@@ -35,11 +35,13 @@ const ProjectEden = () => {
     articlesAnalyzed: 0,
     contentGenerated: 0,
     pendingReview: 0,
+    approvedContent: 0,
     totalArticlesProcessed: 0,
     activeSources: 0
   });
   
   const [contentForReview, setContentForReview] = useState([]);
+  const [approvedContent, setApprovedContent] = useState([]);
   const [topStories, setTopStories] = useState([]);
   const [allArticles, setAllArticles] = useState([]);
   const [sources, setSources] = useState([]);
@@ -62,6 +64,14 @@ const ProjectEden = () => {
       if (reviewData.success) {
         setContentForReview(reviewData.content);
         setStats(prev => ({ ...prev, pendingReview: reviewData.content.length }));
+      }
+
+      // Fetch approved content
+      const approvedResponse = await fetch('/api/eden/content/review?status=approved&limit=50');
+      const approvedData = await approvedResponse.json();
+      if (approvedData.success) {
+        setApprovedContent(approvedData.content);
+        setStats(prev => ({ ...prev, approvedContent: approvedData.content.length }));
       }
 
       // Fetch top stories with higher limit to show all analyzed articles
@@ -259,7 +269,7 @@ const ProjectEden = () => {
         </div>
 
         {/* Stats Dashboard */}
-        <div className={`grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className={`grid grid-cols-1 md:grid-cols-5 gap-6 mb-8 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Articles Aggregated</CardTitle>
@@ -303,12 +313,24 @@ const ProjectEden = () => {
               <p className="text-xs text-muted-foreground">Awaiting human approval</p>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Approved Content</CardTitle>
+              <Check className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.approvedContent}</div>
+              <p className="text-xs text-muted-foreground">Ready for publishing</p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Main Interface */}
         <Tabs defaultValue="review" className="space-y-6">
-          <TabsList className={`grid w-full grid-cols-6 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
+          <TabsList className={`grid w-full grid-cols-7 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
             <TabsTrigger value="review" disabled={showProgressModal}>Content Review</TabsTrigger>
+            <TabsTrigger value="approved" disabled={showProgressModal}>Approved Content</TabsTrigger>
             <TabsTrigger value="stories" disabled={showProgressModal}>Top Stories</TabsTrigger>
             <TabsTrigger value="all-articles" disabled={showProgressModal}>All Articles</TabsTrigger>
             <TabsTrigger value="sources" disabled={showProgressModal}>News Sources</TabsTrigger>
@@ -467,6 +489,153 @@ const ProjectEden = () => {
                             >
                               <X className="w-4 h-4 mr-2" />
                               Reject
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Approved Content Tab */}
+          <TabsContent value="approved" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Approved Content</CardTitle>
+                <CardDescription>
+                  Content approved and ready for publishing to Eden.co.uk
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {approvedContent.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <Check className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>No approved content</p>
+                    <p className="text-sm">Approve content from the review tab to see it here</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {approvedContent.map((content) => (
+                      <Card key={content.gen_article_id} className="border-l-4 border-l-green-500">
+                        <CardHeader>
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <CardTitle className="text-lg">{content.title}</CardTitle>
+                              <CardDescription className="mt-2">
+                                {content.content_type} • {content.word_count} words • 
+                                Approved {new Date(content.reviewed_by_human_at || content.created_at).toLocaleDateString()}
+                              </CardDescription>
+                              
+                              {/* Source Article Information */}
+                              {content.sourceArticle && (
+                                <div className="mt-3 p-3 bg-gray-50 rounded-lg border">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <FileText className="w-4 h-4 text-gray-600" />
+                                    <span className="text-sm font-medium text-gray-700">Source Article</span>
+                                    <Badge variant="outline" className="text-xs">
+                                      <Star className="w-3 h-3 mr-1" />
+                                      {(content.sourceArticle.relevance_score * 100).toFixed(0)}% relevance
+                                    </Badge>
+                                  </div>
+                                  <h4 className="text-sm font-medium text-gray-900 mb-1">
+                                    {content.sourceArticle.title}
+                                  </h4>
+                                  <div className="flex items-center gap-4 text-xs text-gray-600 mb-2">
+                                    <span className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      {new Date(content.sourceArticle.publication_date).toLocaleDateString()}
+                                    </span>
+                                    <span>{content.sourceArticle.source_name}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-700 line-clamp-2 mb-2">
+                                    {content.sourceArticle.summary}
+                                  </p>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex flex-wrap gap-1">
+                                      {content.sourceArticle.keywords?.split(',').slice(0, 3).map((keyword, index) => (
+                                        <Badge key={index} variant="secondary" className="text-xs">
+                                          {keyword.trim()}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                    <Button 
+                                      size="sm" 
+                                      variant="ghost" 
+                                      className="text-xs h-6 px-2"
+                                      onClick={() => window.open(content.sourceArticle.url, '_blank')}
+                                    >
+                                      <ExternalLink className="w-3 h-3 mr-1" />
+                                      View Original
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {getStatusBadge(content.status)}
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="prose max-w-none mb-4">
+                            <div 
+                              className="text-sm text-gray-700 line-clamp-3"
+                              dangerouslySetInnerHTML={{ 
+                                __html: content.body_draft?.substring(0, 300) + '...' 
+                              }}
+                            />
+                          </div>
+                          
+                          {/* Associated Content */}
+                          <div className="flex flex-wrap gap-2 mb-4">
+                            {content.socialPosts?.length > 0 && (
+                              <Badge variant="outline">
+                                <Share2 className="w-3 h-3 mr-1" />
+                                {content.socialPosts.length} Social Posts
+                              </Badge>
+                            )}
+                            {content.videoScripts?.length > 0 && (
+                              <Badge variant="outline">
+                                <Video className="w-3 h-3 mr-1" />
+                                {content.videoScripts.length} Video Scripts
+                              </Badge>
+                            )}
+                            {content.images?.length > 0 && (
+                              <Badge variant="outline">
+                                <Image className="w-3 h-3 mr-1" />
+                                {content.images.length} Images
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex gap-2">
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => openDetailedReview(content)}
+                            >
+                              <Eye className="w-4 h-4 mr-2" />
+                              View Details
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="default"
+                              onClick={() => updateContentStatus(content.gen_article_id, 'article', 'published')}
+                            >
+                              <ExternalLink className="w-4 h-4 mr-2" />
+                              Publish
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => updateContentStatus(content.gen_article_id, 'article', 'review_pending')}
+                            >
+                              <Edit className="w-4 h-4 mr-2" />
+                              Return to Review
                             </Button>
                           </div>
                         </CardContent>
