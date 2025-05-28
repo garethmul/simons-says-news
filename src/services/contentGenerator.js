@@ -56,12 +56,21 @@ class ContentGenerator {
     console.log(`🎨 Generating content for: ${story.title.substring(0, 50)}...`);
     
     try {
-      // Generate Eden angle
-      const edenAngle = await aiService.generateEdenAngle(story.summary_ai, story.keywords_ai);
+      // Use the full article text if available, otherwise fall back to summary
+      const sourceContent = story.full_text || story.summary_ai || story.title;
+      console.log(`📄 Using source content: ${sourceContent.substring(0, 100)}...`);
+      
+      // Generate Eden angle based on the full source content
+      const edenAngle = await aiService.generateEdenAngle(sourceContent, story.keywords_ai);
       console.log(`💡 Eden angle: ${edenAngle.angle.substring(0, 50)}...`);
 
-      // Generate blog post
-      const blogPost = await aiService.generateBlogPost(story.summary_ai, edenAngle, 'blog');
+      // Generate blog post using the full source content and story details
+      const blogPost = await aiService.generateBlogPost(sourceContent, edenAngle, 'blog', {
+        originalTitle: story.title,
+        originalUrl: story.url,
+        sourceName: story.source_name,
+        publicationDate: story.publication_date
+      });
       
       // Store blog post
       const blogId = await db.insertGeneratedArticle({
@@ -71,7 +80,7 @@ class ContentGenerator {
         content_type: 'blog',
         word_count: this.countWords(blogPost.body),
         suggested_eden_product_links: JSON.stringify(blogPost.suggestedLinks),
-        status: 'draft'
+        status: 'review_pending' // Set to review_pending so it shows up in the interface
       });
 
       console.log(`📝 Blog post created (ID: ${blogId})`);

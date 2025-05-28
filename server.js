@@ -360,6 +360,52 @@ app.get('/api/eden/stats/images', async (req, res) => {
   }
 });
 
+// Progress tracking for automation cycles
+let automationProgress = {
+  isRunning: false,
+  currentStep: '',
+  progress: 0,
+  totalSteps: 3,
+  stepDetails: '',
+  startTime: null,
+  results: {}
+};
+
+// Server-Sent Events endpoint for progress updates
+app.get('/api/eden/automate/progress', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
+
+  // Send current progress immediately
+  res.write(`data: ${JSON.stringify(automationProgress)}\n\n`);
+
+  // Keep connection alive
+  const heartbeat = setInterval(() => {
+    res.write(`data: ${JSON.stringify(automationProgress)}\n\n`);
+  }, 5000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+  });
+});
+
+// Helper function to update progress
+function updateProgress(step, progress, details = '', results = {}) {
+  automationProgress = {
+    ...automationProgress,
+    currentStep: step,
+    progress,
+    stepDetails: details,
+    results: { ...automationProgress.results, ...results }
+  };
+  console.log(`📊 Progress: ${step} (${progress}%) - ${details}`);
+}
+
 // Full automation endpoint (news aggregation + analysis + content generation)
 app.post('/api/eden/automate/full-cycle', async (req, res) => {
   try {
@@ -367,34 +413,77 @@ app.post('/api/eden/automate/full-cycle', async (req, res) => {
       return res.status(503).json({ error: 'System not ready' });
     }
 
+    if (automationProgress.isRunning) {
+      return res.status(409).json({ error: 'Automation cycle already running' });
+    }
+
     console.log('🤖 Full automation cycle triggered');
     
-    // Step 1: Aggregate news
-    console.log('📰 Step 1: Aggregating news...');
-    const totalArticles = await newsAggregator.aggregateAllSources();
-    
-    // Step 2: Analyze articles
-    console.log('🧠 Step 2: Analyzing articles...');
-    const analyzed = await newsAggregator.analyzeScrapedArticles();
-    
-    // Step 3: Generate content
-    console.log('🎨 Step 3: Generating content...');
-    const generatedContent = await contentGenerator.generateContentFromTopStories(5);
+    // Initialize progress
+    automationProgress = {
+      isRunning: true,
+      currentStep: 'Starting',
+      progress: 0,
+      totalSteps: 3,
+      stepDetails: 'Initializing automation cycle...',
+      startTime: new Date(),
+      results: {}
+    };
+
+    // Don't await - run in background and return immediately
+    runFullCycleAsync();
     
     res.json({
       success: true,
-      message: 'Full automation cycle completed',
-      results: {
-        articlesAggregated: totalArticles,
-        articlesAnalyzed: analyzed,
-        contentGenerated: generatedContent.length
-      }
+      message: 'Full automation cycle started',
+      progress: automationProgress
     });
   } catch (error) {
     console.error('❌ Full automation cycle failed:', error.message);
+    automationProgress.isRunning = false;
     res.status(500).json({ error: error.message });
   }
 });
+
+async function runFullCycleAsync() {
+  try {
+    // Step 1: Aggregate news
+    updateProgress('Aggregating News', 10, 'Fetching articles from news sources...');
+    console.log('📰 Step 1: Aggregating news...');
+    const totalArticles = await newsAggregator.aggregateAllSources();
+    updateProgress('Aggregating News', 33, `Aggregated ${totalArticles} articles`, { articlesAggregated: totalArticles });
+    
+    // Step 2: Analyze articles
+    updateProgress('Analyzing Articles', 40, 'Running AI analysis on scraped articles...');
+    console.log('🧠 Step 2: Analyzing articles...');
+    const analyzed = await newsAggregator.analyzeScrapedArticles();
+    updateProgress('Analyzing Articles', 66, `Analyzed ${analyzed} articles with AI`, { articlesAnalyzed: analyzed });
+    
+    // Step 3: Generate content
+    updateProgress('Generating Content', 70, 'Creating blog posts, social content, and video scripts...');
+    console.log('🎨 Step 3: Generating content...');
+    const generatedContent = await contentGenerator.generateContentFromTopStories(5);
+    updateProgress('Generating Content', 90, `Generated ${generatedContent.length} content pieces`);
+    
+    // Complete
+    updateProgress('Complete', 100, 'Automation cycle completed successfully!', {
+      articlesAggregated: totalArticles,
+      articlesAnalyzed: analyzed,
+      contentGenerated: generatedContent.length,
+      completedAt: new Date()
+    });
+
+    // Reset after 30 seconds
+    setTimeout(() => {
+      automationProgress.isRunning = false;
+    }, 30000);
+
+  } catch (error) {
+    console.error('❌ Full automation cycle failed:', error.message);
+    updateProgress('Error', 0, `Failed: ${error.message}`);
+    automationProgress.isRunning = false;
+  }
+}
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {

@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import ProgressModal from './ProgressModal';
 import { 
   RefreshCw, 
   Eye, 
@@ -19,7 +20,10 @@ import {
   Users,
   BookOpen,
   Heart,
-  MessageSquare
+  MessageSquare,
+  ExternalLink,
+  Calendar,
+  Star
 } from 'lucide-react';
 
 const ProjectEden = () => {
@@ -36,6 +40,7 @@ const ProjectEden = () => {
   const [loading, setLoading] = useState(false);
   const [selectedContent, setSelectedContent] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showProgressModal, setShowProgressModal] = useState(false);
 
   // Fetch data on component mount
   useEffect(() => {
@@ -78,6 +83,8 @@ const ProjectEden = () => {
 
   const runFullCycle = async () => {
     setLoading(true);
+    setShowProgressModal(true);
+    
     try {
       const response = await fetch('/api/eden/automate/full-cycle', {
         method: 'POST',
@@ -85,22 +92,36 @@ const ProjectEden = () => {
       });
       const data = await response.json();
       
-      if (data.success) {
-        setStats(prev => ({
-          ...prev,
-          articlesAggregated: data.results.articlesAggregated,
-          articlesAnalyzed: data.results.articlesAnalyzed,
-          contentGenerated: data.results.contentGenerated
-        }));
-        
-        // Refresh content for review
-        await fetchDashboardData();
+      if (!data.success) {
+        console.error('Failed to start automation cycle:', data.error);
+        setShowProgressModal(false);
       }
     } catch (error) {
-      console.error('Error running full cycle:', error);
+      console.error('Error starting automation cycle:', error);
+      setShowProgressModal(false);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleProgressComplete = async (results) => {
+    // Update stats with results from automation
+    if (results) {
+      setStats(prev => ({
+        ...prev,
+        articlesAggregated: results.articlesAggregated || prev.articlesAggregated,
+        articlesAnalyzed: results.articlesAnalyzed || prev.articlesAnalyzed,
+        contentGenerated: results.contentGenerated || prev.contentGenerated
+      }));
+    }
+    
+    // Refresh all dashboard data
+    await fetchDashboardData();
+    
+    // Close progress modal after a short delay
+    setTimeout(() => {
+      setShowProgressModal(false);
+    }, 2000);
   };
 
   const updateContentStatus = async (contentId, contentType, status) => {
@@ -258,6 +279,51 @@ const ProjectEden = () => {
                                 {content.content_type} • {content.word_count} words • 
                                 Created {new Date(content.created_at).toLocaleDateString()}
                               </CardDescription>
+                              
+                              {/* Source Article Information */}
+                              {content.sourceArticle && (
+                                <div className="mt-3 p-3 bg-gray-50 rounded-lg border">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <FileText className="w-4 h-4 text-gray-600" />
+                                    <span className="text-sm font-medium text-gray-700">Source Article</span>
+                                    <Badge variant="outline" className="text-xs">
+                                      <Star className="w-3 h-3 mr-1" />
+                                      {(content.sourceArticle.relevance_score * 100).toFixed(0)}% relevance
+                                    </Badge>
+                                  </div>
+                                  <h4 className="text-sm font-medium text-gray-900 mb-1">
+                                    {content.sourceArticle.title}
+                                  </h4>
+                                  <div className="flex items-center gap-4 text-xs text-gray-600 mb-2">
+                                    <span className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      {new Date(content.sourceArticle.publication_date).toLocaleDateString()}
+                                    </span>
+                                    <span>{content.sourceArticle.source_name}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-700 line-clamp-2 mb-2">
+                                    {content.sourceArticle.summary}
+                                  </p>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex flex-wrap gap-1">
+                                      {content.sourceArticle.keywords?.split(',').slice(0, 3).map((keyword, index) => (
+                                        <Badge key={index} variant="secondary" className="text-xs">
+                                          {keyword.trim()}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                    <Button 
+                                      size="sm" 
+                                      variant="ghost" 
+                                      className="text-xs h-6 px-2"
+                                      onClick={() => window.open(content.sourceArticle.url, '_blank')}
+                                    >
+                                      <ExternalLink className="w-3 h-3 mr-1" />
+                                      View Original
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                             <div className="flex items-center gap-2">
                               {getStatusBadge(content.status)}
@@ -494,6 +560,63 @@ const ProjectEden = () => {
                 </div>
               </div>
 
+              {/* Source Article Information */}
+              {selectedContent.sourceArticle && (
+                <div className="mb-8">
+                  <h3 className="text-lg font-semibold mb-4 flex items-center">
+                    <FileText className="w-5 h-5 mr-2" />
+                    Source Article
+                  </h3>
+                  <div className="bg-gray-50 rounded-lg p-6 border">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <h4 className="text-lg font-medium text-gray-900 mb-2">
+                          {selectedContent.sourceArticle.title}
+                        </h4>
+                        <div className="flex items-center gap-4 text-sm text-gray-600 mb-3">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-4 h-4" />
+                            {new Date(selectedContent.sourceArticle.publication_date).toLocaleDateString()}
+                          </span>
+                          <span>{selectedContent.sourceArticle.source_name}</span>
+                          <Badge variant="outline">
+                            <Star className="w-3 h-3 mr-1" />
+                            {(selectedContent.sourceArticle.relevance_score * 100).toFixed(0)}% relevance
+                          </Badge>
+                        </div>
+                      </div>
+                      <Button 
+                        variant="outline"
+                        onClick={() => window.open(selectedContent.sourceArticle.url, '_blank')}
+                      >
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        View Original
+                      </Button>
+                    </div>
+                    
+                    <div className="mb-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">AI Summary:</h5>
+                      <p className="text-sm text-gray-700 bg-white p-3 rounded border">
+                        {selectedContent.sourceArticle.summary}
+                      </p>
+                    </div>
+                    
+                    {selectedContent.sourceArticle.keywords && (
+                      <div>
+                        <h5 className="text-sm font-medium text-gray-700 mb-2">Keywords:</h5>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedContent.sourceArticle.keywords.split(',').map((keyword, index) => (
+                            <Badge key={index} variant="secondary">
+                              {keyword.trim()}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Blog Post Content */}
               <div className="mb-8">
                 <h3 className="text-lg font-semibold mb-4 flex items-center">
@@ -614,6 +737,15 @@ const ProjectEden = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Progress Modal */}
+      {showProgressModal && (
+        <ProgressModal 
+          isOpen={showProgressModal}
+          onClose={() => setShowProgressModal(false)}
+          onComplete={handleProgressComplete} 
+        />
       )}
     </div>
   );

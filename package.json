@@ -29,7 +29,9 @@
     "fresh-start": "npm run clean && npm install && npm run dev",
     "health-check": "node scripts/health-check.js",
     "debug:heroku": "node scripts/heroku-debug.js",
-    "setup:heroku-production": "node scripts/setup-heroku-production.js"
+    "setup:heroku-production": "node scripts/setup-heroku-production.js",
+    "reset:eden": "node scripts/reset-project-eden.js",
+    "reset:eden-all": "node scripts/reset-project-eden.js --clear-all"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

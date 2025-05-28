@@ -234,36 +234,100 @@ class DatabaseService {
   }
 
   async getContentForReview(status = 'draft', limit = 20) {
-    const articles = await this.findMany(
-      'ssnews_generated_articles',
-      'status = ?',
-      [status],
-      'created_at DESC',
-      limit
-    );
+    try {
+      // Handle multiple statuses separated by commas
+      const statuses = typeof status === 'string' ? status.split(',').map(s => s.trim()) : [status];
+      console.log('📋 getContentForReview called with statuses:', statuses, 'limit:', limit);
+      
+      let articles = [];
+      
+      // Get articles for each status using the original working approach
+      for (const singleStatus of statuses) {
+        const statusArticles = await this.findMany(
+          'ssnews_generated_articles',
+          'status = ?',
+          [singleStatus],
+          'created_at DESC',
+          limit
+        );
+        articles = articles.concat(statusArticles);
+      }
+      
+      // Remove duplicates and limit results
+      const uniqueArticles = articles.filter((item, index, self) => 
+        index === self.findIndex(t => t.gen_article_id === item.gen_article_id)
+      ).slice(0, limit);
 
-    // Get associated social posts and video scripts
-    for (const article of articles) {
-      article.socialPosts = await this.findMany(
-        'ssnews_generated_social_posts',
-        'based_on_gen_article_id = ?',
-        [article.gen_article_id]
-      );
+      // Get associated content and source article information for each article
+      for (const article of uniqueArticles) {
+        // Get social posts
+        article.socialPosts = await this.findMany(
+          'ssnews_generated_social_posts',
+          'based_on_gen_article_id = ?',
+          [article.gen_article_id]
+        );
 
-      article.videoScripts = await this.findMany(
-        'ssnews_generated_video_scripts',
-        'based_on_gen_article_id = ?',
-        [article.gen_article_id]
-      );
+        // Get video scripts
+        article.videoScripts = await this.findMany(
+          'ssnews_generated_video_scripts',
+          'based_on_gen_article_id = ?',
+          [article.gen_article_id]
+        );
 
-      article.images = await this.findMany(
-        'ssnews_image_assets',
-        'associated_content_type = ? AND associated_content_id = ?',
-        ['gen_article', article.gen_article_id]
-      );
+        // Get images
+        article.images = await this.findMany(
+          'ssnews_image_assets',
+          'associated_content_type = ? AND associated_content_id = ?',
+          ['gen_article', article.gen_article_id]
+        );
+
+        // Get source article information if available
+        if (article.based_on_scraped_article_id) {
+          try {
+            const sourceArticleQuery = `
+              SELECT 
+                sa.title,
+                sa.url,
+                sa.publication_date,
+                sa.summary_ai,
+                sa.keywords_ai,
+                sa.relevance_score,
+                ns.name as source_name,
+                ns.url as source_website
+              FROM ssnews_scraped_articles sa
+              LEFT JOIN ssnews_news_sources ns ON sa.source_id = ns.source_id
+              WHERE sa.article_id = ?
+            `;
+            
+            const [sourceRows] = await this.pool.execute(sourceArticleQuery, [article.based_on_scraped_article_id]);
+            
+            if (sourceRows.length > 0) {
+              const sourceData = sourceRows[0];
+              article.sourceArticle = {
+                title: sourceData.title,
+                url: sourceData.url,
+                publication_date: sourceData.publication_date,
+                summary: sourceData.summary_ai,
+                keywords: sourceData.keywords_ai,
+                relevance_score: sourceData.relevance_score,
+                source_name: sourceData.source_name,
+                source_website: sourceData.source_website
+              };
+            }
+          } catch (sourceError) {
+            console.error(`❌ Error fetching source article for ${article.gen_article_id}:`, sourceError.message);
+            // Continue without source article info
+          }
+        }
+      }
+
+      console.log(`📋 Found ${uniqueArticles.length} content pieces for review`);
+      return uniqueArticles;
+    } catch (error) {
+      console.error('❌ Database getContentForReview failed:', error.message);
+      console.error('Full error:', error);
+      throw error;
     }
-
-    return articles;
   }
 
   // Image Assets methods
