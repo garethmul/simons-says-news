@@ -8,7 +8,8 @@ dotenv.config({ override: true });
 
 class AIService {
   constructor() {
-    this.promptManager = new PromptManager();
+    // Initialize prompt manager - will be properly initialized when database is ready
+    this.promptManager = null;
     
     // Check for API keys
     const openaiKey = process.env.OPENAI_API_KEY;
@@ -106,6 +107,22 @@ class AIService {
     `;
   }
 
+  // Initialize prompt manager after database is ready
+  initializePromptManager() {
+    if (!this.promptManager) {
+      this.promptManager = new PromptManager();
+      console.log('✅ AI Service prompt manager initialized');
+    }
+  }
+
+  // Ensure prompt manager is available
+  async ensurePromptManager() {
+    if (!this.promptManager) {
+      this.initializePromptManager();
+    }
+    return this.promptManager;
+  }
+
   // Helper method to check if AI services are available
   isAvailable() {
     return this.hasOpenAI || this.hasGemini || this.demoMode;
@@ -171,8 +188,11 @@ class AIService {
     try {
       const startTime = Date.now();
       
+      // Ensure prompt manager is available
+      const promptManager = await this.ensurePromptManager();
+      
       // Get prompt from prompt manager
-      const promptData = await this.promptManager.getPromptForGeneration('analysis', {
+      const promptData = await promptManager.getPromptForGeneration('analysis', {
         article_content: `Title: ${article.title}\n\nContent: ${article.full_text || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`
       });
 
@@ -192,7 +212,7 @@ class AIService {
       const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
 
       // Log the generation (no article ID for analysis)
-      await this.promptManager.logGeneration(
+      await promptManager.logGeneration(
         null,
         promptData.templateId,
         promptData.versionId,
@@ -235,8 +255,9 @@ class AIService {
       
       // Log the error
       try {
-        const promptData = await this.promptManager.getPromptForGeneration('analysis', {});
-        await this.promptManager.logGeneration(
+        const promptManager = await this.ensurePromptManager();
+        const promptData = await promptManager.getPromptForGeneration('analysis', {});
+        await promptManager.logGeneration(
           null,
           promptData.templateId,
           promptData.versionId,
@@ -345,8 +366,11 @@ class AIService {
     try {
       const startTime = Date.now();
       
+      // Ensure prompt manager is available
+      const promptManager = await this.ensurePromptManager();
+      
       // Get prompt from prompt manager
-      const promptData = await this.promptManager.getPromptForGeneration('blog_post', {
+      const promptData = await promptManager.getPromptForGeneration('blog_post', {
         article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`
       });
 
@@ -367,7 +391,7 @@ class AIService {
 
       // Log the generation
       if (generatedArticleId) {
-        await this.promptManager.logGeneration(
+        await promptManager.logGeneration(
           generatedArticleId,
           promptData.templateId,
           promptData.versionId,
@@ -386,8 +410,9 @@ class AIService {
       // Log the error
       if (generatedArticleId) {
         try {
-          const promptData = await this.promptManager.getPromptForGeneration('blog_post', {});
-          await this.promptManager.logGeneration(
+          const promptManager = await this.ensurePromptManager();
+          const promptData = await promptManager.getPromptForGeneration('blog_post', {});
+          await promptManager.logGeneration(
             generatedArticleId,
             promptData.templateId,
             promptData.versionId,
@@ -411,8 +436,11 @@ class AIService {
     try {
       const startTime = Date.now();
       
+      // Ensure prompt manager is available
+      const promptManager = await this.ensurePromptManager();
+      
       // Get prompt from prompt manager
-      const promptData = await this.promptManager.getPromptForGeneration('social_media', {
+      const promptData = await promptManager.getPromptForGeneration('social_media', {
         article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
       });
 
@@ -433,7 +461,7 @@ class AIService {
 
       // Log the generation
       if (generatedArticleId) {
-        await this.promptManager.logGeneration(
+        await promptManager.logGeneration(
           generatedArticleId,
           promptData.templateId,
           promptData.versionId,
@@ -452,8 +480,9 @@ class AIService {
       // Log the error
       if (generatedArticleId) {
         try {
-          const promptData = await this.promptManager.getPromptForGeneration('social_media', {});
-          await this.promptManager.logGeneration(
+          const promptManager = await this.ensurePromptManager();
+          const promptData = await promptManager.getPromptForGeneration('social_media', {});
+          await promptManager.logGeneration(
             generatedArticleId,
             promptData.templateId,
             promptData.versionId,
@@ -477,8 +506,11 @@ class AIService {
     try {
       const startTime = Date.now();
       
+      // Ensure prompt manager is available
+      const promptManager = await this.ensurePromptManager();
+      
       // Get prompt from prompt manager
-      const promptData = await this.promptManager.getPromptForGeneration('video_script', {
+      const promptData = await promptManager.getPromptForGeneration('video_script', {
         article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
         duration: duration
       });
@@ -500,7 +532,7 @@ class AIService {
 
       // Log the generation
       if (generatedArticleId) {
-        await this.promptManager.logGeneration(
+        await promptManager.logGeneration(
           generatedArticleId,
           promptData.templateId,
           promptData.versionId,
@@ -519,8 +551,9 @@ class AIService {
       // Log the error
       if (generatedArticleId) {
         try {
-          const promptData = await this.promptManager.getPromptForGeneration('video_script', {});
-          await this.promptManager.logGeneration(
+          const promptManager = await this.ensurePromptManager();
+          const promptData = await promptManager.getPromptForGeneration('video_script', {});
+          await promptManager.logGeneration(
             generatedArticleId,
             promptData.templateId,
             promptData.versionId,

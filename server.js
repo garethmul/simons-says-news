@@ -76,6 +76,9 @@ async function initializeSystem() {
     // Initialize prompt manager after database is ready
     promptManager = new PromptManager();
     
+    // Initialize AI service prompt manager
+    aiService.initializePromptManager();
+    
     isSystemReady = true;
     initializationError = null;
     console.log('✅ Project Eden system ready!');
@@ -187,6 +190,46 @@ app.get('/api/eden/news/sources/status', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error getting source status:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update news source RSS feed URL
+app.put('/api/eden/news/sources/:sourceName/rss', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { sourceName } = req.params;
+    const { rss_feed_url } = req.body;
+
+    if (!rss_feed_url) {
+      return res.status(400).json({ error: 'RSS feed URL is required' });
+    }
+
+    // Update the RSS feed URL in the database
+    const result = await db.update(
+      'ssnews_news_sources',
+      { rss_feed_url },
+      'name = ?',
+      [sourceName]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'News source not found' });
+    }
+
+    console.log(`📡 Updated RSS feed URL for ${sourceName}: ${rss_feed_url}`);
+    
+    res.json({
+      success: true,
+      message: `Updated RSS feed URL for ${sourceName}`,
+      sourceName,
+      rss_feed_url
+    });
+  } catch (error) {
+    console.error('❌ Error updating RSS feed URL:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -683,6 +726,11 @@ if (process.env.NODE_ENV === 'production') {
   });
 } else {
   app.use(express.static(path.join(__dirname, 'public')));
+  
+  // Specific route for user guide
+  app.get('/user-guide.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'user-guide.html'));
+  });
   
   app.get('/', (req, res) => {
     res.json({ 

@@ -285,7 +285,7 @@ const ProjectEden = () => {
             </div>
             <div className="flex gap-3">
               <Button 
-                onClick={() => window.open('/user-guide.html', '_blank')} 
+                onClick={() => window.location.href = '/user-guide.html'} 
                 variant="outline" 
                 disabled={showProgressModal}
               >
