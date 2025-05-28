@@ -12,6 +12,7 @@ import newsAggregator from './src/services/newsAggregator.js';
 import contentGenerator from './src/services/contentGenerator.js';
 import aiService from './src/services/aiService.js';
 import imageService from './src/services/imageService.js';
+import PromptManager from './src/services/promptManager.js';
 
 // Load environment variables
 dotenv.config();
@@ -56,6 +57,9 @@ app.use(session({
 // Initialize Project Eden database
 let isSystemReady = false;
 let initializationError = null;
+
+// Initialize services
+const promptManager = new PromptManager();
 
 async function initializeSystem() {
   try {
@@ -451,7 +455,6 @@ app.post('/api/eden/automate/full-cycle', async (req, res) => {
 // Reset automation progress endpoint
 app.post('/api/eden/automate/reset', async (req, res) => {
   try {
-    console.log('🔄 Resetting automation progress...');
     automationProgress = {
       isRunning: false,
       currentStep: '',
@@ -462,14 +465,10 @@ app.post('/api/eden/automate/reset', async (req, res) => {
       results: {}
     };
     
-    res.json({
-      success: true,
-      message: 'Automation progress reset',
-      progress: automationProgress
-    });
+    res.json({ success: true, message: 'Automation progress reset' });
   } catch (error) {
-    console.error('❌ Failed to reset automation progress:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error resetting automation progress:', error);
+    res.status(500).json({ error: 'Failed to reset automation progress' });
   }
 });
 
@@ -513,6 +512,128 @@ async function runFullCycleAsync() {
     automationProgress.isRunning = false;
   }
 }
+
+// ===== PROMPT MANAGEMENT API ENDPOINTS =====
+
+// Get all prompt templates
+app.get('/api/eden/prompts/templates', async (req, res) => {
+  try {
+    const templates = await promptManager.getTemplates();
+    res.json({ success: true, templates });
+  } catch (error) {
+    console.error('❌ Error fetching prompt templates:', error);
+    res.status(500).json({ error: 'Failed to fetch prompt templates' });
+  }
+});
+
+// Get specific template with current version
+app.get('/api/eden/prompts/templates/:templateId', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const template = await promptManager.getTemplate(templateId);
+    
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+    
+    res.json({ success: true, template });
+  } catch (error) {
+    console.error('❌ Error fetching prompt template:', error);
+    res.status(500).json({ error: 'Failed to fetch prompt template' });
+  }
+});
+
+// Get all versions for a template
+app.get('/api/eden/prompts/templates/:templateId/versions', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const versions = await promptManager.getTemplateVersions(templateId);
+    res.json({ success: true, versions });
+  } catch (error) {
+    console.error('❌ Error fetching template versions:', error);
+    res.status(500).json({ error: 'Failed to fetch template versions' });
+  }
+});
+
+// Create new template version
+app.post('/api/eden/prompts/templates/:templateId/versions', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const { promptContent, systemMessage, parameters, notes, createdBy } = req.body;
+    
+    if (!promptContent) {
+      return res.status(400).json({ error: 'Prompt content is required' });
+    }
+    
+    const result = await promptManager.createTemplateVersion(
+      templateId, 
+      promptContent, 
+      systemMessage, 
+      parameters, 
+      createdBy || 'user', 
+      notes || ''
+    );
+    
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('❌ Error creating template version:', error);
+    res.status(500).json({ error: 'Failed to create template version' });
+  }
+});
+
+// Set current version for a template
+app.put('/api/eden/prompts/templates/:templateId/versions/:versionId/current', async (req, res) => {
+  try {
+    const { templateId, versionId } = req.params;
+    await promptManager.setCurrentVersion(templateId, versionId);
+    res.json({ success: true, message: 'Current version updated' });
+  } catch (error) {
+    console.error('❌ Error setting current version:', error);
+    res.status(500).json({ error: 'Failed to set current version' });
+  }
+});
+
+// Test a prompt with sample variables
+app.post('/api/eden/prompts/templates/:templateId/versions/:versionId/test', async (req, res) => {
+  try {
+    const { templateId, versionId } = req.params;
+    const { testVariables } = req.body;
+    
+    const result = await promptManager.testPrompt(templateId, versionId, testVariables || {});
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('❌ Error testing prompt:', error);
+    res.status(500).json({ error: 'Failed to test prompt' });
+  }
+});
+
+// Get generation history for a template
+app.get('/api/eden/prompts/templates/:templateId/history', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const { limit } = req.query;
+    
+    const history = await promptManager.getGenerationHistory(templateId, parseInt(limit) || 50);
+    res.json({ success: true, history });
+  } catch (error) {
+    console.error('❌ Error fetching generation history:', error);
+    res.status(500).json({ error: 'Failed to fetch generation history' });
+  }
+});
+
+// Get usage statistics for a template
+app.get('/api/eden/prompts/templates/:templateId/stats', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const stats = await promptManager.getUsageStats(templateId);
+    res.json({ success: true, stats });
+  } catch (error) {
+    console.error('❌ Error fetching usage stats:', error);
+    res.status(500).json({ error: 'Failed to fetch usage stats' });
+  }
+});
+
+// ===== END PROMPT MANAGEMENT API ENDPOINTS =====
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {

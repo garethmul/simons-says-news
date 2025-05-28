@@ -33,7 +33,8 @@
     "reset:eden": "node scripts/reset-project-eden.js",
     "reset:eden-all": "node scripts/reset-project-eden.js --clear-all",
     "cleanup:duplicates": "node src/scripts/cleanup-duplicates.js",
-    "migrate:unique-constraints": "node src/scripts/add-unique-constraints.js"
+    "migrate:unique-constraints": "node src/scripts/add-unique-constraints.js",
+    "setup:prompt-management": "node src/scripts/setup-prompt-management.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

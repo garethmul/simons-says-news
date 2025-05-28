@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import ProgressModal from './ProgressModal';
+import PromptManagement from './PromptManagement';
 import { 
   RefreshCw, 
   Eye, 
@@ -273,11 +274,12 @@ const ProjectEden = () => {
 
         {/* Main Interface */}
         <Tabs defaultValue="review" className="space-y-6">
-          <TabsList className={`grid w-full grid-cols-4 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
+          <TabsList className={`grid w-full grid-cols-5 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
             <TabsTrigger value="review" disabled={showProgressModal}>Content Review</TabsTrigger>
             <TabsTrigger value="stories" disabled={showProgressModal}>Top Stories</TabsTrigger>
             <TabsTrigger value="sources" disabled={showProgressModal}>News Sources</TabsTrigger>
             <TabsTrigger value="analytics" disabled={showProgressModal}>Analytics</TabsTrigger>
+            <TabsTrigger value="prompt-management" disabled={showProgressModal}>Prompts</TabsTrigger>
           </TabsList>
 
           {/* Automation Running Message */}
@@ -576,6 +578,21 @@ const ProjectEden = () => {
                     All systems are running smoothly. News aggregation, AI analysis, and content generation are working as expected.
                   </p>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Prompt Management Tab */}
+          <TabsContent value="prompt-management" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Prompt Management</CardTitle>
+                <CardDescription>
+                  Manage and create prompts for AI content generation
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <PromptManagement />
               </CardContent>
             </Card>
           </TabsContent>

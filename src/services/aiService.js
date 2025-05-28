@@ -1,12 +1,19 @@
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
+import PromptManager from './promptManager.js';
 
-// Ensure environment variables are loaded
-dotenv.config();
+// Force load environment variables
+dotenv.config({ override: true });
 
 class AIService {
   constructor() {
+    this.promptManager = new PromptManager();
+    
+    // Check for API keys
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const geminiKey = process.env.GEMINI_API_KEY;
+
     // Force load environment variables
     if (!process.env.OPENAI_API_KEY || !process.env.GEMINI_API_KEY) {
       console.log('🔄 Reloading environment variables...');
@@ -160,6 +167,100 @@ class AIService {
     }
   }
 
+  async analyzeArticle(article) {
+    try {
+      const startTime = Date.now();
+      
+      // Get prompt from prompt manager
+      const promptData = await this.promptManager.getPromptForGeneration('analysis', {
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`
+      });
+
+      const response = await this.gemini.generateContent({
+        contents: [{ 
+          role: 'user', 
+          parts: [{ text: promptData.prompt }] 
+        }],
+        systemInstruction: promptData.systemMessage,
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 800
+        }
+      });
+
+      const generationTime = Date.now() - startTime;
+      const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
+
+      // Log the generation (no article ID for analysis)
+      await this.promptManager.logGeneration(
+        null,
+        promptData.templateId,
+        promptData.versionId,
+        'gemini',
+        'gemini-1.5-flash',
+        tokensUsed,
+        generationTime,
+        true
+      );
+
+      const analysisText = response.response.text();
+      
+      // Parse the analysis to extract structured data
+      const lines = analysisText.split('\n').filter(line => line.trim());
+      let relevanceScore = 0.5;
+      let summary = '';
+      let keywords = '';
+      
+      for (const line of lines) {
+        if (line.toLowerCase().includes('relevance score') || line.toLowerCase().includes('score:')) {
+          const scoreMatch = line.match(/(\d+\.?\d*)/);
+          if (scoreMatch) {
+            relevanceScore = Math.min(1.0, Math.max(0.0, parseFloat(scoreMatch[1])));
+          }
+        } else if (line.toLowerCase().includes('summary:')) {
+          summary = line.replace(/summary:/i, '').trim();
+        } else if (line.toLowerCase().includes('keywords:') || line.toLowerCase().includes('themes:')) {
+          keywords = line.replace(/(keywords|themes):/i, '').trim();
+        }
+      }
+
+      return {
+        relevanceScore,
+        summary: summary || analysisText.substring(0, 200) + '...',
+        keywords: keywords || 'Christian, faith, news',
+        fullAnalysis: analysisText
+      };
+    } catch (error) {
+      console.error('❌ Error analyzing article:', error);
+      
+      // Log the error
+      try {
+        const promptData = await this.promptManager.getPromptForGeneration('analysis', {});
+        await this.promptManager.logGeneration(
+          null,
+          promptData.templateId,
+          promptData.versionId,
+          'gemini',
+          'gemini-1.5-flash',
+          0,
+          0,
+          false,
+          error.message
+        );
+      } catch (logError) {
+        console.error('❌ Error logging analysis failure:', logError);
+      }
+      
+      // Return default analysis on error
+      return {
+        relevanceScore: 0.5,
+        summary: 'Analysis failed - manual review required',
+        keywords: 'news, review-needed',
+        fullAnalysis: `Error during analysis: ${error.message}`
+      };
+    }
+  }
+
   async analyzeRelevance(articleSummary, keywords) {
     if (!this.hasGemini) {
       throw new Error('Gemini API not available for relevance analysis');
@@ -240,191 +341,201 @@ class AIService {
     }
   }
 
-  async generateBlogPost(sourceContent, edenAngle, contentType = 'blog', sourceInfo = null) {
-    if (!this.hasOpenAI) {
-      throw new Error('OpenAI API not available for blog post generation');
-    }
-
+  async generateBlogPost(article, generatedArticleId = null) {
     try {
-      const wordCount = contentType === 'blog' ? '600-800' : '500';
-      const format = contentType === 'blog' ? 'blog post' : 'PR article';
-
-      const sourceReference = sourceInfo ? `
-        Original Article: "${sourceInfo.originalTitle}"
-        Source: ${sourceInfo.sourceName}
-        Published: ${sourceInfo.publicationDate}
-        URL: ${sourceInfo.originalUrl}
-      ` : '';
-
-      const prompt = `
-        Write a ${wordCount} word ${format} for Eden.co.uk based on this Christian news story.
-        
-        ${sourceReference}
-        
-        Source Content: ${sourceContent}
-        Eden Angle: ${edenAngle.angle}
-        Relevant Products: ${edenAngle.productCategories.join(', ')}
-        Key Themes: ${edenAngle.themes.join(', ')}
-        
-        ${this.edenToneOfVoice}
-        
-        Requirements:
-        - ${this.edenToneOfVoice}
-        - Reference the original news story specifically and thoughtfully
-        - Include 1-2 internal links to Eden products (use placeholder URLs like '/bibles/study-bibles' or '/books/devotionals')
-        - Include a subtle call-to-action related to exploring these resources
-        - Add Eden's unique Christian perspective and practical application
-        - Focus on encouragement and spiritual growth
-        - Ensure theological soundness
-        - Make it clear this is commentary/reflection on the news, not just generic content
-        
-        Structure:
-        1. Engaging headline that references the news topic
-        2. Opening that directly connects to the original story
-        3. Eden's perspective and biblical insights
-        4. Practical application for readers
-        5. Gentle product connection
-        6. Encouraging conclusion with call-to-action
-        
-        Return as JSON:
-        {
-          "title": "Article title that references the news topic",
-          "body": "Full article content with HTML formatting",
-          "suggestedLinks": [
-            {"text": "link text", "url": "/product-category"},
-            {"text": "link text", "url": "/product-category"}
-          ]
-        }
-      `;
-
-      const response = await this.openai.chat.completions.create({
-        model: "gpt-4",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-        max_tokens: 2000
+      const startTime = Date.now();
+      
+      // Get prompt from prompt manager
+      const promptData = await this.promptManager.getPromptForGeneration('blog_post', {
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`
       });
 
-      const text = response.choices[0].message.content.trim();
-      
-      try {
-        return JSON.parse(text);
-      } catch {
-        // Fallback if JSON parsing fails
-        return {
-          title: "Faith in Today's World",
-          body: text,
-          suggestedLinks: [
-            {"text": "Christian books", "url": "/books/christian-books"},
-            {"text": "devotionals", "url": "/books/devotionals"}
-          ]
-        };
+      const messages = [
+        { role: 'system', content: promptData.systemMessage },
+        { role: 'user', content: promptData.prompt }
+      ];
+
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: messages,
+        max_tokens: 2000,
+        temperature: 0.7
+      });
+
+      const generationTime = Date.now() - startTime;
+      const tokensUsed = response.usage?.total_tokens || 0;
+
+      // Log the generation
+      if (generatedArticleId) {
+        await this.promptManager.logGeneration(
+          generatedArticleId,
+          promptData.templateId,
+          promptData.versionId,
+          'openai',
+          'gpt-4',
+          tokensUsed,
+          generationTime,
+          true
+        );
       }
+
+      return response.choices[0].message.content;
     } catch (error) {
-      console.error('❌ AI blog post generation failed:', error.message);
+      console.error('❌ Error generating blog post:', error);
+      
+      // Log the error
+      if (generatedArticleId) {
+        try {
+          const promptData = await this.promptManager.getPromptForGeneration('blog_post', {});
+          await this.promptManager.logGeneration(
+            generatedArticleId,
+            promptData.templateId,
+            promptData.versionId,
+            'openai',
+            'gpt-4',
+            0,
+            0,
+            false,
+            error.message
+          );
+        } catch (logError) {
+          console.error('❌ Error logging generation failure:', logError);
+        }
+      }
+      
       throw error;
     }
   }
 
-  async generateSocialPost(blogContent, platform = 'instagram') {
-    if (!this.hasGemini) {
-      throw new Error('Gemini API not available for social post generation');
-    }
-
+  async generateSocialMediaPosts(article, generatedArticleId = null) {
     try {
-      const wordLimit = platform === 'linkedin' ? '400-600' : '150-250';
-      const tone = platform === 'linkedin' ? 'editorial and insightful' : 'engaging with emotional hook';
-
-      const prompt = `
-        Create a ${platform} post of ${wordLimit} words based on this blog post content.
-        
-        Blog Content: ${blogContent.body}
-        Blog Title: ${blogContent.title}
-        
-        Requirements:
-        - ${tone} tone suitable for Christian audience
-        - ${this.edenToneOfVoice}
-        - Include emotional hook (unless LinkedIn)
-        - Briefly mention core theme and related Eden resources
-        - Encourage engagement
-        - Use appropriate hashtags for ${platform}
-        
-        Return as JSON:
-        {
-          "text": "Social media post content",
-          "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3"]
-        }
-      `;
-
-      const response = await this.geminiModel.generateContent(prompt);
-      const text = response.response.text().trim();
+      const startTime = Date.now();
       
-      try {
-        return JSON.parse(text);
-      } catch {
-        return {
-          text: text,
-          hashtags: ["#ChristianFaith", "#Inspiration", "#Eden"]
-        };
+      // Get prompt from prompt manager
+      const promptData = await this.promptManager.getPromptForGeneration('social_media', {
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
+      });
+
+      const response = await this.gemini.generateContent({
+        contents: [{ 
+          role: 'user', 
+          parts: [{ text: promptData.prompt }] 
+        }],
+        systemInstruction: promptData.systemMessage,
+        generationConfig: {
+          temperature: 0.8,
+          maxOutputTokens: 1000
+        }
+      });
+
+      const generationTime = Date.now() - startTime;
+      const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
+
+      // Log the generation
+      if (generatedArticleId) {
+        await this.promptManager.logGeneration(
+          generatedArticleId,
+          promptData.templateId,
+          promptData.versionId,
+          'gemini',
+          'gemini-1.5-flash',
+          tokensUsed,
+          generationTime,
+          true
+        );
       }
+
+      return response.response.text();
     } catch (error) {
-      console.error('❌ AI social post generation failed:', error.message);
+      console.error('❌ Error generating social media posts:', error);
+      
+      // Log the error
+      if (generatedArticleId) {
+        try {
+          const promptData = await this.promptManager.getPromptForGeneration('social_media', {});
+          await this.promptManager.logGeneration(
+            generatedArticleId,
+            promptData.templateId,
+            promptData.versionId,
+            'gemini',
+            'gemini-1.5-flash',
+            0,
+            0,
+            false,
+            error.message
+          );
+        } catch (logError) {
+          console.error('❌ Error logging generation failure:', logError);
+        }
+      }
+      
       throw error;
     }
   }
 
-  async generateVideoScript(blogContent, duration = 60) {
-    if (!this.hasOpenAI) {
-      throw new Error('OpenAI API not available for video script generation');
-    }
-
+  async generateVideoScript(article, duration = 60, generatedArticleId = null) {
     try {
-      const scriptType = duration <= 60 ? 'short-form (Reels/Shorts)' : 'longer-form (Facebook/YouTube)';
-
-      const prompt = `
-        Create a ${duration}-second ${scriptType} video script based on this blog post.
-        
-        Blog Content: ${blogContent.body}
-        Blog Title: ${blogContent.title}
-        
-        Requirements:
-        - ${this.edenToneOfVoice}
-        - Focus on one key message
-        - Include visual suggestions (hands opening Bible, person journaling, sunrise, etc.)
-        - Suggest simple, warm visuals aligned with Eden's brand
-        - Include subtle call-to-action
-        - Ensure engaging narrative flow
-        - Avoid literal religious symbolism or Jesus' face
-        
-        Return as JSON:
-        {
-          "title": "Video title",
-          "script": "Full script with [VISUAL: description] cues",
-          "visualSuggestions": ["suggestion1", "suggestion2", "suggestion3"],
-          "callToAction": "Specific call-to-action"
-        }
-      `;
-
-      const response = await this.openai.chat.completions.create({
-        model: "gpt-4",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-        max_tokens: 1500
+      const startTime = Date.now();
+      
+      // Get prompt from prompt manager
+      const promptData = await this.promptManager.getPromptForGeneration('video_script', {
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+        duration: duration
       });
 
-      const text = response.choices[0].message.content.trim();
-      
-      try {
-        return JSON.parse(text);
-      } catch {
-        return {
-          title: "Faith in Action",
-          script: text,
-          visualSuggestions: ["Open Bible", "Hands in prayer", "Sunrise over hills"],
-          callToAction: "Explore Christian resources at Eden"
-        };
+      const messages = [
+        { role: 'system', content: promptData.systemMessage },
+        { role: 'user', content: promptData.prompt }
+      ];
+
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: messages,
+        max_tokens: 1500,
+        temperature: 0.7
+      });
+
+      const generationTime = Date.now() - startTime;
+      const tokensUsed = response.usage?.total_tokens || 0;
+
+      // Log the generation
+      if (generatedArticleId) {
+        await this.promptManager.logGeneration(
+          generatedArticleId,
+          promptData.templateId,
+          promptData.versionId,
+          'openai',
+          'gpt-4',
+          tokensUsed,
+          generationTime,
+          true
+        );
       }
+
+      return response.choices[0].message.content;
     } catch (error) {
-      console.error('❌ AI video script generation failed:', error.message);
+      console.error('❌ Error generating video script:', error);
+      
+      // Log the error
+      if (generatedArticleId) {
+        try {
+          const promptData = await this.promptManager.getPromptForGeneration('video_script', {});
+          await this.promptManager.logGeneration(
+            generatedArticleId,
+            promptData.templateId,
+            promptData.versionId,
+            'openai',
+            'gpt-4',
+            0,
+            0,
+            false,
+            error.message
+          );
+        } catch (logError) {
+          console.error('❌ Error logging generation failure:', logError);
+        }
+      }
+      
       throw error;
     }
   }
