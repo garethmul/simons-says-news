@@ -6,6 +6,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORTS } from './ports.config.js';
 
+// Project Eden services
+import db from './src/services/database.js';
+import newsAggregator from './src/services/newsAggregator.js';
+import contentGenerator from './src/services/contentGenerator.js';
+import aiService from './src/services/aiService.js';
+import imageService from './src/services/imageService.js';
+
 // Load environment variables
 dotenv.config();
 
@@ -18,7 +25,7 @@ const PORT = process.env.PORT || PORTS.BACKEND;
 // CORS configuration
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.FRONTEND_URL || 'https://simons-says-news.herokuapp.com']
+    ? [process.env.FRONTEND_URL || 'https://your-app-name.herokuapp.com']
     : [`http://localhost:${PORTS.FRONTEND}`, `http://127.0.0.1:${PORTS.FRONTEND}`],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
@@ -43,24 +50,340 @@ app.use(session({
   }
 }));
 
+// Initialize Project Eden database
+let isSystemReady = false;
+
+async function initializeSystem() {
+  try {
+    console.log('🚀 Initializing Project Eden system...');
+    
+    // Initialize database
+    await db.initialize();
+    
+    isSystemReady = true;
+    console.log('✅ Project Eden system ready!');
+  } catch (error) {
+    console.error('❌ System initialization failed:', error.message);
+    isSystemReady = false;
+  }
+}
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    port: PORT
+    port: PORT,
+    systemReady: isSystemReady,
+    services: {
+      database: isSystemReady,
+      ai: !!process.env.OPENAI_API_KEY && !!process.env.GEMINI_API_KEY,
+      images: !!process.env.PEXELS_API_KEY && !!process.env.SIRV_CLIENT_ID,
+      newsAggregation: true
+    }
   });
 });
 
-// API routes will be mounted here
-// app.use('/api', apiRoutes);
+// Project Eden API endpoints
+
+// News aggregation endpoints
+app.post('/api/eden/news/aggregate', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    console.log('📰 Manual news aggregation triggered');
+    const totalArticles = await newsAggregator.aggregateAllSources();
+    
+    res.json({
+      success: true,
+      message: `Aggregated ${totalArticles} articles`,
+      totalArticles
+    });
+  } catch (error) {
+    console.error('❌ News aggregation failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/eden/news/analyze', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    console.log('🧠 Manual news analysis triggered');
+    const analyzed = await newsAggregator.analyzeScrapedArticles();
+    
+    res.json({
+      success: true,
+      message: `Analyzed ${analyzed} articles`,
+      analyzed
+    });
+  } catch (error) {
+    console.error('❌ News analysis failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/eden/news/top-stories', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const limit = parseInt(req.query.limit) || 10;
+    const minScore = parseFloat(req.query.minScore) || 0.6;
+    
+    const topStories = await newsAggregator.getTopStories(limit, minScore);
+    
+    res.json({
+      success: true,
+      stories: topStories,
+      count: topStories.length
+    });
+  } catch (error) {
+    console.error('❌ Error fetching top stories:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/eden/news/sources/status', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const status = await newsAggregator.getSourceStatus();
+    
+    res.json({
+      success: true,
+      sources: status
+    });
+  } catch (error) {
+    console.error('❌ Error getting source status:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Content generation endpoints
+app.post('/api/eden/content/generate', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const limit = parseInt(req.body.limit) || 5;
+    console.log(`🎨 Manual content generation triggered (limit: ${limit})`);
+    
+    const generatedContent = await contentGenerator.generateContentFromTopStories(limit);
+    
+    res.json({
+      success: true,
+      message: `Generated content for ${generatedContent.length} stories`,
+      content: generatedContent
+    });
+  } catch (error) {
+    console.error('❌ Content generation failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/eden/content/generate-evergreen', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { category, count = 1 } = req.body;
+    
+    if (!category) {
+      return res.status(400).json({ error: 'Category is required' });
+    }
+
+    console.log(`🌲 Evergreen content generation triggered (category: ${category})`);
+    const generatedContent = await contentGenerator.generateEvergreenContent(category, count);
+    
+    res.json({
+      success: true,
+      message: `Generated ${generatedContent.length} evergreen content pieces`,
+      content: generatedContent
+    });
+  } catch (error) {
+    console.error('❌ Evergreen content generation failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/eden/content/review', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const statusParam = req.query.status || 'draft';
+    const limit = parseInt(req.query.limit) || 20;
+    
+    // Handle multiple statuses separated by commas
+    const statuses = statusParam.split(',').map(s => s.trim());
+    
+    let content = [];
+    for (const status of statuses) {
+      const statusContent = await contentGenerator.getContentForReview(status, limit);
+      content = content.concat(statusContent);
+    }
+    
+    // Remove duplicates and limit results
+    const uniqueContent = content.filter((item, index, self) => 
+      index === self.findIndex(t => t.gen_article_id === item.gen_article_id)
+    ).slice(0, limit);
+    
+    res.json({
+      success: true,
+      content: uniqueContent,
+      count: uniqueContent.length
+    });
+  } catch (error) {
+    console.error('❌ Error fetching content for review:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/eden/content/:contentType/:contentId/status', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { contentType, contentId } = req.params;
+    const { status, finalContent } = req.body;
+    
+    if (!['article', 'social', 'video'].includes(contentType)) {
+      return res.status(400).json({ error: 'Invalid content type' });
+    }
+
+    await contentGenerator.updateContentStatus(
+      parseInt(contentId), 
+      contentType, 
+      status, 
+      finalContent
+    );
+    
+    res.json({
+      success: true,
+      message: `${contentType} ${contentId} status updated to ${status}`
+    });
+  } catch (error) {
+    console.error('❌ Error updating content status:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Image service endpoints
+app.get('/api/eden/images/search', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { query, count = 5 } = req.query;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
+    const images = await imageService.searchAndValidateImages(query, parseInt(count));
+    
+    res.json({
+      success: true,
+      images,
+      count: images.length
+    });
+  } catch (error) {
+    console.error('❌ Image search failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// System status and stats endpoints
+app.get('/api/eden/stats/generation', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const stats = await contentGenerator.getGenerationStats();
+    
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('❌ Error getting generation stats:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/eden/stats/images', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const stats = await imageService.getImageStats();
+    
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('❌ Error getting image stats:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Full automation endpoint (news aggregation + analysis + content generation)
+app.post('/api/eden/automate/full-cycle', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    console.log('🤖 Full automation cycle triggered');
+    
+    // Step 1: Aggregate news
+    console.log('📰 Step 1: Aggregating news...');
+    const totalArticles = await newsAggregator.aggregateAllSources();
+    
+    // Step 2: Analyze articles
+    console.log('🧠 Step 2: Analyzing articles...');
+    const analyzed = await newsAggregator.analyzeScrapedArticles();
+    
+    // Step 3: Generate content
+    console.log('🎨 Step 3: Generating content...');
+    const generatedContent = await contentGenerator.generateContentFromTopStories(5);
+    
+    res.json({
+      success: true,
+      message: 'Full automation cycle completed',
+      results: {
+        articlesAggregated: totalArticles,
+        articlesAnalyzed: analyzed,
+        contentGenerated: generatedContent.length
+      }
+    });
+  } catch (error) {
+    console.error('❌ Full automation cycle failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'dist')));
   
-  // Handle React Router (return `index.html` for non-API routes)
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api')) {
       res.sendFile(path.join(__dirname, 'dist', 'index.html'));
@@ -69,14 +392,24 @@ if (process.env.NODE_ENV === 'production') {
     }
   });
 } else {
-  // Development mode - serve public folder
   app.use(express.static(path.join(__dirname, 'public')));
   
   app.get('/', (req, res) => {
     res.json({ 
-      message: 'Development server running',
+      message: 'Project Eden API Server',
+      version: '1.0.0',
+      environment: process.env.NODE_ENV || 'development',
+      systemReady: isSystemReady,
       frontend: `http://localhost:${PORTS.FRONTEND}`,
-      api: `http://localhost:${PORT}/api`
+      api: `http://localhost:${PORT}/api`,
+      endpoints: {
+        health: '/api/health',
+        newsAggregation: '/api/eden/news/*',
+        contentGeneration: '/api/eden/content/*',
+        images: '/api/eden/images/*',
+        stats: '/api/eden/stats/*',
+        automation: '/api/eden/automate/*'
+      }
     });
   });
 }
@@ -96,23 +429,33 @@ app.use('/api/*', (req, res) => {
   res.status(404).json({ error: 'API endpoint not found' });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`🌐 Frontend: http://localhost:${PORTS.FRONTEND}`);
-    console.log(`🔗 API: http://localhost:${PORT}/api`);
-  }
+// Initialize system and start server
+initializeSystem().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Project Eden server running on port ${PORT}`);
+    console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 System Status: ${isSystemReady ? 'Ready' : 'Initializing...'}`);
+    
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`🌐 Frontend: http://localhost:${PORTS.FRONTEND}`);
+      console.log(`🔗 API: http://localhost:${PORT}/api`);
+      console.log(`📋 API Documentation: http://localhost:${PORT}/`);
+    }
+  });
+}).catch(error => {
+  console.error('❌ Failed to start server:', error.message);
+  process.exit(1);
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
+  await db.close();
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down gracefully');
+  await db.close();
   process.exit(0);
 }); 
