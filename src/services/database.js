@@ -86,7 +86,19 @@ class DatabaseService {
       
       for (const statement of statements) {
         if (statement.trim()) {
-          await this.pool.execute(statement);
+          try {
+            await this.pool.execute(statement);
+          } catch (error) {
+            // Ignore duplicate key errors for INSERT IGNORE statements
+            if (error.code === 'ER_DUP_ENTRY' && statement.includes('INSERT IGNORE')) {
+              continue;
+            }
+            // Ignore duplicate index/constraint errors during schema updates
+            if (error.code === 'ER_DUP_KEYNAME' || error.code === 'ER_DUP_INDEX') {
+              continue;
+            }
+            throw error;
+          }
         }
       }
       

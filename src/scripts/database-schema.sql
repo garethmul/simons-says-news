@@ -4,13 +4,15 @@
 -- News Sources Table
 CREATE TABLE IF NOT EXISTS ssnews_news_sources (
     source_id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    url VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    url VARCHAR(255) NOT NULL UNIQUE,
     rss_feed_url VARCHAR(255) NULL,
     last_scraped_at TIMESTAMP NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_name (name),
+    INDEX idx_active (is_active)
 );
 
 -- Scraped Articles Table
@@ -151,7 +153,7 @@ CREATE TABLE IF NOT EXISTS ssnews_image_assets (
 );
 
 -- Insert initial news sources
-INSERT INTO ssnews_news_sources (name, url, rss_feed_url, is_active) VALUES
+INSERT IGNORE INTO ssnews_news_sources (name, url, rss_feed_url, is_active) VALUES
 ('Premier Christian News', 'https://premierchristian.news', 'https://premierchristian.news/rss', TRUE),
 ('Christian Today UK', 'https://christiantoday.com/uk', 'https://christiantoday.com/rss', TRUE),
 ('Church Times', 'https://churchtimes.co.uk', 'https://churchtimes.co.uk/rss', TRUE),
@@ -159,5 +161,4 @@ INSERT INTO ssnews_news_sources (name, url, rss_feed_url, is_active) VALUES
 ('Christian Concern', 'https://christianconcern.com', 'https://christianconcern.com/rss', TRUE),
 ('Baptist Times', 'https://baptist.org.uk/news', NULL, TRUE),
 ('Catholic Herald UK', 'https://catholicherald.co.uk', 'https://catholicherald.co.uk/rss', TRUE),
-('UCB', 'https://ucb.co.uk/news', 'https://ucb.co.uk/rss', TRUE)
-ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP; 
+('UCB', 'https://ucb.co.uk/news', 'https://ucb.co.uk/rss', TRUE); 

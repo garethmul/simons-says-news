@@ -31,7 +31,9 @@
     "debug:heroku": "node scripts/heroku-debug.js",
     "setup:heroku-production": "node scripts/setup-heroku-production.js",
     "reset:eden": "node scripts/reset-project-eden.js",
-    "reset:eden-all": "node scripts/reset-project-eden.js --clear-all"
+    "reset:eden-all": "node scripts/reset-project-eden.js --clear-all",
+    "cleanup:duplicates": "node src/scripts/cleanup-duplicates.js",
+    "migrate:unique-constraints": "node src/scripts/add-unique-constraints.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -414,7 +414,10 @@ app.post('/api/eden/automate/full-cycle', async (req, res) => {
     }
 
     if (automationProgress.isRunning) {
-      return res.status(409).json({ error: 'Automation cycle already running' });
+      return res.status(409).json({ 
+        error: 'Automation cycle already running',
+        progress: automationProgress
+      });
     }
 
     console.log('🤖 Full automation cycle triggered');
@@ -441,6 +444,31 @@ app.post('/api/eden/automate/full-cycle', async (req, res) => {
   } catch (error) {
     console.error('❌ Full automation cycle failed:', error.message);
     automationProgress.isRunning = false;
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reset automation progress endpoint
+app.post('/api/eden/automate/reset', async (req, res) => {
+  try {
+    console.log('🔄 Resetting automation progress...');
+    automationProgress = {
+      isRunning: false,
+      currentStep: '',
+      progress: 0,
+      totalSteps: 3,
+      stepDetails: '',
+      startTime: null,
+      results: {}
+    };
+    
+    res.json({
+      success: true,
+      message: 'Automation progress reset',
+      progress: automationProgress
+    });
+  } catch (error) {
+    console.error('❌ Failed to reset automation progress:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -476,6 +504,7 @@ async function runFullCycleAsync() {
     // Reset after 30 seconds
     setTimeout(() => {
       automationProgress.isRunning = false;
+      console.log('✅ Automation cycle finished - ready for next cycle');
     }, 30000);
 
   } catch (error) {

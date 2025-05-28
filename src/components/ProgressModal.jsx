@@ -14,7 +14,7 @@ import {
   X
 } from 'lucide-react';
 
-const ProgressModal = ({ isOpen, onClose, onComplete }) => {
+const ProgressModal = ({ isOpen, onClose, onComplete, onReset }) => {
   const [progress, setProgress] = useState({
     isRunning: false,
     currentStep: '',
@@ -125,7 +125,10 @@ const ProgressModal = ({ isOpen, onClose, onComplete }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <Card className="w-full max-w-2xl mx-4">
+      {/* Backdrop overlay to disable page interaction */}
+      <div className="absolute inset-0 bg-black bg-opacity-30" />
+      
+      <Card className="w-full max-w-2xl mx-4 relative z-10">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -246,6 +249,12 @@ const ProgressModal = ({ isOpen, onClose, onComplete }) => {
             {progress.currentStep === 'Error' && (
               <Button variant="outline" onClick={onClose}>
                 Close
+              </Button>
+            )}
+            {progress.isRunning && onReset && (
+              <Button variant="outline" onClick={onReset}>
+                <X className="w-4 h-4 mr-2" />
+                Reset & Close
               </Button>
             )}
           </div>

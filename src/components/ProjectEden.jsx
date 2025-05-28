@@ -23,7 +23,8 @@ import {
   MessageSquare,
   ExternalLink,
   Calendar,
-  Star
+  Star,
+  Loader2
 } from 'lucide-react';
 
 const ProjectEden = () => {
@@ -92,6 +93,12 @@ const ProjectEden = () => {
       });
       const data = await response.json();
       
+      if (response.status === 409) {
+        // Automation already running - this is expected, just show the progress
+        console.log('Automation cycle already running, showing progress...');
+        return;
+      }
+      
       if (!data.success) {
         console.error('Failed to start automation cycle:', data.error);
         setShowProgressModal(false);
@@ -101,6 +108,23 @@ const ProjectEden = () => {
       setShowProgressModal(false);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const resetAutomation = async () => {
+    try {
+      const response = await fetch('/api/eden/automate/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('Automation progress reset successfully');
+        setShowProgressModal(false);
+      }
+    } catch (error) {
+      console.error('Error resetting automation:', error);
     }
   };
 
@@ -175,6 +199,11 @@ const ProjectEden = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <div className="max-w-7xl mx-auto">
+        {/* Disabled overlay when automation is running */}
+        {showProgressModal && (
+          <div className="fixed inset-0 bg-white bg-opacity-60 z-40 pointer-events-none" />
+        )}
+        
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
@@ -183,11 +212,11 @@ const ProjectEden = () => {
               <p className="text-lg text-gray-600">AI-Powered Content Automation for Eden.co.uk</p>
             </div>
             <div className="flex gap-3">
-              <Button onClick={fetchDashboardData} variant="outline" disabled={loading}>
+              <Button onClick={fetchDashboardData} variant="outline" disabled={loading || showProgressModal}>
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
-              <Button onClick={runFullCycle} disabled={loading}>
+              <Button onClick={runFullCycle} disabled={loading || showProgressModal}>
                 <Play className="w-4 h-4 mr-2" />
                 Run Full Cycle
               </Button>
@@ -196,7 +225,7 @@ const ProjectEden = () => {
         </div>
 
         {/* Stats Dashboard */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className={`grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Articles Aggregated</CardTitle>
@@ -244,12 +273,27 @@ const ProjectEden = () => {
 
         {/* Main Interface */}
         <Tabs defaultValue="review" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="review">Content Review</TabsTrigger>
-            <TabsTrigger value="stories">Top Stories</TabsTrigger>
-            <TabsTrigger value="sources">News Sources</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsList className={`grid w-full grid-cols-4 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
+            <TabsTrigger value="review" disabled={showProgressModal}>Content Review</TabsTrigger>
+            <TabsTrigger value="stories" disabled={showProgressModal}>Top Stories</TabsTrigger>
+            <TabsTrigger value="sources" disabled={showProgressModal}>News Sources</TabsTrigger>
+            <TabsTrigger value="analytics" disabled={showProgressModal}>Analytics</TabsTrigger>
           </TabsList>
+
+          {/* Automation Running Message */}
+          {showProgressModal && (
+            <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none">
+              <div className="bg-white rounded-lg shadow-lg p-6 border-2 border-blue-200">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+                  <div>
+                    <p className="font-medium text-gray-900">Automation in Progress</p>
+                    <p className="text-sm text-gray-600">Please wait while Project Eden processes your request</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Content Review Tab */}
           <TabsContent value="review" className="space-y-6">
@@ -744,7 +788,8 @@ const ProjectEden = () => {
         <ProgressModal 
           isOpen={showProgressModal}
           onClose={() => setShowProgressModal(false)}
-          onComplete={handleProgressComplete} 
+          onComplete={handleProgressComplete}
+          onReset={resetAutomation}
         />
       )}
     </div>
