@@ -27,7 +27,9 @@
     "deploy": "git push heroku main",
     "clean": "node scripts/enhanced-cleanup.js",
     "fresh-start": "npm run clean && npm install && npm run dev",
-    "health-check": "node scripts/health-check.js"
+    "health-check": "node scripts/health-check.js",
+    "debug:heroku": "node scripts/heroku-debug.js",
+    "setup:heroku-production": "node scripts/setup-heroku-production.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

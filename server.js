@@ -25,7 +25,10 @@ const PORT = process.env.PORT || PORTS.BACKEND;
 // CORS configuration
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.FRONTEND_URL || 'https://your-app-name.herokuapp.com']
+    ? [
+        process.env.FRONTEND_URL || 'https://simons-says-news.herokuapp.com',
+        'https://simons-says-news.herokuapp.com'
+      ]
     : [`http://localhost:${PORTS.FRONTEND}`, `http://127.0.0.1:${PORTS.FRONTEND}`],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
@@ -52,30 +55,43 @@ app.use(session({
 
 // Initialize Project Eden database
 let isSystemReady = false;
+let initializationError = null;
 
 async function initializeSystem() {
   try {
     console.log('🚀 Initializing Project Eden system...');
     
-    // Initialize database
-    await db.initialize();
+    // Initialize database with timeout
+    const initPromise = db.initialize();
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Database initialization timeout')), 30000)
+    );
+    
+    await Promise.race([initPromise, timeoutPromise]);
     
     isSystemReady = true;
+    initializationError = null;
     console.log('✅ Project Eden system ready!');
   } catch (error) {
     console.error('❌ System initialization failed:', error.message);
+    console.error('Full error:', error);
     isSystemReady = false;
+    initializationError = error.message;
+    
+    // Don't exit the process, just log the error
+    // This allows the health check endpoint to still work
   }
 }
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ 
-    status: 'OK', 
+    status: isSystemReady ? 'OK' : 'INITIALIZING', 
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     port: PORT,
     systemReady: isSystemReady,
+    initializationError: initializationError,
     services: {
       database: isSystemReady,
       ai: !!process.env.OPENAI_API_KEY && !!process.env.GEMINI_API_KEY,
@@ -430,21 +446,22 @@ app.use('/api/*', (req, res) => {
 });
 
 // Initialize system and start server
-initializeSystem().then(() => {
-  app.listen(PORT, () => {
-    console.log(`🚀 Project Eden server running on port ${PORT}`);
-    console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔗 System Status: ${isSystemReady ? 'Ready' : 'Initializing...'}`);
-    
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`🌐 Frontend: http://localhost:${PORTS.FRONTEND}`);
-      console.log(`🔗 API: http://localhost:${PORT}/api`);
-      console.log(`📋 API Documentation: http://localhost:${PORT}/`);
-    }
-  });
-}).catch(error => {
-  console.error('❌ Failed to start server:', error.message);
-  process.exit(1);
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Project Eden server running on port ${PORT}`);
+  console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 System Status: ${isSystemReady ? 'Ready' : 'Initializing...'}`);
+  
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`🌐 Frontend: http://localhost:${PORTS.FRONTEND}`);
+    console.log(`🔗 API: http://localhost:${PORT}/api`);
+    console.log(`📋 API Documentation: http://localhost:${PORT}/`);
+  }
+});
+
+// Initialize system in background after server starts
+initializeSystem().catch(error => {
+  console.error('❌ System initialization failed:', error.message);
+  // Don't exit the process, just log the error
 });
 
 // Graceful shutdown

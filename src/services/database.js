@@ -14,6 +14,16 @@ class DatabaseService {
 
   async initialize() {
     try {
+      // SSL configuration for production vs development
+      const sslConfig = process.env.NODE_ENV === 'production' 
+        ? {
+            ca: process.env.MYSQL_SSL_CA,
+            rejectUnauthorized: false // For Heroku compatibility
+          }
+        : process.env.MYSQL_SSL_CA 
+          ? { ca: process.env.MYSQL_SSL_CA }
+          : false;
+
       // Create connection pool for better performance
       this.pool = mysql.createPool({
         host: process.env.DB_HOST,
@@ -21,21 +31,33 @@ class DatabaseService {
         user: process.env.DB_USER,
         password: process.env.DB_PASSWORD,
         database: process.env.DB_NAME,
-        ssl: {
-          ca: process.env.MYSQL_SSL_CA
-        },
+        ssl: sslConfig,
         timezone: 'Z',
         dateStrings: true,
         connectionLimit: 10,
         queueLimit: 0,
-        acquireTimeout: 60000,
-        timeout: 60000
+        acquireTimeout: 30000, // Reduced for Heroku
+        timeout: 30000, // Reduced for Heroku
+        connectTimeout: 30000
       });
 
-      // Test connection
-      const connection = await this.pool.getConnection();
-      console.log('✅ Database connected successfully');
-      connection.release();
+      // Test connection with retry logic
+      let retries = 3;
+      let connection;
+      
+      while (retries > 0) {
+        try {
+          connection = await this.pool.getConnection();
+          console.log('✅ Database connected successfully');
+          connection.release();
+          break;
+        } catch (error) {
+          retries--;
+          console.log(`❌ Database connection attempt failed (${3 - retries}/3): ${error.message}`);
+          if (retries === 0) throw error;
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+        }
+      }
 
       // Initialize schema
       await this.initializeSchema();
@@ -43,6 +65,13 @@ class DatabaseService {
       return true;
     } catch (error) {
       console.error('❌ Database connection failed:', error.message);
+      console.error('Connection details:', {
+        host: process.env.DB_HOST,
+        port: process.env.DB_PORT,
+        user: process.env.DB_USER,
+        database: process.env.DB_NAME,
+        hasSSL: !!process.env.MYSQL_SSL_CA
+      });
       throw error;
     }
   }
