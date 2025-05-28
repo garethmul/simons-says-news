@@ -49,6 +49,42 @@ const ProjectEden = () => {
   const [selectedContent, setSelectedContent] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
+  const [activeTab, setActiveTab] = useState('review');
+
+  // Hash routing functionality
+  useEffect(() => {
+    // Function to get tab from URL hash
+    const getTabFromHash = () => {
+      const hash = window.location.hash.substring(1); // Remove the #
+      const validTabs = ['review', 'approved', 'top-stories', 'all-articles', 'sources', 'analytics', 'prompts'];
+      return validTabs.includes(hash) ? hash : 'review';
+    };
+
+    // Set initial tab from URL
+    setActiveTab(getTabFromHash());
+
+    // Listen for hash changes
+    const handleHashChange = () => {
+      setActiveTab(getTabFromHash());
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []);
+
+  // Function to handle tab changes and update URL
+  const handleTabChange = (tabValue) => {
+    setActiveTab(tabValue);
+    window.history.pushState(null, null, `#${tabValue}`);
+  };
+
+  // Helper function to get direct link to a tab
+  const getTabUrl = (tabValue) => {
+    return `${window.location.origin}${window.location.pathname}#${tabValue}`;
+  };
 
   // Fetch data on component mount
   useEffect(() => {
@@ -327,15 +363,15 @@ const ProjectEden = () => {
         </div>
 
         {/* Main Interface */}
-        <Tabs defaultValue="review" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
           <TabsList className={`grid w-full grid-cols-7 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
             <TabsTrigger value="review" disabled={showProgressModal}>Content Review</TabsTrigger>
             <TabsTrigger value="approved" disabled={showProgressModal}>Approved Content</TabsTrigger>
-            <TabsTrigger value="stories" disabled={showProgressModal}>Top Stories</TabsTrigger>
+            <TabsTrigger value="top-stories" disabled={showProgressModal}>Top Stories</TabsTrigger>
             <TabsTrigger value="all-articles" disabled={showProgressModal}>All Articles</TabsTrigger>
             <TabsTrigger value="sources" disabled={showProgressModal}>News Sources</TabsTrigger>
             <TabsTrigger value="analytics" disabled={showProgressModal}>Analytics</TabsTrigger>
-            <TabsTrigger value="prompt-management" disabled={showProgressModal}>Prompts</TabsTrigger>
+            <TabsTrigger value="prompts" disabled={showProgressModal}>Prompts</TabsTrigger>
           </TabsList>
 
           {/* Automation Running Message */}
@@ -648,7 +684,7 @@ const ProjectEden = () => {
           </TabsContent>
 
           {/* Top Stories Tab */}
-          <TabsContent value="stories" className="space-y-6">
+          <TabsContent value="top-stories" className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>Top Christian News Stories</CardTitle>
@@ -875,7 +911,7 @@ const ProjectEden = () => {
           </TabsContent>
 
           {/* Prompt Management Tab */}
-          <TabsContent value="prompt-management" className="space-y-6">
+          <TabsContent value="prompts" className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>Prompt Management</CardTitle>
