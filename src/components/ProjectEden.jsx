@@ -25,7 +25,8 @@ import {
   ExternalLink,
   Calendar,
   Star,
-  Loader2
+  Loader2,
+  HelpCircle
 } from 'lucide-react';
 
 const ProjectEden = () => {
@@ -33,11 +34,14 @@ const ProjectEden = () => {
     articlesAggregated: 0,
     articlesAnalyzed: 0,
     contentGenerated: 0,
-    pendingReview: 0
+    pendingReview: 0,
+    totalArticlesProcessed: 0,
+    activeSources: 0
   });
   
   const [contentForReview, setContentForReview] = useState([]);
   const [topStories, setTopStories] = useState([]);
+  const [allArticles, setAllArticles] = useState([]);
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedContent, setSelectedContent] = useState(null);
@@ -53,18 +57,24 @@ const ProjectEden = () => {
     setLoading(true);
     try {
       // Fetch content for review - include both draft and review_pending
-      const reviewResponse = await fetch('/api/eden/content/review?status=draft,review_pending&limit=10');
+      const reviewResponse = await fetch('/api/eden/content/review?status=draft,review_pending&limit=50');
       const reviewData = await reviewResponse.json();
       if (reviewData.success) {
         setContentForReview(reviewData.content);
         setStats(prev => ({ ...prev, pendingReview: reviewData.content.length }));
       }
 
-      // Fetch top stories
-      const storiesResponse = await fetch('/api/eden/news/top-stories?limit=5&minScore=0.1');
+      // Fetch top stories with higher limit to show all analyzed articles
+      const storiesResponse = await fetch('/api/eden/news/top-stories?limit=100&minScore=0.1');
       const storiesData = await storiesResponse.json();
       if (storiesData.success) {
-        setTopStories(storiesData.stories);
+        setTopStories(storiesData.stories.slice(0, 10)); // Show top 10 in Top Stories tab
+        setAllArticles(storiesData.stories); // Store all for All Articles tab
+        setStats(prev => ({ 
+          ...prev, 
+          articlesAnalyzed: storiesData.stories.length,
+          totalArticlesProcessed: storiesData.stories.length
+        }));
       }
 
       // Fetch source status
@@ -73,7 +83,22 @@ const ProjectEden = () => {
       if (sourcesData.success) {
         setSources(sourcesData.sources);
         const totalArticles = sourcesData.sources.reduce((sum, source) => sum + source.articles_last_24h, 0);
-        setStats(prev => ({ ...prev, articlesAggregated: totalArticles }));
+        const activeSources = sourcesData.sources.filter(source => source.is_active).length;
+        setStats(prev => ({ 
+          ...prev, 
+          articlesAggregated: totalArticles,
+          activeSources: activeSources
+        }));
+      }
+
+      // Fetch generation stats
+      const genStatsResponse = await fetch('/api/eden/stats/generation');
+      const genStatsData = await genStatsResponse.json();
+      if (genStatsData.success && genStatsData.stats) {
+        setStats(prev => ({ 
+          ...prev, 
+          contentGenerated: genStatsData.stats.totalGenerated || 0
+        }));
       }
 
     } catch (error) {
@@ -213,6 +238,14 @@ const ProjectEden = () => {
               <p className="text-lg text-gray-600">AI-Powered Content Automation for Eden.co.uk</p>
             </div>
             <div className="flex gap-3">
+              <Button 
+                onClick={() => window.open('/user-guide.html', '_blank')} 
+                variant="outline" 
+                disabled={showProgressModal}
+              >
+                <HelpCircle className="w-4 h-4 mr-2" />
+                User Guide
+              </Button>
               <Button onClick={fetchDashboardData} variant="outline" disabled={loading || showProgressModal}>
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
@@ -274,9 +307,10 @@ const ProjectEden = () => {
 
         {/* Main Interface */}
         <Tabs defaultValue="review" className="space-y-6">
-          <TabsList className={`grid w-full grid-cols-5 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
+          <TabsList className={`grid w-full grid-cols-6 ${showProgressModal ? 'opacity-50 pointer-events-none' : ''}`}>
             <TabsTrigger value="review" disabled={showProgressModal}>Content Review</TabsTrigger>
             <TabsTrigger value="stories" disabled={showProgressModal}>Top Stories</TabsTrigger>
+            <TabsTrigger value="all-articles" disabled={showProgressModal}>All Articles</TabsTrigger>
             <TabsTrigger value="sources" disabled={showProgressModal}>News Sources</TabsTrigger>
             <TabsTrigger value="analytics" disabled={showProgressModal}>Analytics</TabsTrigger>
             <TabsTrigger value="prompt-management" disabled={showProgressModal}>Prompts</TabsTrigger>
@@ -480,10 +514,79 @@ const ProjectEden = () => {
                               </Badge>
                             ))}
                           </div>
-                          <Button size="sm" variant="outline">
-                            <FileText className="w-4 h-4 mr-2" />
-                            Generate Content
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => window.open(story.url, '_blank')}
+                            >
+                              <ExternalLink className="w-4 h-4 mr-2" />
+                              View Original
+                            </Button>
+                            <Button size="sm" variant="outline">
+                              <FileText className="w-4 h-4 mr-2" />
+                              Generate Content
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* All Articles Tab */}
+          <TabsContent value="all-articles" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>All Articles</CardTitle>
+                <CardDescription>
+                  All articles processed by Project Eden
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {allArticles.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>No articles processed</p>
+                    <p className="text-sm">Run the full cycle to process new articles</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {allArticles.map((article) => (
+                      <Card key={article.article_id} className="border-l-4 border-l-purple-500">
+                        <CardHeader>
+                          <CardTitle className="text-lg">{article.title}</CardTitle>
+                          <CardDescription>
+                            {article.source_name} • Relevance: {(article.relevance_score * 100).toFixed(0)}% • 
+                            {new Date(article.publication_date).toLocaleDateString()}
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-sm text-gray-700 mb-3">{article.summary_ai}</p>
+                          <div className="flex flex-wrap gap-1 mb-3">
+                            {article.keywords_ai?.split(',').slice(0, 5).map((keyword, index) => (
+                              <Badge key={index} variant="secondary" className="text-xs">
+                                {keyword.trim()}
+                              </Badge>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => window.open(article.url, '_blank')}
+                            >
+                              <ExternalLink className="w-4 h-4 mr-2" />
+                              View Original
+                            </Button>
+                            <Button size="sm" variant="outline">
+                              <FileText className="w-4 h-4 mr-2" />
+                              Generate Content
+                            </Button>
+                          </div>
                         </CardContent>
                       </Card>
                     ))}
@@ -556,16 +659,27 @@ const ProjectEden = () => {
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-blue-600 mb-2">94</div>
+                    <div className="text-3xl font-bold text-blue-600 mb-2">{stats.totalArticlesProcessed}</div>
                     <div className="text-sm text-gray-600">Total Articles Processed</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-green-600 mb-2">8</div>
+                    <div className="text-3xl font-bold text-green-600 mb-2">{stats.activeSources}</div>
                     <div className="text-sm text-gray-600">Active News Sources</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-purple-600 mb-2">100%</div>
-                    <div className="text-sm text-gray-600">System Uptime</div>
+                    <div className="text-3xl font-bold text-purple-600 mb-2">{stats.contentGenerated}</div>
+                    <div className="text-sm text-gray-600">Content Pieces Generated</div>
+                  </div>
+                </div>
+                
+                <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="text-center p-4 bg-blue-50 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-600 mb-1">{stats.articlesAggregated}</div>
+                    <div className="text-sm text-gray-600">Articles Aggregated (24h)</div>
+                  </div>
+                  <div className="text-center p-4 bg-orange-50 rounded-lg">
+                    <div className="text-2xl font-bold text-orange-600 mb-1">{stats.articlesAnalyzed}</div>
+                    <div className="text-sm text-gray-600">Articles Analyzed</div>
                   </div>
                 </div>
                 
@@ -577,6 +691,15 @@ const ProjectEden = () => {
                   <p className="text-sm text-green-700 mt-2">
                     All systems are running smoothly. News aggregation, AI analysis, and content generation are working as expected.
                   </p>
+                  <div className="mt-4 text-sm text-green-700">
+                    <p><strong>Data Breakdown:</strong></p>
+                    <ul className="list-disc list-inside mt-2 space-y-1">
+                      <li>{stats.articlesAggregated} articles found from {stats.activeSources} active news sources</li>
+                      <li>{stats.articlesAnalyzed} articles analyzed for relevance</li>
+                      <li>{stats.contentGenerated} content pieces generated</li>
+                      <li>{stats.pendingReview} items awaiting review</li>
+                    </ul>
+                  </div>
                 </div>
               </CardContent>
             </Card>

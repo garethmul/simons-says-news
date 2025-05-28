@@ -377,19 +377,31 @@ class ContentGenerator {
 
   async getGenerationStats() {
     try {
-      const stats = await db.query(`
+      // Get detailed stats
+      const detailedStats = await db.query(`
         SELECT 
           content_type,
           status,
           COUNT(*) as count,
           DATE(created_at) as date
         FROM ssnews_generated_articles 
-        WHERE created_at > DATE_SUB(NOW(), INTERVAL 7 DAYS)
+        WHERE created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)
         GROUP BY content_type, status, DATE(created_at)
         ORDER BY date DESC
       `);
 
-      return stats;
+      // Get total count
+      const totalResult = await db.query(`
+        SELECT COUNT(*) as total
+        FROM ssnews_generated_articles
+      `);
+
+      const totalGenerated = totalResult[0]?.total || 0;
+
+      return {
+        totalGenerated,
+        detailedStats
+      };
     } catch (error) {
       console.error('❌ Error getting generation stats:', error.message);
       throw error;

@@ -58,8 +58,8 @@ app.use(session({
 let isSystemReady = false;
 let initializationError = null;
 
-// Initialize services
-const promptManager = new PromptManager();
+// Initialize services after database is ready
+let promptManager = null;
 
 async function initializeSystem() {
   try {
@@ -72,6 +72,9 @@ async function initializeSystem() {
     );
     
     await Promise.race([initPromise, timeoutPromise]);
+    
+    // Initialize prompt manager after database is ready
+    promptManager = new PromptManager();
     
     isSystemReady = true;
     initializationError = null;
@@ -518,6 +521,10 @@ async function runFullCycleAsync() {
 // Get all prompt templates
 app.get('/api/eden/prompts/templates', async (req, res) => {
   try {
+    if (!isSystemReady || !promptManager) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+    
     const templates = await promptManager.getTemplates();
     res.json({ success: true, templates });
   } catch (error) {
@@ -529,6 +536,10 @@ app.get('/api/eden/prompts/templates', async (req, res) => {
 // Get specific template with current version
 app.get('/api/eden/prompts/templates/:templateId', async (req, res) => {
   try {
+    if (!isSystemReady || !promptManager) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+    
     const { templateId } = req.params;
     const template = await promptManager.getTemplate(templateId);
     
@@ -546,6 +557,10 @@ app.get('/api/eden/prompts/templates/:templateId', async (req, res) => {
 // Get all versions for a template
 app.get('/api/eden/prompts/templates/:templateId/versions', async (req, res) => {
   try {
+    if (!isSystemReady || !promptManager) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+    
     const { templateId } = req.params;
     const versions = await promptManager.getTemplateVersions(templateId);
     res.json({ success: true, versions });
@@ -558,6 +573,10 @@ app.get('/api/eden/prompts/templates/:templateId/versions', async (req, res) => 
 // Create new template version
 app.post('/api/eden/prompts/templates/:templateId/versions', async (req, res) => {
   try {
+    if (!isSystemReady || !promptManager) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+    
     const { templateId } = req.params;
     const { promptContent, systemMessage, parameters, notes, createdBy } = req.body;
     
@@ -584,6 +603,10 @@ app.post('/api/eden/prompts/templates/:templateId/versions', async (req, res) =>
 // Set current version for a template
 app.put('/api/eden/prompts/templates/:templateId/versions/:versionId/current', async (req, res) => {
   try {
+    if (!isSystemReady || !promptManager) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+    
     const { templateId, versionId } = req.params;
     await promptManager.setCurrentVersion(templateId, versionId);
     res.json({ success: true, message: 'Current version updated' });
@@ -596,6 +619,10 @@ app.put('/api/eden/prompts/templates/:templateId/versions/:versionId/current', a
 // Test a prompt with sample variables
 app.post('/api/eden/prompts/templates/:templateId/versions/:versionId/test', async (req, res) => {
   try {
+    if (!isSystemReady || !promptManager) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+    
     const { templateId, versionId } = req.params;
     const { testVariables } = req.body;
     
@@ -610,6 +637,10 @@ app.post('/api/eden/prompts/templates/:templateId/versions/:versionId/test', asy
 // Get generation history for a template
 app.get('/api/eden/prompts/templates/:templateId/history', async (req, res) => {
   try {
+    if (!isSystemReady || !promptManager) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+    
     const { templateId } = req.params;
     const { limit } = req.query;
     
@@ -624,6 +655,10 @@ app.get('/api/eden/prompts/templates/:templateId/history', async (req, res) => {
 // Get usage statistics for a template
 app.get('/api/eden/prompts/templates/:templateId/stats', async (req, res) => {
   try {
+    if (!isSystemReady || !promptManager) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+    
     const { templateId } = req.params;
     const stats = await promptManager.getUsageStats(templateId);
     res.json({ success: true, stats });
