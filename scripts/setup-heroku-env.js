@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 
 // Load local .env file
-dotenv.config();
+const envConfig = dotenv.config();
 
 // Variables that should NOT be copied to production
 const EXCLUDE_VARS = [
@@ -18,7 +18,6 @@ const EXCLUDE_VARS = [
 const PRODUCTION_OVERRIDES = {
   NODE_ENV: 'production',
   SESSION_SECRET: 'CHANGE_THIS_IN_PRODUCTION', // Reminder to change
-  FRONTEND_URL: 'https://your-app-name.herokuapp.com' // Will be updated
 };
 
 function setupHerokuEnv() {
@@ -42,33 +41,39 @@ function setupHerokuEnv() {
     // Update production overrides with actual app name
     PRODUCTION_OVERRIDES.FRONTEND_URL = `https://${appName}.herokuapp.com`;
     
-    // Process environment variables
+    // Process environment variables from .env file only
     const envVars = [];
     
-    for (const [key, value] of Object.entries(process.env)) {
-      // Skip excluded variables
-      if (EXCLUDE_VARS.includes(key)) {
-        console.log(`⏭️  Skipping ${key} (development only)`);
-        continue;
-      }
-      
-      // Use production override if available
-      const finalValue = PRODUCTION_OVERRIDES[key] || value;
-      
-      if (finalValue) {
-        envVars.push(`${key}=${finalValue}`);
+    if (envConfig.parsed) {
+      for (const [key, value] of Object.entries(envConfig.parsed)) {
+        // Skip excluded variables
+        if (EXCLUDE_VARS.includes(key)) {
+          console.log(`⏭️  Skipping ${key} (development only)`);
+          continue;
+        }
         
-        // Warn about values that need manual update
-        if (PRODUCTION_OVERRIDES[key] && key === 'SESSION_SECRET') {
-          console.log(`⚠️  Remember to update ${key} with a secure production value`);
+        // Use production override if available
+        const finalValue = PRODUCTION_OVERRIDES[key] || value;
+        
+        if (finalValue && finalValue !== 'your-db-user' && finalValue !== 'your-db-password') {
+          envVars.push(`${key}="${finalValue}"`);
+          
+          // Warn about values that need manual update
+          if (PRODUCTION_OVERRIDES[key] && key === 'SESSION_SECRET') {
+            console.log(`⚠️  Remember to update ${key} with a secure production value`);
+          }
         }
       }
     }
+    
+    // Set essential production variables
+    envVars.push(`FRONTEND_URL="https://${appName}.herokuapp.com"`);
     
     // Set all variables at once
     if (envVars.length > 0) {
       const configCommand = `heroku config:set ${envVars.join(' ')}`;
       console.log('🚀 Setting environment variables...');
+      console.log(`Command: ${configCommand}`);
       execSync(configCommand, { stdio: 'inherit' });
       console.log('✅ Environment variables configured');
     }
