@@ -1,0 +1,33 @@
+{
+  "restartable": "rs",
+  "ignore": [
+    ".git",
+    "node_modules/**/node_modules",
+    "dist",
+    "src/components/**/*",
+    "src/pages/**/*",
+    "src/assets/**/*",
+    "src/hooks/**/*",
+    "src/styles/**/*",
+    "src/App.jsx",
+    "src/main.jsx",
+    "src/index.css",
+    "*.test.js"
+  ],
+  "verbose": true,
+  "watch": [
+    "src/routes/",
+    "src/config/",
+    "src/utils/",
+    "src/models/",
+    "src/middleware/",
+    "src/services/",
+    "src/socket/",
+    "server.js"
+  ],
+  "ext": "js,jsx,json",
+  "delay": "1000",
+  "env": {
+    "NODE_ENV": "development"
+  }
+}

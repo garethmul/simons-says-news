@@ -1,0 +1,64 @@
+{
+  "name": "simons-says-news",
+  "version": "1.0.0",
+  "description": "A full-stack React/Node.js news application",
+  "main": "server.js",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "server": "nodemon --config nodemon.json server.js",
+    "client": "vite --port 5576",
+    "dev": "node start-dev.js",
+    "restart": "node scripts/kill-ports.js && npm run dev",
+    "build": "vite build",
+    "heroku-postbuild": "npm run build",
+    "kill-ports": "node scripts/kill-ports.js",
+    "dev:legacy": "concurrently \"npm run server\" \"npm run client\"",
+    "preview": "vite preview",
+    "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "setup:github": "node scripts/setup-github.js",
+    "setup:heroku": "node scripts/setup-heroku.js",
+    "setup:heroku-env": "node scripts/setup-heroku-env.js",
+    "setup:auto-deploy": "node scripts/setup-auto-deploy.js",
+    "setup:complete": "node scripts/complete-setup.js",
+    "deploy": "git push heroku main",
+    "clean": "node scripts/enhanced-cleanup.js",
+    "fresh-start": "npm run clean && npm install && npm run dev",
+    "health-check": "node scripts/health-check.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-session": "^1.18.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^7.1.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.55.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "node-fetch": "^3.3.2",
+    "nodemon": "^3.1.9",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.0.8"
+  },
+  "keywords": [
+    "react",
+    "nodejs",
+    "express",
+    "vite",
+    "full-stack"
+  ],
+  "author": "",
+  "license": "MIT"
+}

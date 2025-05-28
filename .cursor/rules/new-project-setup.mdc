@@ -1,0 +1,1224 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Development Environment Setup Guide
+
+This guide documents the standard development environment setup for full-stack React/Node.js applications that can run locally and deploy to Heroku.
+
+## Project Structure Overview
+
+```
+project-root/
+├── src/                    # Source code
+│   ├── components/         # React components
+│   ├── pages/             # React pages
+│   ├── routes/            # Express API routes
+│   ├── config/            # Configuration files
+│   ├── utils/             # Utility functions
+│   ├── services/          # Business logic services
+│   ├── middleware/        # Express middleware
+│   ├── models/            # Data models
+│   ├── hooks/             # React hooks
+│   ├── assets/            # Static assets
+│   ├── styles/            # CSS/styling files
+│   ├── scripts/           # Database migrations & scripts
+│   └── socket/            # WebSocket configuration
+├── public/                # Static files served by Vite
+├── dist/                  # Production build output
+├── scripts/               # Development utilities
+├── server.js              # Express server entry point
+├── start-dev.js           # Development startup script
+├── vite.config.js         # Vite configuration
+├── package.json           # Dependencies and scripts
+├── nodemon.json           # Hot reload configuration
+├── Procfile               # Heroku deployment config
+├── .env                   # Environment variables (local)
+├── .gitignore             # Git ignore rules
+└── tailwind.config.js     # Tailwind CSS config
+```
+
+## Port Configuration
+
+### Dynamic Port Allocation Strategy
+**IMPORTANT**: Each new project should use unique, random ports to avoid conflicts with other local development projects.
+
+#### Port Selection Guidelines
+- **Frontend (Vite)**: Choose a random port between 5000-5999 (e.g., 5847, 5291, 5634)
+- **Backend (Express)**: Choose a random port between 3000-3999 (e.g., 3847, 3291, 3634)  
+- **HMR (Hot Module Replacement)**: Frontend port + 1 (e.g., if frontend is 5847, HMR is 5848)
+
+#### Port Selection Process
+1. Use an online random number generator or run: `node -e "console.log('Frontend:', Math.floor(Math.random() * 1000) + 5000, 'Backend:', Math.floor(Math.random() * 1000) + 3000)"`
+2. Check ports aren't in use: `lsof -i :PORT_NUMBER` (Unix) or `netstat -ano | findstr :PORT_NUMBER` (Windows)
+3. Avoid common ports: 3000, 3001, 5000, 5173, 8000, 8080, 9000
+4. Document chosen ports in project README
+5. Update all configuration files with selected ports
+
+#### Example Port Configuration
+```javascript
+// For a new project, you might choose:
+const PORTS = {
+  FRONTEND: 5847,  // Random port in 5000-5999 range
+  BACKEND: 3291,   // Random port in 3000-3999 range  
+  HMR: 5848        // Frontend port + 1
+};
+```
+
+### Why Random Ports?
+- Prevents conflicts between multiple local development projects
+- Allows running multiple projects simultaneously
+- Reduces developer friction when switching between projects
+- Avoids "port already in use" errors
+
+## Package.json Configuration
+
+### Essential Scripts
+```json
+{
+  "scripts": {
+    "start": "node server.js",
+    "server": "nodemon --config nodemon.json server.js",
+    "client": "vite --port 5173",
+    "dev": "node start-dev.js",
+    "restart": "node scripts/kill-ports.js && npm run dev",
+    "build": "vite build",
+    "heroku-postbuild": "npm run build",
+    "kill-ports": "node scripts/kill-ports.js"
+  }
+}
+```
+
+### Key Dependencies
+```json
+{
+  "dependencies": {
+    "express": "^4.21.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express-session": "^1.18.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^7.1.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.8",
+    "nodemon": "^3.1.9",
+    "concurrently": "^8.2.2",
+    "tailwindcss": "^3.4.1",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.33"
+  }
+}
+```
+
+## Environment Variables Setup
+
+### .env File Structure
+```env
+# Server Configuration
+NODE_ENV=development
+PORT=3001
+SESSION_SECRET=your-secure-session-secret
+
+# Database Configuration
+DB_HOST=your-database-host
+DB_PORT=5432
+DB_USER=your-db-user
+DB_PASSWORD=your-db-password
+DB_NAME=your-db-name
+
+# Frontend Configuration
+VITE_API_URL=/api
+FRONTEND_URL=http://localhost:5173
+
+# API Keys (prefix with VITE_ for client-side access)
+VITE_OPENAI_API_KEY=your-openai-key
+OPENAI_API_KEY=your-openai-key
+
+# Debug Configuration
+VITE_DEBUG_LEVEL=1
+VITE_DEBUG_CATEGORIES=PROGRESS,DIALOG
+```
+
+### Heroku Config Vars
+When deploying to Heroku, copy all environment variables to Config Vars:
+```bash
+heroku config:set NODE_ENV=production
+heroku config:set SESSION_SECRET=your-production-secret
+heroku config:set DB_HOST=your-production-db-host
+# ... etc for all variables
+```
+
+## Development Startup Configuration
+
+### start-dev.js
+Creates a unified development startup script that:
+- Kills any existing processes on required ports
+- Starts the backend server with nodemon for hot reloading
+- Starts the frontend with Vite for hot module replacement
+- Handles graceful shutdown
+
+Key features:
+- Cross-platform port killing (Windows/Unix)
+- Sequential startup (backend first, then frontend)
+- Process cleanup on exit
+- Automatic nodemon.json generation
+
+### nodemon.json Configuration
+```json
+{
+  "restartable": "rs",
+  "ignore": [
+    ".git",
+    "node_modules/**/node_modules",
+    "dist",
+    "src/client",
+    "*.test.js",
+    "src/components/**/*",
+    "src/assets/**/*",
+    "src/hooks/**/*",
+    "src/pages/**/*",
+    "src/App.jsx",
+    "src/main.jsx",
+    "src/index.css"
+  ],
+  "verbose": true,
+  "watch": [
+    "src/routes/",
+    "src/config/",
+    "src/utils/",
+    "src/models/",
+    "src/middleware/",
+    "src/services/",
+    "server.js"
+  ],
+  "ext": "js,jsx,json",
+  "delay": "1000",
+  "env": {
+    "NODE_ENV": "development"
+  }
+}
+```
+
+## Vite Configuration
+
+### Key Features
+- React plugin for JSX support
+- Proxy configuration for API requests
+- Hot Module Replacement (HMR) setup
+- Production build optimisation
+- Environment variable handling
+
+### Proxy Setup
+```javascript
+server: {
+  port: 5173,
+  strictPort: true,
+  host: 'localhost',
+  proxy: {
+    '/api': {
+      target: 'http://localhost:3001',
+      changeOrigin: true,
+      secure: false,
+      ws: true,
+      timeout: 30000
+    }
+  }
+}
+```
+
+## Express Server Configuration
+
+### Key Features
+- CORS configuration for development and production
+- Session management with secure cookies
+- Static file serving (dist for production, public for development)
+- API route mounting under `/api` prefix
+- Health check endpoint
+- Graceful error handling
+
+### CORS Setup
+```javascript
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://your-app.herokuapp.com']
+    : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
+};
+```
+
+## Git Configuration
+
+### .gitignore Essentials
+```gitignore
+# Dependencies
+node_modules/
+
+# Build outputs
+/dist
+/build
+
+# Environment files
+.env
+.env.*
+*.env
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+temp/
+```
+
+## Heroku Deployment Setup
+
+### Procfile
+```
+web: node server.js
+```
+
+### Required Heroku Configuration
+1. **Node.js version**: Specify in package.json
+   ```json
+   "engines": {
+     "node": ">=18.0.0"
+   }
+   ```
+
+2. **Build script**: Heroku runs `heroku-postbuild`
+   ```json
+   "heroku-postbuild": "npm run build"
+   ```
+
+3. **Static file serving**: Server handles both API and static files
+
+## Development Workflow
+
+### Starting Development
+```bash
+npm run dev
+```
+This command:
+1. Kills any processes on ports 5173, 3001, 5174
+2. Starts the Express server on port 3001
+3. Starts the Vite dev server on port 5173
+4. Sets up proxy forwarding from frontend to backend
+
+### Restarting Development
+```bash
+npm run restart
+```
+Kills all processes and restarts the development environment.
+
+### Building for Production
+```bash
+npm run build
+```
+Creates optimised production build in `dist/` directory.
+
+## Hot Reloading Setup
+
+### Frontend (Vite)
+- Automatic hot module replacement
+- Instant updates for React components
+- CSS hot reloading
+- Fast refresh for state preservation
+
+### Backend (Nodemon)
+- Watches server-side files only
+- Ignores frontend files to prevent unnecessary restarts
+- 1-second delay to batch file changes
+- Verbose logging for debugging
+
+## Security Considerations
+
+### Development
+- HTTP cookies allowed for local development
+- CORS configured for localhost origins
+- Session secrets should be different from production
+
+### Production
+- HTTPS-only cookies
+- Secure session configuration
+- Environment-specific CORS origins
+- Proper error handling without stack traces
+
+## Troubleshooting
+
+### Port Conflicts
+- Use `npm run kill-ports` to free up ports
+- Check for other applications using ports 3001, 5173, 5174
+
+### Environment Variables
+- Ensure all required variables are set in both .env and Heroku config
+- Use `VITE_` prefix for client-side variables
+- Restart development server after changing .env
+
+### Database Connections
+- Verify database credentials and network access
+- Check SSL configuration for production databases
+- Ensure connection pooling is properly configured
+
+### Build Issues
+- Clear Vite cache: `rm -rf node_modules/.vite`
+- Clear npm cache: `npm cache clean --force`
+- Reinstall dependencies: `rm -rf node_modules && npm install`
+
+## Additional Considerations
+
+### Performance
+- Use connection pooling for database
+- Implement request timeouts (30s for Heroku)
+- Optimise bundle size with proper imports
+- Use lazy loading for routes
+
+### Monitoring
+- Health check endpoints for uptime monitoring
+- Structured logging for debugging
+- Error tracking integration
+
+### Scaling
+- Stateless session management for horizontal scaling
+- Database connection limits
+- Rate limiting for API endpoints
+
+## Quick Setup Checklist
+
+1. ✅ Clone repository structure
+2. ✅ Copy package.json dependencies
+3. ✅ Set up .env file with required variables
+4. ✅ Configure vite.config.js with proxy
+5. ✅ Set up server.js with CORS and routes
+6. ✅ Create start-dev.js for unified startup
+7. ✅ Configure nodemon.json for backend hot reload
+8. ✅ Set up .gitignore with essential exclusions
+9. ✅ Create Procfile for Heroku deployment
+10. ✅ Test local development with `npm run dev`
+11. ✅ Configure Heroku app with config vars
+12. ✅ Test production build with `npm run build`
+
+This setup provides a robust, scalable development environment that works consistently across different machines and deploys seamlessly to Heroku.
+
+## Available NPM Scripts
+
+### Core Development Scripts
+```bash
+npm run dev              # Start both frontend and backend with hot reloading
+npm run restart          # Kill all processes and restart development environment
+npm run kill-ports       # Kill processes on configured ports only
+```
+
+### Individual Server Scripts  
+```bash
+npm run server           # Start backend only with nodemon hot reloading
+npm run client           # Start frontend only with Vite
+npm run dev:legacy       # Alternative: start both servers with concurrently
+```
+
+### Production & Build Scripts
+```bash
+npm start                # Start production server (used by Heroku)
+npm run build            # Build frontend for production
+npm run preview          # Preview production build locally
+npm run heroku-postbuild # Heroku build hook (runs automatically)
+```
+
+### Code Quality Scripts
+```bash
+npm run lint             # Run ESLint on codebase
+```
+
+### Database Migration Scripts (if applicable)
+```bash
+npm run migrate:domain-ai-data    # Run domain AI data migration
+npm run migrate:brandfetch-data   # Run Brandfetch data migration  
+npm run migrate:lbf              # Run LBF migrations
+```
+
+### Enhanced Cleanup Script
+For the most robust cleanup and restart, consider adding this enhanced script to package.json:
+
+```json
+{
+  "scripts": {
+    "clean": "node scripts/enhanced-cleanup.js",
+    "fresh-start": "npm run clean && npm install && npm run dev"
+  }
+}
+```
+
+## Improvements for New Projects
+
+### 1. Enhanced Port Management
+Create a `ports.config.js` file for centralised port management:
+
+```javascript
+// ports.config.js
+export const PORTS = {
+  FRONTEND: 5847,  // Update with your random ports
+  BACKEND: 3291,   // Update with your random ports
+  HMR: 5848        // Frontend + 1
+};
+
+export const getPortConfig = () => {
+  return {
+    vite: PORTS.FRONTEND,
+    express: PORTS.BACKEND,
+    hmr: PORTS.HMR
+  };
+};
+```
+
+### 2. Improved Environment Management
+Add environment validation script:
+
+```javascript
+// scripts/validate-env.js
+import dotenv from 'dotenv';
+import fs from 'fs';
+
+dotenv.config();
+
+const requiredVars = [
+  'NODE_ENV',
+  'PORT', 
+  'SESSION_SECRET',
+  'DB_HOST',
+  'DB_USER',
+  'DB_PASSWORD',
+  'DB_NAME'
+];
+
+const missingVars = requiredVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+  console.error('❌ Missing required environment variables:');
+  missingVars.forEach(varName => console.error(`  - ${varName}`));
+  process.exit(1);
+}
+
+console.log('✅ All required environment variables are set');
+```
+
+### 3. Enhanced Cleanup Script
+Create `scripts/enhanced-cleanup.js`:
+
+```javascript
+import { exec } from 'child_process';
+import { platform } from 'os';
+import { promisify } from 'util';
+import fs from 'fs';
+
+const execAsync = promisify(exec);
+const isWindows = platform() === 'win32';
+
+// Import your port configuration
+const PORTS_TO_CLEAN = [3000, 3001, 5000, 5173, 5174]; // Add your project's ports
+
+async function killProcessOnPort(port) {
+  try {
+    if (isWindows) {
+      const findCmd = `netstat -ano | findstr :${port}`;
+      const { stdout } = await execAsync(findCmd);
+      
+      if (stdout) {
+        const lines = stdout.trim().split('\n');
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length > 4) {
+            const pid = parts[4];
+            if (pid && pid !== '0') {
+              await execAsync(`taskkill /F /PID ${pid}`);
+              console.log(`✅ Killed process ${pid} on port ${port}`);
+            }
+          }
+        }
+      }
+    } else {
+      await execAsync(`lsof -ti:${port} | xargs kill -9`);
+      console.log(`✅ Killed process on port ${port}`);
+    }
+  } catch (error) {
+    console.log(`ℹ️  No process found on port ${port}`);
+  }
+}
+
+async function cleanupNodeModules() {
+  try {
+    if (fs.existsSync('node_modules')) {
+      console.log('🧹 Cleaning node_modules...');
+      if (isWindows) {
+        await execAsync('rmdir /s /q node_modules');
+      } else {
+        await execAsync('rm -rf node_modules');
+      }
+      console.log('✅ node_modules cleaned');
+    }
+  } catch (error) {
+    console.error('❌ Error cleaning node_modules:', error.message);
+  }
+}
+
+async function cleanupCache() {
+  try {
+    console.log('🧹 Cleaning caches...');
+    
+    // Clean npm cache
+    await execAsync('npm cache clean --force');
+    
+    // Clean Vite cache
+    if (fs.existsSync('node_modules/.vite')) {
+      if (isWindows) {
+        await execAsync('rmdir /s /q node_modules\\.vite');
+      } else {
+        await execAsync('rm -rf node_modules/.vite');
+      }
+    }
+    
+    // Clean dist folder
+    if (fs.existsSync('dist')) {
+      if (isWindows) {
+        await execAsync('rmdir /s /q dist');
+      } else {
+        await execAsync('rm -rf dist');
+      }
+    }
+    
+    console.log('✅ Caches cleaned');
+  } catch (error) {
+    console.error('❌ Error cleaning caches:', error.message);
+  }
+}
+
+async function enhancedCleanup() {
+  console.log('🚀 Starting enhanced cleanup...');
+  
+  // Kill processes on ports
+  console.log('🔪 Killing processes on ports...');
+  await Promise.all(PORTS_TO_CLEAN.map(port => killProcessOnPort(port)));
+  
+  // Clean caches
+  await cleanupCache();
+  
+  // Optionally clean node_modules (uncomment if needed)
+  // await cleanupNodeModules();
+  
+  console.log('✅ Enhanced cleanup complete!');
+}
+
+enhancedCleanup().catch(console.error);
+```
+
+### 4. Development Health Check
+Add a health check script to verify everything is working:
+
+```javascript
+// scripts/health-check.js
+import fetch from 'node-fetch';
+import { PORTS } from '../ports.config.js';
+
+async function checkHealth() {
+  try {
+    // Check backend health
+    const backendResponse = await fetch(`http://localhost:${PORTS.BACKEND}/api/health`, {
+      timeout: 5000
+    });
+    
+    if (backendResponse.ok) {
+      console.log('✅ Backend server is healthy');
+    } else {
+      console.log('❌ Backend server returned error status');
+    }
+    
+    // Check frontend
+    const frontendResponse = await fetch(`http://localhost:${PORTS.FRONTEND}`, {
+      timeout: 5000
+    });
+    
+    if (frontendResponse.ok) {
+      console.log('✅ Frontend server is healthy');
+    } else {
+      console.log('❌ Frontend server returned error status');
+    }
+    
+  } catch (error) {
+    console.error('❌ Health check failed:', error.message);
+    console.log('💡 Try running: npm run restart');
+  }
+}
+
+checkHealth();
+```
+
+### 5. Project Initialisation Script
+Create a script to set up new projects with random ports:
+
+```javascript
+// scripts/init-project.js
+import fs from 'fs';
+import { execSync } from 'child_process';
+
+function generateRandomPorts() {
+  const frontend = Math.floor(Math.random() * 1000) + 5000;
+  const backend = Math.floor(Math.random() * 1000) + 3000;
+  const hmr = frontend + 1;
+  
+  return { frontend, backend, hmr };
+}
+
+function initProject() {
+  const ports = generateRandomPorts();
+  
+  console.log('🎲 Generated random ports:');
+  console.log(`   Frontend: ${ports.frontend}`);
+  console.log(`   Backend: ${ports.backend}`);
+  console.log(`   HMR: ${ports.hmr}`);
+  
+  // Create ports.config.js
+  const portsConfig = `// Auto-generated port configuration
+export const PORTS = {
+  FRONTEND: ${ports.frontend},
+  BACKEND: ${ports.backend},
+  HMR: ${ports.hmr}
+};
+
+export const getPortConfig = () => ({
+  vite: PORTS.FRONTEND,
+  express: PORTS.BACKEND,
+  hmr: PORTS.HMR
+});
+`;
+  
+  fs.writeFileSync('ports.config.js', portsConfig);
+  console.log('✅ Created ports.config.js');
+  
+  // Update package.json scripts to use the ports
+  // ... (implementation depends on your needs)
+  
+  console.log('🚀 Project initialised with unique ports!');
+  console.log(`📝 Remember to update your .env file with PORT=${ports.backend}`);
+}
+
+initProject();
+```
+
+## GitHub and Heroku Deployment Setup
+
+### Prerequisites
+- Git installed and configured
+- GitHub CLI (`gh`) installed (optional but recommended)
+- Heroku CLI installed and logged in
+- Project folder with a meaningful name (this will be used for repo and app names)
+
+### Step 1: Create GitHub Repository
+
+#### Option A: Using GitHub CLI (Recommended)
+```bash
+# Navigate to your project folder
+cd your-project-folder
+
+# Initialize git if not already done
+git init
+
+# Create GitHub repository based on folder name
+gh repo create $(basename "$PWD") --public --source=. --remote=origin --push
+
+# Or for private repository
+gh repo create $(basename "$PWD") --private --source=. --remote=origin --push
+```
+
+#### Option B: Manual GitHub Setup
+```bash
+# Initialize git repository
+git init
+
+# Add all files
+git add .
+
+# Initial commit
+git commit -m "Initial commit: project setup"
+
+# Create repository on GitHub.com manually, then:
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_PROJECT_NAME.git
+git branch -M main
+git push -u origin main
+```
+
+#### Option C: Automated Script
+Create `scripts/setup-github.js`:
+
+```javascript
+// scripts/setup-github.js
+import { execSync } from 'child_process';
+import path from 'path';
+
+function setupGitHub() {
+  const projectName = path.basename(process.cwd());
+  
+  console.log(`🚀 Setting up GitHub repository: ${projectName}`);
+  
+  try {
+    // Check if git is initialized
+    try {
+      execSync('git status', { stdio: 'ignore' });
+    } catch {
+      console.log('📝 Initializing git repository...');
+      execSync('git init');
+    }
+    
+    // Check if GitHub CLI is available
+    try {
+      execSync('gh --version', { stdio: 'ignore' });
+      
+      // Create repository with GitHub CLI
+      console.log('📦 Creating GitHub repository...');
+      execSync(`gh repo create ${projectName} --public --source=. --remote=origin --push`, { stdio: 'inherit' });
+      
+    } catch {
+      console.log('❌ GitHub CLI not found. Please:');
+      console.log('1. Install GitHub CLI: https://cli.github.com/');
+      console.log('2. Or create repository manually on GitHub.com');
+      console.log(`3. Repository name should be: ${projectName}`);
+      
+      // Prepare for manual setup
+      execSync('git add .');
+      execSync('git commit -m "Initial commit: project setup"');
+      
+      console.log('\n📋 Manual setup commands:');
+      console.log(`git remote add origin https://github.com/YOUR_USERNAME/${projectName}.git`);
+      console.log('git branch -M main');
+      console.log('git push -u origin main');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error setting up GitHub:', error.message);
+  }
+}
+
+setupGitHub();
+```
+
+### Step 2: Create Heroku App
+
+#### Option A: Using Heroku CLI
+```bash
+# Create Heroku app with same name as project folder
+heroku create $(basename "$PWD")
+
+# Or if name is taken, add a suffix
+heroku create $(basename "$PWD")-app
+```
+
+#### Option B: Automated Script
+Create `scripts/setup-heroku.js`:
+
+```javascript
+// scripts/setup-heroku.js
+import { execSync } from 'child_process';
+import path from 'path';
+
+function setupHeroku() {
+  const projectName = path.basename(process.cwd());
+  
+  console.log(`🚀 Setting up Heroku app: ${projectName}`);
+  
+  try {
+    // Check if Heroku CLI is available
+    execSync('heroku --version', { stdio: 'ignore' });
+    
+    // Try to create app with project name
+    try {
+      execSync(`heroku create ${projectName}`, { stdio: 'inherit' });
+      console.log(`✅ Created Heroku app: ${projectName}`);
+      return projectName;
+    } catch {
+      // If name is taken, try with suffix
+      const appNameWithSuffix = `${projectName}-app`;
+      try {
+        execSync(`heroku create ${appNameWithSuffix}`, { stdio: 'inherit' });
+        console.log(`✅ Created Heroku app: ${appNameWithSuffix}`);
+        return appNameWithSuffix;
+      } catch {
+        console.log('❌ Both app names are taken. Please choose manually:');
+        console.log(`heroku create ${projectName}-YOUR_SUFFIX`);
+        return null;
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ Heroku CLI not found. Please install: https://devcenter.heroku.com/articles/heroku-cli');
+    return null;
+  }
+}
+
+const appName = setupHeroku();
+if (appName) {
+  console.log(`\n📝 Your Heroku app URL: https://${appName}.herokuapp.com`);
+}
+```
+
+### Step 3: Configure Heroku Environment Variables
+
+#### Option A: Manual Configuration
+```bash
+# Set each environment variable individually
+heroku config:set NODE_ENV=production
+heroku config:set SESSION_SECRET=your-production-session-secret
+heroku config:set DB_HOST=your-production-db-host
+heroku config:set DB_PORT=5432
+heroku config:set DB_USER=your-production-db-user
+heroku config:set DB_PASSWORD=your-production-db-password
+heroku config:set DB_NAME=your-production-db-name
+
+# Add API keys
+heroku config:set OPENAI_API_KEY=your-openai-key
+heroku config:set BRANDFETCH_API_KEY=your-brandfetch-key
+# ... add other API keys as needed
+```
+
+#### Option B: Automated Script from .env
+Create `scripts/setup-heroku-env.js`:
+
+```javascript
+// scripts/setup-heroku-env.js
+import { execSync } from 'child_process';
+import dotenv from 'dotenv';
+import fs from 'fs';
+
+// Load local .env file
+dotenv.config();
+
+// Variables that should NOT be copied to production
+const EXCLUDE_VARS = [
+  'VITE_API_URL',
+  'FRONTEND_URL',
+  'VITE_DEBUG_LEVEL',
+  'VITE_DEBUG_CATEGORIES',
+  'REACT_APP_DEBUG'
+];
+
+// Variables that need different values in production
+const PRODUCTION_OVERRIDES = {
+  NODE_ENV: 'production',
+  SESSION_SECRET: 'CHANGE_THIS_IN_PRODUCTION', // Reminder to change
+  FRONTEND_URL: 'https://your-app-name.herokuapp.com' // Will be updated
+};
+
+function setupHerokuEnv() {
+  console.log('🔧 Configuring Heroku environment variables...');
+  
+  try {
+    // Check if we're in a Heroku app directory
+    const herokuRemotes = execSync('git remote -v', { encoding: 'utf8' });
+    if (!herokuRemotes.includes('heroku')) {
+      console.log('❌ No Heroku remote found. Run "heroku create" first.');
+      return;
+    }
+    
+    // Get current Heroku app name
+    const appInfo = execSync('heroku apps:info --json', { encoding: 'utf8' });
+    const appData = JSON.parse(appInfo);
+    const appName = appData.name;
+    
+    console.log(`📱 Configuring app: ${appName}`);
+    
+    // Update production overrides with actual app name
+    PRODUCTION_OVERRIDES.FRONTEND_URL = `https://${appName}.herokuapp.com`;
+    
+    // Process environment variables
+    const envVars = [];
+    
+    for (const [key, value] of Object.entries(process.env)) {
+      // Skip excluded variables
+      if (EXCLUDE_VARS.includes(key)) {
+        console.log(`⏭️  Skipping ${key} (development only)`);
+        continue;
+      }
+      
+      // Use production override if available
+      const finalValue = PRODUCTION_OVERRIDES[key] || value;
+      
+      if (finalValue) {
+        envVars.push(`${key}=${finalValue}`);
+        
+        // Warn about values that need manual update
+        if (PRODUCTION_OVERRIDES[key] && key === 'SESSION_SECRET') {
+          console.log(`⚠️  Remember to update ${key} with a secure production value`);
+        }
+      }
+    }
+    
+    // Set all variables at once
+    if (envVars.length > 0) {
+      const configCommand = `heroku config:set ${envVars.join(' ')}`;
+      console.log('🚀 Setting environment variables...');
+      execSync(configCommand, { stdio: 'inherit' });
+      console.log('✅ Environment variables configured');
+    }
+    
+    // Display current config
+    console.log('\n📋 Current Heroku config:');
+    execSync('heroku config', { stdio: 'inherit' });
+    
+  } catch (error) {
+    console.error('❌ Error configuring Heroku environment:', error.message);
+  }
+}
+
+setupHerokuEnv();
+```
+
+#### Option C: Interactive Setup Script
+Create `scripts/interactive-heroku-setup.js`:
+
+```javascript
+// scripts/interactive-heroku-setup.js
+import { execSync } from 'child_process';
+import readline from 'readline';
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+function question(prompt) {
+  return new Promise((resolve) => {
+    rl.question(prompt, resolve);
+  });
+}
+
+async function interactiveSetup() {
+  console.log('🔧 Interactive Heroku Environment Setup\n');
+  
+  try {
+    // Essential variables
+    const sessionSecret = await question('Enter production SESSION_SECRET (or press Enter to generate): ');
+    const dbHost = await question('Enter production DB_HOST: ');
+    const dbUser = await question('Enter production DB_USER: ');
+    const dbPassword = await question('Enter production DB_PASSWORD: ');
+    const dbName = await question('Enter production DB_NAME: ');
+    
+    // Generate session secret if not provided
+    const finalSessionSecret = sessionSecret || require('crypto').randomBytes(32).toString('hex');
+    
+    const configs = [
+      `NODE_ENV=production`,
+      `SESSION_SECRET=${finalSessionSecret}`,
+      `DB_HOST=${dbHost}`,
+      `DB_PORT=5432`,
+      `DB_USER=${dbUser}`,
+      `DB_PASSWORD=${dbPassword}`,
+      `DB_NAME=${dbName}`
+    ];
+    
+    // Optional API keys
+    console.log('\n🔑 API Keys (press Enter to skip):');
+    const openaiKey = await question('OPENAI_API_KEY: ');
+    if (openaiKey) configs.push(`OPENAI_API_KEY=${openaiKey}`);
+    
+    const brandfetchKey = await question('BRANDFETCH_API_KEY: ');
+    if (brandfetchKey) configs.push(`BRANDFETCH_API_KEY=${brandfetchKey}`);
+    
+    // Set all configs
+    const configCommand = `heroku config:set ${configs.join(' ')}`;
+    console.log('\n🚀 Setting configuration...');
+    execSync(configCommand, { stdio: 'inherit' });
+    
+    console.log('✅ Heroku environment configured successfully!');
+    
+  } catch (error) {
+    console.error('❌ Error:', error.message);
+  } finally {
+    rl.close();
+  }
+}
+
+interactiveSetup();
+```
+
+### Step 4: Setup Automatic Deployment from GitHub
+
+#### Option A: Using Heroku CLI
+```bash
+# Connect Heroku app to GitHub repository
+heroku git:remote -a your-app-name
+
+# Enable automatic deploys from main branch
+heroku labs:enable runtime-dyno-metadata
+heroku config:set HEROKU_APP_NAME=your-app-name
+
+# Set up GitHub integration (requires web interface)
+echo "🌐 Complete setup at: https://dashboard.heroku.com/apps/your-app-name/deploy/github"
+```
+
+#### Option B: Automated Script
+Create `scripts/setup-auto-deploy.js`:
+
+```javascript
+// scripts/setup-auto-deploy.js
+import { execSync } from 'child_process';
+import path from 'path';
+
+function setupAutoDeploy() {
+  const projectName = path.basename(process.cwd());
+  
+  console.log('🔄 Setting up automatic deployment...');
+  
+  try {
+    // Get Heroku app info
+    const appInfo = execSync('heroku apps:info --json', { encoding: 'utf8' });
+    const appData = JSON.parse(appInfo);
+    const appName = appData.name;
+    
+    // Get GitHub repository info
+    const gitRemote = execSync('git remote get-url origin', { encoding: 'utf8' }).trim();
+    const repoMatch = gitRemote.match(/github\.com[:/](.+)\/(.+)\.git/);
+    
+    if (!repoMatch) {
+      console.log('❌ Could not determine GitHub repository from remote URL');
+      return;
+    }
+    
+    const [, owner, repo] = repoMatch;
+    
+    console.log(`📱 Heroku app: ${appName}`);
+    console.log(`📦 GitHub repo: ${owner}/${repo}`);
+    
+    // Enable required Heroku features
+    try {
+      execSync('heroku labs:enable runtime-dyno-metadata', { stdio: 'ignore' });
+    } catch {
+      // Feature might already be enabled
+    }
+    
+    // Set app name in config for reference
+    execSync(`heroku config:set HEROKU_APP_NAME=${appName}`, { stdio: 'inherit' });
+    
+    console.log('\n🌐 To complete automatic deployment setup:');
+    console.log(`1. Visit: https://dashboard.heroku.com/apps/${appName}/deploy/github`);
+    console.log(`2. Connect to GitHub repository: ${owner}/${repo}`);
+    console.log('3. Enable "Automatic deploys" from main branch');
+    console.log('4. Optionally enable "Wait for CI to pass before deploy"');
+    
+    // Open browser automatically (optional)
+    const shouldOpen = process.argv.includes('--open');
+    if (shouldOpen) {
+      const url = `https://dashboard.heroku.com/apps/${appName}/deploy/github`;
+      console.log(`\n🌐 Opening browser to: ${url}`);
+      
+      // Cross-platform browser opening
+      const command = process.platform === 'win32' ? 'start' : 
+                     process.platform === 'darwin' ? 'open' : 'xdg-open';
+      execSync(`${command} "${url}"`, { stdio: 'ignore' });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error setting up auto-deploy:', error.message);
+  }
+}
+
+setupAutoDeploy();
+```
+
+### Complete Setup Script
+
+Create `scripts/complete-setup.js` that runs all steps:
+
+```javascript
+// scripts/complete-setup.js
+import { execSync } from 'child_process';
+import path from 'path';
+
+async function completeSetup() {
+  const projectName = path.basename(process.cwd());
+  
+  console.log(`🚀 Complete setup for project: ${projectName}\n`);
+  
+  try {
+    // Step 1: GitHub setup
+    console.log('📦 Step 1: Setting up GitHub repository...');
+    execSync('node scripts/setup-github.js', { stdio: 'inherit' });
+    
+    // Step 2: Heroku app creation
+    console.log('\n📱 Step 2: Creating Heroku app...');
+    execSync('node scripts/setup-heroku.js', { stdio: 'inherit' });
+    
+    // Step 3: Environment variables
+    console.log('\n🔧 Step 3: Configuring environment variables...');
+    execSync('node scripts/setup-heroku-env.js', { stdio: 'inherit' });
+    
+    // Step 4: Auto-deployment
+    console.log('\n🔄 Step 4: Setting up auto-deployment...');
+    execSync('node scripts/setup-auto-deploy.js --open', { stdio: 'inherit' });
+    
+    console.log('\n✅ Complete setup finished!');
+    console.log('\n📋 Next steps:');
+    console.log('1. Complete GitHub integration in the opened browser tab');
+    console.log('2. Review and update production environment variables');
+    console.log('3. Push changes to trigger first deployment');
+    console.log('4. Monitor deployment at Heroku dashboard');
+    
+  } catch (error) {
+    console.error('❌ Setup failed:', error.message);
+  }
+}
+
+completeSetup();
+```
+
+### Package.json Scripts Addition
+
+Add these scripts to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "setup:github": "node scripts/setup-github.js",
+    "setup:heroku": "node scripts/setup-heroku.js", 
+    "setup:heroku-env": "node scripts/setup-heroku-env.js",
+    "setup:auto-deploy": "node scripts/setup-auto-deploy.js",
+    "setup:complete": "node scripts/complete-setup.js",
+    "deploy": "git push heroku main"
+  }
+}
+```
+
+### Manual Checklist
+
+If you prefer manual setup, follow this checklist:
+
+1. **GitHub Repository**
+   - [ ] `git init` (if not already done)
+   - [ ] `gh repo create PROJECT_NAME --public --source=. --remote=origin --push`
+   - [ ] Or create manually on GitHub.com and push
+
+2. **Heroku App**
+   - [ ] `heroku create PROJECT_NAME`
+   - [ ] Note the app URL for environment variables
+
+3. **Environment Variables**
+   - [ ] `heroku config:set NODE_ENV=production`
+   - [ ] `heroku config:set SESSION_SECRET=secure-production-secret`
+   - [ ] Copy all necessary variables from `.env`
+   - [ ] Update `FRONTEND_URL` to Heroku app URL
+
+4. **Auto-Deployment**
+   - [ ] Visit Heroku dashboard → Deploy tab
+   - [ ] Connect to GitHub repository
+   - [ ] Enable automatic deploys from main branch
+   - [ ] Test with a push to main branch
+
+This setup ensures your project is properly configured for continuous deployment from GitHub to Heroku with all environment variables correctly configured. 
