@@ -293,6 +293,14 @@ class DatabaseService {
           ['gen_article', article.gen_article_id]
         );
 
+        // Map image field names to camelCase for frontend compatibility
+        article.images = article.images.map(img => ({
+          ...img,
+          sirvUrl: img.sirv_cdn_url,
+          altText: img.alt_text_suggestion_ai,
+          query: img.alt_text_suggestion_ai || 'Christian content image' // Use alt text as query fallback
+        }));
+
         // Get source article information if available
         if (article.based_on_scraped_article_id) {
           try {

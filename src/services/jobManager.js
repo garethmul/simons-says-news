@@ -10,11 +10,12 @@ class JobManager {
     try {
       console.log(`📋 Creating ${jobType} job with payload:`, payload);
       
+      // Ensure payload is properly handled for MySQL JSON column
       const jobData = {
         job_type: jobType,
         status: 'queued',
         priority,
-        payload: JSON.stringify(payload),
+        payload: payload, // MySQL will handle the JSON conversion
         created_by: createdBy,
         progress_percentage: 0
       };
@@ -96,7 +97,7 @@ class JobManager {
       };
 
       if (results) {
-        updateData.results = JSON.stringify(results);
+        updateData.results = results; // MySQL will handle the JSON conversion
       }
 
       await db.update('ssnews_jobs', updateData, 'job_id = ?', [jobId]);
@@ -129,12 +130,18 @@ class JobManager {
   async getJob(jobId) {
     try {
       const job = await db.findOne('ssnews_jobs', 'job_id = ?', [jobId]);
-      if (job && job.payload) {
-        job.payload = JSON.parse(job.payload);
+      if (!job) return null;
+      
+      // MySQL JSON columns return objects directly, no parsing needed
+      // Just ensure they exist
+      if (!job.payload) {
+        job.payload = {};
       }
-      if (job && job.results) {
-        job.results = JSON.parse(job.results);
+      
+      if (!job.results) {
+        job.results = null;
       }
+      
       return job;
     } catch (error) {
       console.error('❌ Error getting job:', error.message);
@@ -152,10 +159,11 @@ class JobManager {
         LIMIT ${parseInt(limit)}
       `, [status]);
 
+      // MySQL JSON columns return objects directly, no parsing needed
       return jobs.map(job => ({
         ...job,
-        payload: job.payload ? JSON.parse(job.payload) : null,
-        results: job.results ? JSON.parse(job.results) : null
+        payload: job.payload || {},
+        results: job.results || null
       }));
     } catch (error) {
       console.error('❌ Error getting jobs by status:', error.message);
@@ -228,10 +236,11 @@ class JobManager {
         LIMIT ${parseInt(limit)}
       `);
 
+      // MySQL JSON columns return objects directly, no parsing needed
       return jobs.map(job => ({
         ...job,
-        payload: job.payload ? JSON.parse(job.payload) : null,
-        results: job.results ? JSON.parse(job.results) : null,
+        payload: job.payload || {},
+        results: job.results || null,
         duration: job.started_at && job.completed_at 
           ? Math.round((new Date(job.completed_at) - new Date(job.started_at)) / 1000)
           : null

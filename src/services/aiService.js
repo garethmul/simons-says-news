@@ -589,23 +589,49 @@ class AIService {
         
         Article content: ${articleContent.body.substring(0, 500)}...
         
-        Image Guidelines:
-        - Warm, welcoming, hopeful, natural light, soft colors
-        - Modern but reverent, editorial lifestyle
-        - AVOID: Jesus' face, mystical symbols, overly Catholic iconography
-        - PREFER: Hope, community, nature, light, open Bible, hands in prayer, diverse people in study/reflection
-        - Show diverse people (ethnicity, age, gender) in natural expressions
+        Generate SPECIFIC search queries that relate directly to the article's topic, people, or events.
+        
+        Image Guidelines to follow:
+        - Warm, welcoming, hopeful, natural light preferred
+        - AVOID: Jesus' face, crucifix, mystical symbols, overly Catholic iconography
+        - OKAY: Hope, community, nature, light, Bible, prayer hands, diverse people
+        
+        BE SPECIFIC about:
+        - Named people in the article (e.g., "Franklin Graham speaking")
+        - Specific events or places mentioned
+        - The actual topic being discussed
+        
+        Don't be overly generic - relate queries to the article content!
         
         Return only the search queries as a JSON array:
-        ["query1", "query2", "query3"]
+        ["specific query 1", "specific query 2", "specific query 3"]
       `;
 
       const response = await this.geminiModel.generateContent(prompt);
       const text = response.response.text().trim();
       
       try {
-        return JSON.parse(text);
-      } catch {
+        // Handle markdown code blocks that Gemini sometimes adds
+        let cleanedText = text;
+        if (text.includes('```json')) {
+          cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        } else if (text.includes('```')) {
+          cleanedText = text.replace(/```\n?/g, '').trim();
+        }
+        
+        // Try to parse the cleaned text
+        const queries = JSON.parse(cleanedText);
+        
+        // Validate it's an array
+        if (!Array.isArray(queries)) {
+          throw new Error('Response is not an array');
+        }
+        
+        console.log(`✅ Generated unique image queries for "${articleContent.title.substring(0, 50)}...":`, queries);
+        return queries;
+      } catch (parseError) {
+        console.error('❌ Failed to parse AI response:', text);
+        console.error('Parse error:', parseError.message);
         // Fallback queries
         return ["open bible natural light", "diverse people praying", "sunrise hope nature"];
       }

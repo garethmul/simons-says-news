@@ -430,6 +430,163 @@ app.get('/api/eden/stats/images', async (req, res) => {
   }
 });
 
+// ===== USER BOOKMARKS API ENDPOINTS =====
+
+// Get user's bookmarked articles
+app.get('/api/eden/bookmarks', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const userId = req.query.userId;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    // Get all bookmarked article IDs for the user
+    const bookmarks = await db.query(`
+      SELECT 
+        b.bookmark_id,
+        b.article_id,
+        b.bookmarked_at,
+        a.title,
+        a.url,
+        a.publication_date,
+        a.summary_ai,
+        a.keywords_ai,
+        a.relevance_score,
+        s.name as source_name
+      FROM ssnews_user_bookmarks b
+      JOIN ssnews_scraped_articles a ON b.article_id = a.article_id
+      JOIN ssnews_news_sources s ON a.source_id = s.source_id
+      WHERE b.user_id = ?
+      ORDER BY b.bookmarked_at DESC
+    `, [userId]);
+
+    res.json({
+      success: true,
+      bookmarks
+    });
+  } catch (error) {
+    console.error('❌ Error fetching bookmarks:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add a bookmark
+app.post('/api/eden/bookmarks', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { userId, userEmail, articleId } = req.body;
+    
+    if (!userId || !articleId) {
+      return res.status(400).json({ error: 'User ID and Article ID are required' });
+    }
+
+    // Check if bookmark already exists
+    const existing = await db.findOne(
+      'ssnews_user_bookmarks',
+      'user_id = ? AND article_id = ?',
+      [userId, articleId]
+    );
+
+    if (existing) {
+      return res.json({
+        success: true,
+        message: 'Bookmark already exists',
+        bookmarkId: existing.bookmark_id
+      });
+    }
+
+    // Insert new bookmark
+    const bookmarkId = await db.insert('ssnews_user_bookmarks', {
+      user_id: userId,
+      user_email: userEmail || null,
+      article_id: articleId
+    });
+
+    console.log(`⭐ User ${userId} bookmarked article ${articleId}`);
+
+    res.json({
+      success: true,
+      message: 'Bookmark added successfully',
+      bookmarkId
+    });
+  } catch (error) {
+    console.error('❌ Error adding bookmark:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Remove a bookmark
+app.delete('/api/eden/bookmarks', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { userId, articleId } = req.query;
+    
+    if (!userId || !articleId) {
+      return res.status(400).json({ error: 'User ID and Article ID are required' });
+    }
+
+    const result = await db.query(
+      'DELETE FROM ssnews_user_bookmarks WHERE user_id = ? AND article_id = ?',
+      [userId, articleId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Bookmark not found' });
+    }
+
+    console.log(`⭐ User ${userId} removed bookmark for article ${articleId}`);
+
+    res.json({
+      success: true,
+      message: 'Bookmark removed successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error removing bookmark:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get bookmarked article IDs only (for quick checking)
+app.get('/api/eden/bookmarks/ids', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const userId = req.query.userId;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const bookmarks = await db.query(
+      'SELECT article_id FROM ssnews_user_bookmarks WHERE user_id = ?',
+      [userId]
+    );
+
+    const articleIds = bookmarks.map(b => b.article_id);
+
+    res.json({
+      success: true,
+      articleIds
+    });
+  } catch (error) {
+    console.error('❌ Error fetching bookmark IDs:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Progress tracking for automation cycles
 let automationProgress = {
   isRunning: false,

@@ -15,6 +15,32 @@ CREATE TABLE IF NOT EXISTS ssnews_system_logs (
     INDEX idx_source (source)
 );
 
+-- Jobs Queue Table
+CREATE TABLE IF NOT EXISTS ssnews_jobs (
+    job_id INT AUTO_INCREMENT PRIMARY KEY,
+    job_type ENUM('content_generation', 'full_cycle', 'news_aggregation', 'ai_analysis') NOT NULL,
+    status ENUM('queued', 'processing', 'completed', 'failed', 'cancelled') DEFAULT 'queued',
+    priority INT DEFAULT 0,
+    payload JSON NULL,
+    results JSON NULL,
+    error_message TEXT NULL,
+    progress_percentage INT DEFAULT 0,
+    progress_details TEXT NULL,
+    worker_id VARCHAR(100) NULL,
+    retry_count INT DEFAULT 0,
+    max_retries INT DEFAULT 3,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP NULL,
+    completed_at TIMESTAMP NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_by VARCHAR(100) DEFAULT 'system',
+    INDEX idx_status (status),
+    INDEX idx_job_type (job_type),
+    INDEX idx_priority_created (priority DESC, created_at ASC),
+    INDEX idx_created_at (created_at),
+    INDEX idx_worker (worker_id)
+);
+
 -- News Sources Table
 CREATE TABLE IF NOT EXISTS ssnews_news_sources (
     source_id INT AUTO_INCREMENT PRIMARY KEY,

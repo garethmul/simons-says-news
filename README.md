@@ -105,6 +105,30 @@ FRONTEND_URL=http://localhost:5576
 # NEWS_API_KEY=your-news-api-key
 ```
 
+### Firebase Authentication
+
+Project Eden uses Firebase Authentication to restrict access to authorized users only.
+
+**Setup:**
+1. Users must be created in Firebase Console (christian-360 project)
+2. Add authorized email addresses to `AUTHORIZED_EMAILS` in `src/App.jsx`
+3. Users sign in with email/password at the login screen
+
+**Managing Users:**
+```bash
+# View user creation guide
+node scripts/create-firebase-user.js
+
+# Add emails to authorized list in src/App.jsx:
+const AUTHORIZED_EMAILS = [
+  'admin@eden.co.uk',
+  'user@example.com',
+  // Add more as needed
+];
+```
+
+See `FIREBASE_AUTH_SETUP.md` for detailed authentication documentation.
+
 ## 📜 Available Scripts
 
 ### Core Development Scripts

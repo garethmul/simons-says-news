@@ -31,10 +31,15 @@ import {
   Loader2,
   HelpCircle,
   Terminal,
-  Search
+  Search,
+  LogOut,
+  Zap
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 const ProjectEden = () => {
+  const { currentUser, logout } = useAuth();
+  
   const [stats, setStats] = useState({
     articlesAggregated: 0,
     articlesAnalyzed: 0,
@@ -55,7 +60,7 @@ const ProjectEden = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [showLogViewer, setShowLogViewer] = useState(false);
-  const [activeTab, setActiveTab] = useState('review');
+  const [activeTab, setActiveTab] = useState('dashboard');
 
   // Top Stories state
   const [topStoriesPage, setTopStoriesPage] = useState(1);
@@ -63,7 +68,7 @@ const ProjectEden = () => {
   const [topStoriesSortBy, setTopStoriesSortBy] = useState('relevance');
   const [favoriteStories, setFavoriteStories] = useState(new Set());
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
-  const storiesPerPage = 10;
+  const topStoriesPerPage = 10;
 
   // State for approved content modal
   const [showApprovedModal, setShowApprovedModal] = useState(false);
@@ -83,13 +88,17 @@ const ProjectEden = () => {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
 
+  // Additional state variables
+  const [analyzingMore, setAnalyzingMore] = useState(false);
+  const [generatingContent, setGeneratingContent] = useState(false);
+
   // Hash routing functionality
   useEffect(() => {
     // Function to get tab from URL hash
     const getTabFromHash = () => {
       const hash = window.location.hash.substring(1); // Remove the #
-      const validTabs = ['review', 'approved', 'top-stories', 'all-articles', 'sources', 'analytics', 'prompts'];
-      return validTabs.includes(hash) ? hash : 'review';
+      const validTabs = ['dashboard', 'review', 'approved', 'stories', 'jobs', 'prompts'];
+      return validTabs.includes(hash) ? hash : 'dashboard';
     };
 
     // Set initial tab from URL
@@ -118,10 +127,115 @@ const ProjectEden = () => {
     return `${window.location.origin}${window.location.pathname}#${tabValue}`;
   };
 
-  // Fetch data on component mount
+  // Fetch all data
+  const fetchData = async () => {
+    if (!currentUser) return;
+    
+    setLoading(true);
+    try {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      
+      // Fetch all data in parallel
+      const [
+        reviewResponse,
+        approvedResponse,
+        articlesResponse,
+        statsResponse,
+        jobStatsResponse,
+        bookmarksResponse,
+        sourcesResponse
+      ] = await Promise.all([
+        fetch(`${baseUrl}/api/eden/content/review`),
+        fetch(`${baseUrl}/api/eden/content/review?status=approved`),
+        fetch(`${baseUrl}/api/eden/news/top-stories?limit=100&minScore=0.1`),
+        fetch(`${baseUrl}/api/eden/stats/generation`),
+        fetch(`${baseUrl}/api/eden/jobs/queue/stats`),
+        // Fetch user's bookmarks
+        currentUser?.uid ? fetch(`${baseUrl}/api/eden/bookmarks/ids?userId=${currentUser.uid}`) : Promise.resolve({ json: () => ({ articleIds: [] }) }),
+        fetch(`${baseUrl}/api/eden/news/sources/status`)
+      ]);
+
+      // Store data for later use
+      let reviewData = { content: [] };
+      let approvedData = { content: [] };
+      let articlesData = { stories: [] };
+      let sourcesData = { sources: [] };
+
+      if (reviewResponse.ok) {
+        reviewData = await reviewResponse.json();
+        setContentForReview(reviewData.content || []);
+      }
+
+      if (approvedResponse.ok) {
+        approvedData = await approvedResponse.json();
+        setApprovedContent(approvedData.content || []);
+      }
+
+      if (articlesResponse.ok) {
+        articlesData = await articlesResponse.json();
+        setAllArticles(articlesData.stories || []);
+        setTopStories(articlesData.stories?.slice(0, 10) || []);
+      }
+
+      if (statsResponse.ok) {
+        const data = await statsResponse.json();
+        setStats(data.stats || {
+          articlesAggregated: 0,
+          articlesAnalyzed: 0,
+          contentGenerated: 0,
+          contentApproved: 0,
+          totalBlogs: 0,
+          totalSocialPosts: 0,
+          totalVideoScripts: 0
+        });
+      }
+
+      if (jobStatsResponse.ok) {
+        const data = await jobStatsResponse.json();
+        setJobStats(data.stats || { summary: {}, details: [] });
+        setWorkerStatus(data.worker || { isRunning: false });
+      }
+
+      if (bookmarksResponse.ok && currentUser?.uid) {
+        const data = await bookmarksResponse.json();
+        setFavoriteStories(new Set(data.articleIds || []));
+      }
+
+      if (sourcesResponse.ok) {
+        sourcesData = await sourcesResponse.json();
+        setSources(sourcesData.sources || []);
+      }
+
+      // Update stats with all the data
+      const totalArticles = sourcesData.sources.reduce((sum, source) => sum + source.articles_last_24h, 0);
+      const activeSources = sourcesData.sources.filter(source => source.is_active).length;
+      
+      setStats(prev => ({ 
+        ...prev, 
+        articlesAggregated: totalArticles,
+        activeSources: activeSources,
+        articlesAnalyzed: articlesData.stories?.length || 0,
+        pendingReview: reviewData.content?.length || 0,
+        approvedContent: approvedData.content?.length || 0,
+        totalArticlesProcessed: articlesData.stories?.length || 0
+      }));
+
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setLoading(false);
+    }
+  };
+
+  // Fetch data from server
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    fetchData();
+    
+    // Refresh data every 30 seconds
+    const interval = setInterval(fetchData, 30000);
+    
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   // Fetch jobs when Jobs tab is accessed
   useEffect(() => {
@@ -130,100 +244,106 @@ const ProjectEden = () => {
     }
   }, [activeTab]);
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  const approveContent = async (contentId, contentType) => {
     try {
-      // Fetch content for review - include both draft and review_pending, exclude rejected
-      const reviewResponse = await fetch('/api/eden/content/review?status=draft,review_pending&limit=50');
-      const reviewData = await reviewResponse.json();
-      if (reviewData.success) {
-        setContentForReview(reviewData.content);
-        setStats(prev => ({ ...prev, pendingReview: reviewData.content.length }));
+      console.log(`✅ Approving ${contentType} ${contentId}`);
+      
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' })
+      });
+      
+      if (response.ok) {
+        console.log(`✅ Content approved successfully`);
+        await fetchData();
+      } else {
+        console.error('Failed to approve content');
       }
-
-      // Fetch approved content
-      const approvedResponse = await fetch('/api/eden/content/review?status=approved&limit=50');
-      const approvedData = await approvedResponse.json();
-      if (approvedData.success) {
-        setApprovedContent(approvedData.content);
-        setStats(prev => ({ ...prev, approvedContent: approvedData.content.length }));
-      }
-
-      // Fetch top stories with higher limit to show all analyzed articles
-      const storiesResponse = await fetch('/api/eden/news/top-stories?limit=100&minScore=0.1');
-      const storiesData = await storiesResponse.json();
-      if (storiesData.success) {
-        setTopStories(storiesData.stories.slice(0, 10)); // Show top 10 in Top Stories tab
-        setAllArticles(storiesData.stories); // Store all for All Articles tab
-        setStats(prev => ({ 
-          ...prev, 
-          articlesAnalyzed: storiesData.stories.length,
-          totalArticlesProcessed: storiesData.stories.length
-        }));
-      }
-
-      // Fetch source status
-      const sourcesResponse = await fetch('/api/eden/news/sources/status');
-      const sourcesData = await sourcesResponse.json();
-      if (sourcesData.success) {
-        setSources(sourcesData.sources);
-        const totalArticles = sourcesData.sources.reduce((sum, source) => sum + source.articles_last_24h, 0);
-        const activeSources = sourcesData.sources.filter(source => source.is_active).length;
-        setStats(prev => ({ 
-          ...prev, 
-          articlesAggregated: totalArticles,
-          activeSources: activeSources
-        }));
-      }
-
-      // Fetch generation stats
-      const genStatsResponse = await fetch('/api/eden/stats/generation');
-      const genStatsData = await genStatsResponse.json();
-      if (genStatsData.success && genStatsData.stats) {
-        setStats(prev => ({ 
-          ...prev, 
-          contentGenerated: genStatsData.stats.totalGenerated || 0
-        }));
-      }
-
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      console.error('Error approving content:', error);
+    }
+  };
+  
+  const rejectContent = async (contentId, contentType) => {
+    try {
+      console.log(`❌ Rejecting ${contentType} ${contentId}`);
+      
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'rejected' })
+      });
+      
+      if (response.ok) {
+        console.log(`✅ Content rejected successfully`);
+        await fetchData();
+      } else {
+        console.error('Failed to reject content');
+      }
+    } catch (error) {
+      console.error('Error rejecting content:', error);
+    }
+  };
+
+  const analyzeMoreArticles = async () => {
+    setAnalyzingMore(true);
+    try {
+      console.log('🧠 Analyzing more articles...');
+      
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/news/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 20 })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ Analyzed ${data.analyzed} more articles`);
+        await fetchData(); // Refresh to show newly analyzed articles
+      } else {
+        console.error('Failed to analyze more articles');
+      }
+    } catch (error) {
+      console.error('Error analyzing more articles:', error);
     } finally {
-      setLoading(false);
+      setAnalyzingMore(false);
     }
   };
 
   const runFullCycle = async () => {
     try {
-      const response = await fetch('/api/eden/automate/full-cycle', {
+      console.log('🤖 Starting full automation cycle...');
+      setShowProgressModal(true);
+      
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/automate/full-cycle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        headers: { 'Content-Type': 'application/json' }
       });
-
+      
       if (response.ok) {
         const data = await response.json();
         console.log('✅ Full cycle job created:', data.jobId);
-        
-        // Show success notification
-        alert(`Full automation cycle job created! Job ID: ${data.jobId}\nCheck the Jobs tab to monitor progress.`);
-        
-        // Refresh jobs list
-        fetchJobs();
+        setShowProgressModal(false);
+        await fetchData();
       } else {
-        const errorData = await response.json();
-        console.error('❌ Full cycle job creation failed:', errorData.error);
-        alert(`Failed to create full cycle job: ${errorData.error}`);
+        console.error('Failed to start automation cycle');
+        setShowProgressModal(false);
       }
     } catch (error) {
-      console.error('❌ Full cycle job creation error:', error);
-      alert(`Error creating full cycle job: ${error.message}`);
+      console.error('Error running full cycle:', error);
+      setShowProgressModal(false);
     }
   };
 
   const cancelJob = async (jobId) => {
     try {
-      const response = await fetch(`/api/eden/jobs/${jobId}/cancel`, {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/jobs/${jobId}/cancel`, {
         method: 'POST'
       });
 
@@ -243,7 +363,8 @@ const ProjectEden = () => {
 
   const retryJob = async (jobId) => {
     try {
-      const response = await fetch(`/api/eden/jobs/${jobId}/retry`, {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/jobs/${jobId}/retry`, {
         method: 'POST'
       });
 
@@ -263,7 +384,8 @@ const ProjectEden = () => {
 
   const resetAutomation = async () => {
     try {
-      const response = await fetch('/api/eden/automate/reset', {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/automate/reset`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -290,7 +412,7 @@ const ProjectEden = () => {
     }
     
     // Refresh all dashboard data
-    await fetchDashboardData();
+    await fetchData();
     
     // Close progress modal after a short delay
     setTimeout(() => {
@@ -298,20 +420,25 @@ const ProjectEden = () => {
     }, 2000);
   };
 
-  const updateContentStatus = async (contentId, contentType, status) => {
+  const updateContentStatus = async (contentType, contentId, newStatus) => {
     try {
-      const response = await fetch(`/api/eden/content/${contentType}/${contentId}/status`, {
+      console.log(`📝 Updating ${contentType} ${contentId} to ${newStatus}`);
+      
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ status: newStatus })
       });
       
       if (response.ok) {
-        // Refresh content list
-        await fetchDashboardData();
+        console.log(`✅ Status updated successfully`);
+        await fetchData(); // Refresh data
+      } else {
+        console.error('Failed to update status');
       }
     } catch (error) {
-      console.error('Error updating content status:', error);
+      console.error('Error updating status:', error);
     }
   };
 
@@ -323,52 +450,6 @@ const ProjectEden = () => {
   const closeDetailModal = () => {
     setShowDetailModal(false);
     setSelectedContent(null);
-  };
-
-  const approveContent = async (contentId) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`/api/eden/content/article/${contentId}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'approved' })
-      });
-      
-      if (response.ok) {
-        console.log(`✅ Content ${contentId} approved`);
-        // Refresh content list
-        await fetchDashboardData();
-      } else {
-        console.error('Failed to approve content');
-      }
-    } catch (error) {
-      console.error('Error approving content:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const rejectContent = async (contentId) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`/api/eden/content/article/${contentId}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'rejected' })
-      });
-      
-      if (response.ok) {
-        console.log(`❌ Content ${contentId} rejected`);
-        // Refresh content list
-        await fetchDashboardData();
-      } else {
-        console.error('Failed to reject content');
-      }
-    } catch (error) {
-      console.error('Error rejecting content:', error);
-    } finally {
-      setLoading(false);
-    }
   };
 
   const getStatusBadge = (status) => {
@@ -394,44 +475,72 @@ const ProjectEden = () => {
     setFavoriteStories(newFavorites);
   };
 
-//   const generateContentFromStory = async (story) => {
-//     try {
-//       setLoading(true);
-//       console.log(`🎨 Generating content for story: ${story.title}`);
-//       
-//       const response = await fetch('/api/eden/content/generate', {
-//         method: 'POST',
-//         headers: { 'Content-Type': 'application/json' },
-//         body: JSON.stringify({ 
-//           limit: 1,
-//           specificStoryId: story.article_id 
-//         })
-//       });
-//       
-//       if (response.ok) {
-//         const data = await response.json();
-//         console.log(`✅ Content generated successfully`);
-//         await fetchDashboardData(); // Refresh to show new content
-//       } else {
-//         console.error('Failed to generate content');
-//       }
-//     } catch (error) {
-//       console.error('Error generating content:', error);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
+  // Toggle favorite/bookmark status
+  const toggleFavorite = async (articleId) => {
+    if (!currentUser?.uid) {
+      console.warn('User must be logged in to bookmark articles');
+      return;
+    }
+
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+    const newFavorites = new Set(favoriteStories);
+    
+    try {
+      if (favoriteStories.has(articleId)) {
+        // Remove bookmark
+        const response = await fetch(`${baseUrl}/api/eden/bookmarks?userId=${currentUser.uid}&articleId=${articleId}`, {
+          method: 'DELETE'
+        });
+
+        if (response.ok) {
+          newFavorites.delete(articleId);
+          console.log(`Removed bookmark for article ${articleId}`);
+        } else {
+          throw new Error('Failed to remove bookmark');
+        }
+      } else {
+        // Add bookmark
+        const response = await fetch(`${baseUrl}/api/eden/bookmarks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.uid,
+            userEmail: currentUser.email,
+            articleId
+          })
+        });
+
+        if (response.ok) {
+          newFavorites.add(articleId);
+          console.log(`Added bookmark for article ${articleId}`);
+        } else {
+          throw new Error('Failed to add bookmark');
+        }
+      }
+      
+      setFavoriteStories(newFavorites);
+    } catch (error) {
+      console.error('Error toggling bookmark:', error);
+      // Revert on error
+      setFavoriteStories(favoriteStories);
+    }
+  };
 
   const getFilteredAndSortedStories = () => {
     let filtered = allArticles;
 
     // Apply search filter
     if (topStoriesSearch) {
-      filtered = filtered.filter(story => 
-        story.title.toLowerCase().includes(topStoriesSearch.toLowerCase()) ||
-        story.source_name.toLowerCase().includes(topStoriesSearch.toLowerCase()) ||
-        (story.keywords_ai && story.keywords_ai.toLowerCase().includes(topStoriesSearch.toLowerCase()))
-      );
+      filtered = filtered.filter(story => {
+        if (!story) return false;
+        
+        const searchLower = topStoriesSearch.toLowerCase();
+        const titleMatch = story.title && story.title.toLowerCase().includes(searchLower);
+        const sourceMatch = story.source_name && story.source_name.toLowerCase().includes(searchLower);
+        const keywordsMatch = story.keywords_ai && story.keywords_ai.toLowerCase().includes(searchLower);
+        
+        return titleMatch || sourceMatch || keywordsMatch;
+      });
     }
 
     // Apply favorites filter
@@ -447,9 +556,9 @@ const ProjectEden = () => {
         case 'date':
           return new Date(b.publication_date) - new Date(a.publication_date);
         case 'source':
-          return a.source_name.localeCompare(b.source_name);
+          return (a.source_name || '').localeCompare(b.source_name || '');
         case 'title':
-          return a.title.localeCompare(b.title);
+          return (a.title || '').localeCompare(b.title || '');
         default:
           return b.relevance_score - a.relevance_score;
       }
@@ -460,44 +569,23 @@ const ProjectEden = () => {
 
   const getPaginatedStories = () => {
     const filtered = getFilteredAndSortedStories();
-    const startIndex = (topStoriesPage - 1) * storiesPerPage;
-    const endIndex = startIndex + storiesPerPage;
+    const start = (topStoriesPage - 1) * topStoriesPerPage;
+    const end = start + topStoriesPerPage;
     return {
-      stories: filtered.slice(startIndex, endIndex),
+      stories: filtered.slice(start, end),
       totalStories: filtered.length,
-      totalPages: Math.ceil(filtered.length / storiesPerPage)
+      totalPages: Math.ceil(filtered.length / topStoriesPerPage)
     };
-  };
-
-  const analyzeMoreArticles = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch('/api/eden/news/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await response.json();
-      
-      if (data.success) {
-        console.log(`✅ ${data.analyzed} more articles analyzed successfully`);
-        await fetchDashboardData();
-      } else {
-        console.error('Failed to analyze more articles');
-      }
-    } catch (error) {
-      console.error('Error analyzing more articles:', error);
-    } finally {
-      setLoading(false);
-    }
   };
 
   // Job management functions
   const fetchJobs = async () => {
     try {
       setJobsLoading(true);
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
       const [jobsResponse, statsResponse] = await Promise.all([
-        fetch('/api/eden/jobs/recent?limit=20'),
-        fetch('/api/eden/jobs/queue/stats')
+        fetch(`${baseUrl}/api/eden/jobs/recent?limit=20`),
+        fetch(`${baseUrl}/api/eden/jobs/queue/stats`)
       ]);
       
       if (jobsResponse.ok && statsResponse.ok) {
@@ -520,7 +608,8 @@ const ProjectEden = () => {
       setGenerating(true);
       console.log('Creating content generation job for story:', storyId);
       
-      const response = await fetch('/api/eden/content/generate', {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/content/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit: 1, specificStoryId: storyId })
@@ -548,6 +637,106 @@ const ProjectEden = () => {
     }
   };
 
+  const startJobWorker = async () => {
+    try {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const response = await fetch(`${baseUrl}/api/eden/jobs/worker/start`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        console.log('✅ Job worker started');
+        // Refresh worker status
+        fetchJobs();
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Failed to start job worker:', errorData.error);
+        alert(`Failed to start job worker: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Error starting job worker:', error);
+      alert(`Error starting job worker: ${error.message}`);
+    }
+  };
+
+  const createContentJob = async (specificStoryId = null) => {
+    try {
+      setGeneratingContent(true);
+      console.log('📝 Creating content generation job...');
+      
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const payload = specificStoryId 
+        ? { specificStoryId }
+        : { limit: 5 };
+      
+      const response = await fetch(`${baseUrl}/api/eden/content/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Content generation job created:', data.jobId);
+        
+        // Refresh data and switch to jobs tab
+        await fetchData();
+        handleTabChange('jobs');
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Content generation failed:', errorData.error);
+        alert(`Failed to create content: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Content generation error:', error);
+      alert(`Error creating content: ${error.message}`);
+    } finally {
+      setGeneratingContent(false);
+    }
+  };
+
+  // Loading skeleton component
+  const LoadingCard = ({ lines = 3 }) => (
+    <Card className="animate-pulse">
+      <CardHeader>
+        <div className="h-6 bg-gray-200 rounded w-1/3 mb-2"></div>
+        <div className="h-4 bg-gray-200 rounded w-2/3"></div>
+      </CardHeader>
+      <CardContent>
+        {[...Array(lines)].map((_, i) => (
+          <div key={i} className="h-4 bg-gray-200 rounded mb-2" style={{ width: `${80 + Math.random() * 20}%` }}></div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+
+  // Professional loading state
+  const LoadingState = ({ message = "Loading content...", count = 3 }) => (
+    <div className="space-y-4">
+      <div className="flex items-center justify-center py-8">
+        <div className="flex items-center gap-3">
+          <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+          <span className="text-gray-600 font-medium">{message}</span>
+        </div>
+      </div>
+      {[...Array(count)].map((_, i) => (
+        <LoadingCard key={i} lines={3 + (i % 2)} />
+      ))}
+    </div>
+  );
+
+  // Simple LiveLogs button component
+  const LiveLogs = () => (
+    <Button 
+      onClick={() => setShowLogViewer(true)} 
+      variant="outline" 
+      disabled={showProgressModal}
+    >
+      <Terminal className="w-4 h-4 mr-2" />
+      Live Logs
+    </Button>
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <div className="max-w-7xl mx-auto">
@@ -563,30 +752,23 @@ const ProjectEden = () => {
               <h1 className="text-4xl font-bold text-gray-900 mb-2">Project Eden</h1>
               <p className="text-lg text-gray-600">AI-Powered Content Automation for Eden.co.uk</p>
             </div>
-            <div className="flex gap-3">
-              <Button 
-                onClick={() => window.location.href = '/user-guide.html'} 
-                variant="outline" 
-                disabled={showProgressModal}
-              >
-                <HelpCircle className="w-4 h-4 mr-2" />
-                User Guide
-              </Button>
-              <Button 
-                onClick={() => setShowLogViewer(true)} 
-                variant="outline" 
-                disabled={showProgressModal}
-              >
-                <Terminal className="w-4 h-4 mr-2" />
-                Live Logs
-              </Button>
-              <Button onClick={fetchDashboardData} variant="outline" disabled={loading || showProgressModal}>
+            <div className="flex items-center gap-2">
+              <Button onClick={fetchData} variant="outline" disabled={loading || showProgressModal}>
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
               <Button onClick={runFullCycle} disabled={loading || showProgressModal}>
-                <Play className="w-4 h-4 mr-2" />
+                <Zap className="w-4 h-4 mr-2" />
                 Run Full Cycle
+              </Button>
+              <LiveLogs />
+              <Button 
+                variant="ghost" 
+                onClick={logout}
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout ({currentUser?.email})
               </Button>
             </div>
           </div>
@@ -654,11 +836,11 @@ const ProjectEden = () => {
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
           <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="content-review">Review ({contentForReview.length})</TabsTrigger>
-            <TabsTrigger value="approved-content">Approved ({approvedContent.length})</TabsTrigger>
-            <TabsTrigger value="top-stories">Top Stories</TabsTrigger>
-            <TabsTrigger value="all-articles">All Articles</TabsTrigger>
+            <TabsTrigger value="review">Review ({contentForReview.length})</TabsTrigger>
+            <TabsTrigger value="approved">Approved ({approvedContent.length})</TabsTrigger>
+            <TabsTrigger value="stories">Stories ({allArticles.length})</TabsTrigger>
             <TabsTrigger value="jobs">Jobs</TabsTrigger>
+            <TabsTrigger value="prompts">Prompts</TabsTrigger>
           </TabsList>
 
           {/* Automation Running Message */}
@@ -676,8 +858,178 @@ const ProjectEden = () => {
             </div>
           )}
 
+          {/* Dashboard Tab */}
+          <TabsContent value="dashboard" className="space-y-6">
+            {loading ? (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-2">
+                        <div className="h-8 bg-gray-200 rounded w-48 animate-pulse" />
+                        <div className="h-4 bg-gray-200 rounded w-96 animate-pulse" />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <LoadingState message="Loading dashboard statistics..." count={4} />
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>System Overview</CardTitle>
+                    <CardDescription>
+                      Project Eden automation status and recent activity
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* System Status */}
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-semibold text-gray-900">System Status</h3>
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
+                            <div className="flex items-center">
+                              <Check className="w-5 h-5 text-green-600 mr-2" />
+                              <span className="font-medium text-green-800">News Aggregation</span>
+                            </div>
+                            <Badge variant="success">Active</Badge>
+                          </div>
+                          <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
+                            <div className="flex items-center">
+                              <Check className="w-5 h-5 text-green-600 mr-2" />
+                              <span className="font-medium text-green-800">AI Analysis</span>
+                            </div>
+                            <Badge variant="success">Active</Badge>
+                          </div>
+                          <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
+                            <div className="flex items-center">
+                              <Check className="w-5 h-5 text-green-600 mr-2" />
+                              <span className="font-medium text-green-800">Content Generation</span>
+                            </div>
+                            <Badge variant="success">Active</Badge>
+                          </div>
+                          <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-200">
+                            <div className="flex items-center">
+                              <Loader2 className="w-5 h-5 text-blue-600 mr-2" />
+                              <span className="font-medium text-blue-800">Job Worker</span>
+                            </div>
+                            <Badge variant={workerStatus.isRunning ? 'success' : 'secondary'}>
+                              {workerStatus.isRunning ? 'Running' : 'Stopped'}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Quick Actions */}
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-semibold text-gray-900">Quick Actions</h3>
+                        <div className="space-y-3">
+                          <Button onClick={runFullCycle} className="w-full justify-start" disabled={loading || showProgressModal}>
+                            <Zap className="w-4 h-4 mr-2" />
+                            Run Full Automation Cycle
+                          </Button>
+                          <Button 
+                            onClick={() => handleTabChange('stories')} 
+                            variant="outline" 
+                            className="w-full justify-start"
+                          >
+                            <TrendingUp className="w-4 h-4 mr-2" />
+                            View Stories ({allArticles.length})
+                          </Button>
+                          <Button 
+                            onClick={() => handleTabChange('review')} 
+                            variant="outline" 
+                            className="w-full justify-start"
+                          >
+                            <Eye className="w-4 h-4 mr-2" />
+                            Review Content ({contentForReview.length})
+                          </Button>
+                          <Button 
+                            onClick={() => handleTabChange('jobs')} 
+                            variant="outline" 
+                            className="w-full justify-start"
+                          >
+                            <Clock className="w-4 h-4 mr-2" />
+                            Monitor Jobs ({jobStats.summary.total_jobs || 0})
+                          </Button>
+                          <Button 
+                            onClick={() => handleTabChange('prompts')} 
+                            variant="outline" 
+                            className="w-full justify-start"
+                          >
+                            <Edit className="w-4 h-4 mr-2" />
+                            Manage Prompts
+                          </Button>
+                          {!workerStatus.isRunning && (
+                            <Button 
+                              onClick={startJobWorker} 
+                              variant="outline" 
+                              className="w-full justify-start text-orange-600 border-orange-300 hover:bg-orange-50"
+                            >
+                              <Play className="w-4 h-4 mr-2" />
+                              Start Job Worker
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Recent Activity */}
+                    <div className="mt-8">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
+                      <div className="space-y-3">
+                        {stats.articlesAggregated > 0 && (
+                          <div className="flex items-center p-3 bg-blue-50 rounded-lg border border-blue-200">
+                            <FileText className="w-5 h-5 text-blue-600 mr-3" />
+                            <span className="text-blue-800">
+                              {stats.articlesAggregated} articles aggregated from {stats.activeSources} news sources
+                            </span>
+                          </div>
+                        )}
+                        {stats.articlesAnalyzed > 0 && (
+                          <div className="flex items-center p-3 bg-purple-50 rounded-lg border border-purple-200">
+                            <TrendingUp className="w-5 h-5 text-purple-600 mr-3" />
+                            <span className="text-purple-800">
+                              {stats.articlesAnalyzed} articles analyzed for relevance
+                            </span>
+                          </div>
+                        )}
+                        {stats.contentGenerated > 0 && (
+                          <div className="flex items-center p-3 bg-green-50 rounded-lg border border-green-200">
+                            <BookOpen className="w-5 h-5 text-green-600 mr-3" />
+                            <span className="text-green-800">
+                              {stats.contentGenerated} content pieces generated
+                            </span>
+                          </div>
+                        )}
+                        {stats.pendingReview > 0 && (
+                          <div className="flex items-center p-3 bg-orange-50 rounded-lg border border-orange-200">
+                            <Eye className="w-5 h-5 text-orange-600 mr-3" />
+                            <span className="text-orange-800">
+                              {stats.pendingReview} content pieces awaiting review
+                            </span>
+                          </div>
+                        )}
+                        {(stats.articlesAggregated === 0 && stats.articlesAnalyzed === 0 && stats.contentGenerated === 0) && (
+                          <div className="text-center py-6 text-gray-500">
+                            <div className="text-sm">No recent activity</div>
+                            <div className="text-xs mt-1">Run the full cycle to start processing content</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </TabsContent>
+
           {/* Content Review Tab */}
-          <TabsContent value="content-review" className="space-y-6">
+          <TabsContent value="review" className="space-y-6">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -708,7 +1060,9 @@ const ProjectEden = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                {contentForReview.length === 0 ? (
+                {loading && contentForReview.length === 0 ? (
+                  <LoadingState message="Loading content for review..." count={3} />
+                ) : contentForReview.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>No content pending review</p>
@@ -895,7 +1249,7 @@ const ProjectEden = () => {
                             <Button 
                               size="sm" 
                               variant="outline"
-                              onClick={() => approveContent(content.gen_article_id)}
+                              onClick={() => approveContent(content.gen_article_id, content.content_type)}
                               disabled={loading}
                             >
                               <Check className="w-4 h-4 mr-2" />
@@ -904,7 +1258,7 @@ const ProjectEden = () => {
                             <Button 
                               size="sm" 
                               variant="destructive"
-                              onClick={() => rejectContent(content.gen_article_id)}
+                              onClick={() => rejectContent(content.gen_article_id, content.content_type)}
                               disabled={loading}
                             >
                               <X className="w-4 h-4 mr-2" />
@@ -921,7 +1275,7 @@ const ProjectEden = () => {
           </TabsContent>
 
           {/* Approved Content Tab */}
-          <TabsContent value="approved-content" className="space-y-6">
+          <TabsContent value="approved" className="space-y-6">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -952,7 +1306,9 @@ const ProjectEden = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                {approvedContent.length === 0 ? (
+                {loading && approvedContent.length === 0 ? (
+                  <LoadingState message="Loading approved content..." count={3} />
+                ) : approvedContent.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <Check className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>No approved content</p>
@@ -1127,7 +1483,7 @@ const ProjectEden = () => {
                             <Button 
                               size="sm" 
                               variant="default"
-                              onClick={() => updateContentStatus(content.gen_article_id, 'article', 'published')}
+                              onClick={() => updateContentStatus('article', content.gen_article_id, 'published')}
                             >
                               <ExternalLink className="w-4 h-4 mr-2" />
                               Publish
@@ -1135,7 +1491,7 @@ const ProjectEden = () => {
                             <Button 
                               size="sm" 
                               variant="outline"
-                              onClick={() => updateContentStatus(content.gen_article_id, 'article', 'review_pending')}
+                              onClick={() => updateContentStatus('article', content.gen_article_id, 'review_pending')}
                             >
                               <Edit className="w-4 h-4 mr-2" />
                               Return to Review
@@ -1151,18 +1507,18 @@ const ProjectEden = () => {
           </TabsContent>
 
           {/* Top Stories Tab */}
-          <TabsContent value="top-stories" className="space-y-6">
+          <TabsContent value="stories" className="space-y-6">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle>Top Christian News Stories</CardTitle>
+                    <CardTitle>All Christian News Stories</CardTitle>
                     <CardDescription>
-                      Highest relevance stories for Eden's content strategy
+                      All analyzed stories for Eden's content strategy
                     </CardDescription>
                   </div>
                   <Badge variant="outline" className="text-sm">
-                    {topStories.length} of {allArticles.length} stories
+                    {allArticles.length} analyzed stories
                   </Badge>
                 </div>
                 
@@ -1170,31 +1526,33 @@ const ProjectEden = () => {
                 <div className="mt-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
                   <h3 className="font-semibold text-purple-900 mb-2">🏆 What you're viewing:</h3>
                   <p className="text-sm text-purple-800 mb-3">
-                    The top 10 most relevant Christian news stories from {stats.articlesAggregated} articles discovered across {stats.activeSources} news sources. 
-                    Stories are ranked by AI relevance scoring (60%+ relevance threshold) based on Christian themes, values, and Eden's audience interests.
+                    All {allArticles.length} analyzed Christian news stories from {stats.articlesAggregated} articles discovered across {stats.activeSources} news sources. 
+                    Stories are ranked by AI relevance scoring based on Christian themes, values, and Eden's audience interests.
                   </p>
-                  <h4 className="font-semibold text-purple-900 mb-1">🎯 Why only these stories?</h4>
+                  <h4 className="font-semibold text-purple-900 mb-1">🎯 Story breakdown:</h4>
                   <ul className="text-sm text-purple-800 list-disc list-inside space-y-1 mb-3">
-                    <li>Only {((topStories.length / stats.articlesAggregated) * 100).toFixed(1)}% of all articles meet our relevance criteria</li>
+                    <li>{allArticles.filter(a => a.relevance_score >= 0.6).length} high relevance stories (60%+ score)</li>
+                    <li>{allArticles.filter(a => a.relevance_score >= 0.3 && a.relevance_score < 0.6).length} moderate relevance stories (30-60% score)</li>
+                    <li>{allArticles.filter(a => a.relevance_score < 0.3).length} lower relevance stories (&lt;30% score)</li>
                     <li>AI filters for Christian themes, values, and audience alignment</li>
-                    <li>Quality over quantity ensures meaningful content generation</li>
-                    <li>Top stories have the highest potential for engagement</li>
                   </ul>
                   <h4 className="font-semibold text-purple-900 mb-1">📈 Next steps:</h4>
                   <ul className="text-sm text-purple-800 list-disc list-inside space-y-1">
-                    <li>Generate AI content from these high-quality stories</li>
+                    <li>Generate AI content from high-scoring stories</li>
                     <li>Review source articles for additional context</li>
                     <li>Use "Generate Content" to create blog posts and social media</li>
-                    <li>Check "All Articles" tab to see complete analysis results</li>
+                    <li>Star your favorite stories for quick access</li>
                   </ul>
                 </div>
               </CardHeader>
               <CardContent>
-                {topStories.length === 0 ? (
+                {loading && allArticles.length === 0 ? (
+                  <LoadingState message="Loading stories..." count={5} />
+                ) : allArticles.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <TrendingUp className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>No analyzed stories available</p>
-                    <p className="text-sm">Run news aggregation and analysis to see top stories</p>
+                    <p className="text-sm">Run news aggregation and analysis to see stories</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -1247,7 +1605,7 @@ const ProjectEden = () => {
                         <>
                           <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
                             <span>
-                              Showing {((topStoriesPage - 1) * storiesPerPage) + 1}-{Math.min(topStoriesPage * storiesPerPage, totalStories)} of {totalStories} stories
+                              Showing {((topStoriesPage - 1) * topStoriesPerPage) + 1}-{Math.min(topStoriesPage * topStoriesPerPage, totalStories)} of {totalStories} stories
                               {showFavoritesOnly && ` (${favoriteStories.size} favorites)`}
                             </span>
                             <span>{allArticles.length} total analyzed • {stats.articlesAggregated} discovered</span>
@@ -1259,7 +1617,7 @@ const ProjectEden = () => {
                                 <div className="flex items-center gap-2 mb-2">
                                   <CardTitle className="text-lg flex-1">{story.title}</CardTitle>
                                   <Badge variant="outline" className="text-xs">
-                                    #{((topStoriesPage - 1) * storiesPerPage) + index + 1}
+                                    #{((topStoriesPage - 1) * topStoriesPerPage) + index + 1}
                                   </Badge>
                                   <Badge variant="secondary" className="text-xs">
                                     {(story.relevance_score * 100).toFixed(0)}% relevance
@@ -1267,7 +1625,7 @@ const ProjectEden = () => {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => toggleFavoriteStory(story.article_id)}
+                                    onClick={() => toggleFavorite(story.article_id)}
                                     className="p-1 h-8 w-8"
                                   >
                                     <Star className={`w-4 h-4 ${favoriteStories.has(story.article_id) ? 'fill-current text-yellow-500' : 'text-gray-400'}`} />
@@ -1299,7 +1657,7 @@ const ProjectEden = () => {
                                   <Button 
                                     size="sm" 
                                     variant="default"
-                                    onClick={() => generateContentFromStory(story)}
+                                    onClick={() => generateContentFromStory(story.article_id)}
                                     disabled={loading}
                                   >
                                     <FileText className="w-4 h-4 mr-2" />
@@ -1426,7 +1784,9 @@ const ProjectEden = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                {allArticles.length === 0 ? (
+                {loading && allArticles.length === 0 ? (
+                  <LoadingState message="Loading all articles..." count={5} />
+                ) : allArticles.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>No articles processed</p>
@@ -1483,7 +1843,7 @@ const ProjectEden = () => {
                         <>
                           <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
                             <span>
-                              Showing {((topStoriesPage - 1) * storiesPerPage) + 1}-{Math.min(topStoriesPage * storiesPerPage, totalStories)} of {totalStories} articles
+                              Showing {((topStoriesPage - 1) * topStoriesPerPage) + 1}-{Math.min(topStoriesPage * topStoriesPerPage, totalStories)} of {totalStories} articles
                               {showFavoritesOnly && ` (${favoriteStories.size} starred)`}
                             </span>
                             <span>{allArticles.length} total analyzed • {stats.articlesAggregated} discovered</span>
@@ -1495,7 +1855,7 @@ const ProjectEden = () => {
                                 <div className="flex items-center gap-2 mb-2">
                                   <CardTitle className="text-lg flex-1">{article.title}</CardTitle>
                                   <Badge variant="outline" className="text-xs">
-                                    #{((topStoriesPage - 1) * storiesPerPage) + index + 1}
+                                    #{((topStoriesPage - 1) * topStoriesPerPage) + index + 1}
                                   </Badge>
                                   <Badge 
                                     variant={article.relevance_score >= 0.6 ? "default" : article.relevance_score >= 0.3 ? "secondary" : "outline"} 
@@ -1506,7 +1866,7 @@ const ProjectEden = () => {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => toggleFavoriteStory(article.article_id)}
+                                    onClick={() => toggleFavorite(article.article_id)}
                                     className="p-1 h-8 w-8"
                                   >
                                     <Star className={`w-4 h-4 ${favoriteStories.has(article.article_id) ? 'fill-current text-yellow-500' : 'text-gray-400'}`} />
@@ -1538,7 +1898,7 @@ const ProjectEden = () => {
                                   <Button 
                                     size="sm" 
                                     variant="default"
-                                    onClick={() => generateContentFromStory(article)}
+                                    onClick={() => generateContentFromStory(article.article_id)}
                                     disabled={loading}
                                   >
                                     <FileText className="w-4 h-4 mr-2" />
@@ -1616,135 +1976,157 @@ const ProjectEden = () => {
                 </div>
                 
                 {/* Explanatory section */}
-                <div className="mt-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                  <h3 className="font-semibold text-orange-900 mb-2">📡 What you're viewing:</h3>
-                  <p className="text-sm text-orange-800 mb-3">
-                    {sources.length} configured Christian news sources that Project Eden monitors for relevant content. 
-                    Sources include major Christian publications, denominational news, and faith-focused media outlets.
-                  </p>
-                  <h4 className="font-semibold text-orange-900 mb-1">📊 Source performance:</h4>
-                  <ul className="text-sm text-orange-800 list-disc list-inside space-y-1 mb-3">
-                    <li>{stats.activeSources} sources are currently active and being monitored</li>
-                    <li>{sources.filter(s => s.articles_last_24h > 0).length} sources provided articles in the last 24 hours</li>
-                    <li>Total articles discovered: {stats.articlesAggregated} from all sources</li>
-                    <li>RSS feeds are checked regularly for new content</li>
-                  </ul>
-                  <h4 className="font-semibold text-orange-900 mb-1">🔧 Next steps:</h4>
-                  <ul className="text-sm text-orange-800 list-disc list-inside space-y-1">
-                    <li>Monitor source performance and article quality</li>
-                    <li>Add new Christian news sources as needed</li>
-                    <li>Update RSS feed URLs if sources change</li>
-                    <li>Deactivate sources that consistently provide low-relevance content</li>
-                  </ul>
-                </div>
+                {!loading && (
+                  <div className="mt-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
+                    <h3 className="font-semibold text-orange-900 mb-2">📡 What you're viewing:</h3>
+                    <p className="text-sm text-orange-800 mb-3">
+                      {sources.length} configured Christian news sources that Project Eden monitors for relevant content. 
+                      Sources include major Christian publications, denominational news, and faith-focused media outlets.
+                    </p>
+                    <h4 className="font-semibold text-orange-900 mb-1">📊 Source performance:</h4>
+                    <ul className="text-sm text-orange-800 list-disc list-inside space-y-1 mb-3">
+                      <li>{stats.activeSources} sources are currently active and being monitored</li>
+                      <li>{sources.filter(s => s.articles_last_24h > 0).length} sources provided articles in the last 24 hours</li>
+                      <li>Total articles discovered: {stats.articlesAggregated} from all sources</li>
+                      <li>RSS feeds are checked regularly for new content</li>
+                    </ul>
+                    <h4 className="font-semibold text-orange-900 mb-1">🔧 Next steps:</h4>
+                    <ul className="text-sm text-orange-800 list-disc list-inside space-y-1">
+                      <li>Monitor source performance and article quality</li>
+                      <li>Add new Christian news sources as needed</li>
+                      <li>Update RSS feed URLs if sources change</li>
+                      <li>Deactivate sources that consistently provide low-relevance content</li>
+                    </ul>
+                  </div>
+                )}
               </CardHeader>
               <CardContent>
-                <div className="mb-4">
-                  <div className="flex items-center justify-between text-sm text-gray-600">
-                    <span>Showing all {sources.length} configured sources</span>
-                    <span>{sources.reduce((sum, s) => sum + s.articles_last_24h, 0)} articles in last 24h</span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {sources.map((source, index) => (
-                    <Card key={`source-${source.source_id || index}`} className="border">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CardTitle className="text-base">{source.name}</CardTitle>
-                            <Badge variant="outline" className="text-xs">#{index + 1}</Badge>
-                          </div>
-                          <Badge variant={source.is_active ? 'success' : 'secondary'}>
-                            {source.is_active ? 'Active' : 'Inactive'}
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-0">
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Articles (24h):</span>
-                            <span className="font-medium">{source.articles_last_24h}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Last scraped:</span>
-                            <span className="font-medium">
-                              {source.last_scraped_at ? 
-                                new Date(source.last_scraped_at).toLocaleTimeString() : 
-                                'Never'
-                              }
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">RSS Feed:</span>
-                            <span className="font-medium">
-                              {source.rss_feed_url ? '✓' : '✗'}
-                            </span>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                {loading && sources.length === 0 ? (
+                  <LoadingState message="Loading news sources..." count={4} />
+                ) : (
+                  <>
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between text-sm text-gray-600">
+                        <span>Showing all {sources.length} configured sources</span>
+                        <span>{sources.reduce((sum, s) => sum + s.articles_last_24h, 0)} articles in last 24h</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {sources.map((source, index) => (
+                        <Card key={`source-${source.source_id || index}`} className="border">
+                          <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <CardTitle className="text-base">{source.name}</CardTitle>
+                                <Badge variant="outline" className="text-xs">#{index + 1}</Badge>
+                              </div>
+                              <Badge variant={source.is_active ? 'success' : 'secondary'}>
+                                {source.is_active ? 'Active' : 'Inactive'}
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="pt-0">
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Articles (24h):</span>
+                                <span className="font-medium">{source.articles_last_24h}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Last scraped:</span>
+                                <span className="font-medium">
+                                  {source.last_scraped_at ? 
+                                    new Date(source.last_scraped_at).toLocaleTimeString() : 
+                                    'Never'
+                                  }
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">RSS Feed:</span>
+                                <span className="font-medium">
+                                  {source.rss_feed_url ? '✓' : '✗'}
+                                </span>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
 
           {/* Analytics Tab */}
           <TabsContent value="analytics" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>System Performance</CardTitle>
-                <CardDescription>
-                  Project Eden automation metrics and insights
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-blue-600 mb-2">{stats.totalArticlesProcessed}</div>
-                    <div className="text-sm text-gray-600">Total Articles Processed</div>
+            {loading ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>System Performance</CardTitle>
+                  <CardDescription>
+                    Project Eden automation metrics and insights
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <LoadingState message="Loading analytics..." count={6} />
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>System Performance</CardTitle>
+                  <CardDescription>
+                    Project Eden automation metrics and insights
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-blue-600 mb-2">{stats.totalArticlesProcessed}</div>
+                      <div className="text-sm text-gray-600">Total Articles Processed</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-green-600 mb-2">{stats.activeSources}</div>
+                      <div className="text-sm text-gray-600">Active News Sources</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-purple-600 mb-2">{stats.contentGenerated}</div>
+                      <div className="text-sm text-gray-600">Content Pieces Generated</div>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-green-600 mb-2">{stats.activeSources}</div>
-                    <div className="text-sm text-gray-600">Active News Sources</div>
+                  
+                  <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="text-center p-4 bg-blue-50 rounded-lg">
+                      <div className="text-2xl font-bold text-blue-600 mb-1">{stats.articlesAggregated}</div>
+                      <div className="text-sm text-gray-600">Articles Aggregated (24h)</div>
+                    </div>
+                    <div className="text-center p-4 bg-orange-50 rounded-lg">
+                      <div className="text-2xl font-bold text-orange-600 mb-1">{stats.articlesAnalyzed}</div>
+                      <div className="text-sm text-gray-600">Articles Analyzed</div>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-purple-600 mb-2">{stats.contentGenerated}</div>
-                    <div className="text-sm text-gray-600">Content Pieces Generated</div>
+                  
+                  <div className="mt-8 p-4 bg-green-50 rounded-lg border border-green-200">
+                    <div className="flex items-center">
+                      <Check className="w-5 h-5 text-green-600 mr-2" />
+                      <span className="font-medium text-green-800">Project Eden Status: Fully Operational</span>
+                    </div>
+                    <p className="text-sm text-green-700 mt-2">
+                      All systems are running smoothly. News aggregation, AI analysis, and content generation are working as expected.
+                    </p>
+                    <div className="mt-4 text-sm text-green-700">
+                      <p><strong>Data Breakdown:</strong></p>
+                      <ul className="list-disc list-inside mt-2 space-y-1">
+                        <li>{stats.articlesAggregated} articles found from {stats.activeSources} active news sources</li>
+                        <li>{stats.articlesAnalyzed} articles analyzed for relevance</li>
+                        <li>{stats.contentGenerated} content pieces generated</li>
+                        <li>{stats.pendingReview} items awaiting review</li>
+                      </ul>
+                    </div>
                   </div>
-                </div>
-                
-                <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="text-center p-4 bg-blue-50 rounded-lg">
-                    <div className="text-2xl font-bold text-blue-600 mb-1">{stats.articlesAggregated}</div>
-                    <div className="text-sm text-gray-600">Articles Aggregated (24h)</div>
-                  </div>
-                  <div className="text-center p-4 bg-orange-50 rounded-lg">
-                    <div className="text-2xl font-bold text-orange-600 mb-1">{stats.articlesAnalyzed}</div>
-                    <div className="text-sm text-gray-600">Articles Analyzed</div>
-                  </div>
-                </div>
-                
-                <div className="mt-8 p-4 bg-green-50 rounded-lg border border-green-200">
-                  <div className="flex items-center">
-                    <Check className="w-5 h-5 text-green-600 mr-2" />
-                    <span className="font-medium text-green-800">Project Eden Status: Fully Operational</span>
-                  </div>
-                  <p className="text-sm text-green-700 mt-2">
-                    All systems are running smoothly. News aggregation, AI analysis, and content generation are working as expected.
-                  </p>
-                  <div className="mt-4 text-sm text-green-700">
-                    <p><strong>Data Breakdown:</strong></p>
-                    <ul className="list-disc list-inside mt-2 space-y-1">
-                      <li>{stats.articlesAggregated} articles found from {stats.activeSources} active news sources</li>
-                      <li>{stats.articlesAnalyzed} articles analyzed for relevance</li>
-                      <li>{stats.contentGenerated} content pieces generated</li>
-                      <li>{stats.pendingReview} items awaiting review</li>
-                    </ul>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           {/* Prompt Management Tab */}
@@ -2167,7 +2549,7 @@ const ProjectEden = () => {
               {/* Action Buttons */}
               <div className="flex gap-3 pt-6 border-t">
                 <Button 
-                  onClick={() => approveContent(selectedContent.gen_article_id)}
+                  onClick={() => approveContent(selectedContent.gen_article_id, selectedContent.content_type)}
                   className="flex-1"
                 >
                   <Check className="w-4 h-4 mr-2" />
@@ -2175,7 +2557,7 @@ const ProjectEden = () => {
                 </Button>
                 <Button 
                   variant="outline"
-                  onClick={() => rejectContent(selectedContent.gen_article_id)}
+                  onClick={() => rejectContent(selectedContent.gen_article_id, selectedContent.content_type)}
                   className="flex-1"
                 >
                   <X className="w-4 h-4 mr-2" />

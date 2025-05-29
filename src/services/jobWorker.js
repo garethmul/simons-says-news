@@ -69,16 +69,8 @@ class JobWorker {
     console.log(`🔄 Processing job ${job.job_id} (${job.job_type})`);
 
     try {
-      // Handle payload parsing - it might already be an object or a JSON string
-      let payload;
-      if (typeof job.payload === 'string') {
-        payload = JSON.parse(job.payload);
-      } else if (typeof job.payload === 'object') {
-        payload = job.payload;
-      } else {
-        throw new Error('Invalid payload format');
-      }
-      
+      // MySQL JSON columns return objects directly
+      const payload = job.payload || {};
       console.log(`📋 Job ${job.job_id} payload:`, payload);
       
       let results = null;
