@@ -129,11 +129,9 @@ const ProjectEden = () => {
 
   // Fetch all data
   const fetchData = async () => {
-    if (!currentUser) return;
-    
     setLoading(true);
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       
       // Fetch all data in parallel
       const [
@@ -248,7 +246,7 @@ const ProjectEden = () => {
     try {
       console.log(`✅ Approving ${contentType} ${contentId}`);
       
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -270,7 +268,7 @@ const ProjectEden = () => {
     try {
       console.log(`❌ Rejecting ${contentType} ${contentId}`);
       
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -293,7 +291,7 @@ const ProjectEden = () => {
     try {
       console.log('🧠 Analyzing more articles...');
       
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/news/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -319,7 +317,7 @@ const ProjectEden = () => {
       console.log('🤖 Starting full automation cycle...');
       setShowProgressModal(true);
       
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/automate/full-cycle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -342,7 +340,7 @@ const ProjectEden = () => {
 
   const cancelJob = async (jobId) => {
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/jobs/${jobId}/cancel`, {
         method: 'POST'
       });
@@ -363,7 +361,7 @@ const ProjectEden = () => {
 
   const retryJob = async (jobId) => {
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/jobs/${jobId}/retry`, {
         method: 'POST'
       });
@@ -384,7 +382,7 @@ const ProjectEden = () => {
 
   const resetAutomation = async () => {
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/automate/reset`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -424,7 +422,7 @@ const ProjectEden = () => {
     try {
       console.log(`📝 Updating ${contentType} ${contentId} to ${newStatus}`);
       
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -482,7 +480,7 @@ const ProjectEden = () => {
       return;
     }
 
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+    const baseUrl = import.meta.env.VITE_API_URL || '';
     const newFavorites = new Set(favoriteStories);
     
     try {
@@ -582,7 +580,7 @@ const ProjectEden = () => {
   const fetchJobs = async () => {
     try {
       setJobsLoading(true);
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const [jobsResponse, statsResponse] = await Promise.all([
         fetch(`${baseUrl}/api/eden/jobs/recent?limit=20`),
         fetch(`${baseUrl}/api/eden/jobs/queue/stats`)
@@ -608,7 +606,7 @@ const ProjectEden = () => {
       setGenerating(true);
       console.log('Creating content generation job for story:', storyId);
       
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/content/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -639,7 +637,7 @@ const ProjectEden = () => {
 
   const startJobWorker = async () => {
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/jobs/worker/start`, {
         method: 'POST'
       });
@@ -664,7 +662,7 @@ const ProjectEden = () => {
       setGeneratingContent(true);
       console.log('📝 Creating content generation job...');
       
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3607';
+      const baseUrl = import.meta.env.VITE_API_URL || '';
       const payload = specificStoryId 
         ? { specificStoryId }
         : { limit: 5 };
