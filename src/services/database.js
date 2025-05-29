@@ -347,6 +347,122 @@ class DatabaseService {
     return this.insert('ssnews_image_assets', imageData);
   }
 
+  // System Logs methods
+  async insertLog(level, message, source = 'server', metadata = null) {
+    try {
+      return await this.insert('ssnews_system_logs', {
+        level,
+        message,
+        source,
+        metadata: metadata ? JSON.stringify(metadata) : null
+      });
+    } catch (error) {
+      // Don't throw errors for logging failures to avoid infinite loops
+      console.error('❌ Failed to insert log to database:', error.message);
+      return null;
+    }
+  }
+
+  async getLogs(limit = 100, level = null, source = null) {
+    try {
+      let whereClause = '1=1';
+      const whereParams = [];
+
+      if (level) {
+        whereClause += ' AND level = ?';
+        whereParams.push(level);
+      }
+
+      if (source) {
+        whereClause += ' AND source = ?';
+        whereParams.push(source);
+      }
+
+      // Use string interpolation for LIMIT to avoid parameter binding issues
+      const limitValue = parseInt(limit) || 100;
+
+      const [rows] = await this.pool.execute(`
+        SELECT 
+          log_id as id,
+          timestamp,
+          level,
+          message,
+          source,
+          metadata,
+          created_at
+        FROM ssnews_system_logs 
+        WHERE ${whereClause}
+        ORDER BY timestamp DESC 
+        LIMIT ${limitValue}
+      `, whereParams);
+
+      // Parse metadata JSON safely
+      return rows.map(row => {
+        let parsedMetadata = null;
+        if (row.metadata) {
+          try {
+            // Handle case where metadata might already be an object or a string
+            if (typeof row.metadata === 'string') {
+              parsedMetadata = JSON.parse(row.metadata);
+            } else {
+              parsedMetadata = row.metadata;
+            }
+          } catch (error) {
+            console.warn('Failed to parse metadata for log', row.id, ':', error.message);
+            parsedMetadata = null;
+          }
+        }
+        
+        return {
+          ...row,
+          metadata: parsedMetadata
+        };
+      });
+    } catch (error) {
+      console.error('❌ Failed to retrieve logs from database:', error.message);
+      return [];
+    }
+  }
+
+  async clearLogs(olderThanDays = null) {
+    try {
+      let sql = 'DELETE FROM ssnews_system_logs';
+      const whereParams = [];
+
+      if (olderThanDays) {
+        sql += ' WHERE timestamp < DATE_SUB(NOW(), INTERVAL ? DAY)';
+        whereParams.push(olderThanDays);
+      }
+
+      const [result] = await this.pool.execute(sql, whereParams);
+
+      return result.affectedRows;
+    } catch (error) {
+      console.error('❌ Failed to clear logs from database:', error.message);
+      return 0;
+    }
+  }
+
+  async getLogStats() {
+    try {
+      const [rows] = await this.pool.execute(`
+        SELECT 
+          level,
+          COUNT(*) as count,
+          DATE(timestamp) as date
+        FROM ssnews_system_logs 
+        WHERE timestamp > DATE_SUB(NOW(), INTERVAL 7 DAY)
+        GROUP BY level, DATE(timestamp)
+        ORDER BY date DESC, level
+      `);
+
+      return rows;
+    } catch (error) {
+      console.error('❌ Failed to get log stats from database:', error.message);
+      return [];
+    }
+  }
+
   // Evergreen Content methods
   async insertEvergreenIdea(ideaData) {
     return this.insert('ssnews_evergreen_content_ideas', ideaData);

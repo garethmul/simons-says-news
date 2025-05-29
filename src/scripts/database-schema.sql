@@ -1,6 +1,20 @@
 -- Project Eden Database Schema
 -- MySQL Database Schema for AI Content Automation System
 
+-- System Logs Table
+CREATE TABLE IF NOT EXISTS ssnews_system_logs (
+    log_id INT AUTO_INCREMENT PRIMARY KEY,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    level ENUM('info', 'warn', 'error', 'debug') NOT NULL DEFAULT 'info',
+    message TEXT NOT NULL,
+    source VARCHAR(100) DEFAULT 'server',
+    metadata JSON NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_timestamp (timestamp),
+    INDEX idx_level (level),
+    INDEX idx_source (source)
+);
+
 -- News Sources Table
 CREATE TABLE IF NOT EXISTS ssnews_news_sources (
     source_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -92,7 +106,7 @@ CREATE TABLE IF NOT EXISTS ssnews_generated_articles (
     word_count INT NULL,
     tone_of_voice_alignment_score_ai FLOAT NULL,
     suggested_eden_product_links TEXT NULL, -- JSON array
-    status ENUM('draft', 'review_pending', 'approved', 'published') DEFAULT 'draft',
+    status ENUM('draft', 'review_pending', 'approved', 'published', 'rejected') DEFAULT 'draft',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     reviewed_by_human_at TIMESTAMP NULL,
@@ -111,7 +125,7 @@ CREATE TABLE IF NOT EXISTS ssnews_generated_social_posts (
     text_draft TEXT NOT NULL,
     text_final TEXT NULL,
     emotional_hook_present_ai_check BOOLEAN NULL,
-    status ENUM('draft', 'review_pending', 'approved', 'published') DEFAULT 'draft',
+    status ENUM('draft', 'review_pending', 'approved', 'published', 'rejected') DEFAULT 'draft',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (based_on_gen_article_id) REFERENCES ssnews_generated_articles(gen_article_id) ON DELETE CASCADE,

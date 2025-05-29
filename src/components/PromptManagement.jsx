@@ -25,7 +25,11 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  Play
+  Play,
+  Image,
+  Heart,
+  BookOpen,
+  Users
 } from 'lucide-react';
 
 const PromptManagement = () => {
@@ -44,6 +48,14 @@ const PromptManagement = () => {
   const [newSystemMessage, setNewSystemMessage] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [testVariables, setTestVariables] = useState('{"article_content": "Sample news article content here..."}');
+
+  // New template creation states
+  const [showNewTemplateForm, setShowNewTemplateForm] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateCategory, setNewTemplateCategory] = useState('');
+  const [newTemplateDescription, setNewTemplateDescription] = useState('');
+  const [newTemplatePrompt, setNewTemplatePrompt] = useState('');
+  const [newTemplateSystemMessage, setNewTemplateSystemMessage] = useState('');
 
   useEffect(() => {
     fetchTemplates();
@@ -123,6 +135,48 @@ const PromptManagement = () => {
     }
   };
 
+  const createNewTemplate = async () => {
+    if (!newTemplateName.trim() || !newTemplateCategory.trim() || !newTemplatePrompt.trim()) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/eden/prompts/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTemplateName,
+          category: newTemplateCategory.toLowerCase().replace(/\s+/g, '_'),
+          description: newTemplateDescription,
+          promptContent: newTemplatePrompt,
+          systemMessage: newTemplateSystemMessage,
+          createdBy: 'user'
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        // Reset form
+        setNewTemplateName('');
+        setNewTemplateCategory('');
+        setNewTemplateDescription('');
+        setNewTemplatePrompt('');
+        setNewTemplateSystemMessage('');
+        setShowNewTemplateForm(false);
+        
+        // Refresh templates and select the new one
+        await fetchTemplates();
+        const newTemplate = templates.find(t => t.template_id === data.templateId);
+        if (newTemplate) {
+          setSelectedTemplate(newTemplate);
+        }
+      }
+    } catch (error) {
+      console.error('Error creating new template:', error);
+    }
+  };
+
   const setCurrentVersion = async (versionId) => {
     try {
       const response = await fetch(`/api/eden/prompts/templates/${selectedTemplate.template_id}/versions/${versionId}/current`, {
@@ -163,6 +217,11 @@ const PromptManagement = () => {
       case 'social_media': return <MessageSquare className="w-4 h-4" />;
       case 'video_script': return <Video className="w-4 h-4" />;
       case 'analysis': return <TrendingUp className="w-4 h-4" />;
+      case 'image_generation': return <Image className="w-4 h-4" />;
+      case 'prayer': return <Heart className="w-4 h-4" />;
+      case 'devotional': return <BookOpen className="w-4 h-4" />;
+      case 'newsletter': return <MessageSquare className="w-4 h-4" />;
+      case 'sermon': return <Users className="w-4 h-4" />;
       default: return <FileText className="w-4 h-4" />;
     }
   };
@@ -173,6 +232,11 @@ const PromptManagement = () => {
       case 'social_media': return 'bg-green-100 text-green-800';
       case 'video_script': return 'bg-purple-100 text-purple-800';
       case 'analysis': return 'bg-orange-100 text-orange-800';
+      case 'image_generation': return 'bg-pink-100 text-pink-800';
+      case 'prayer': return 'bg-red-100 text-red-800';
+      case 'devotional': return 'bg-yellow-100 text-yellow-800';
+      case 'newsletter': return 'bg-teal-100 text-teal-800';
+      case 'sermon': return 'bg-indigo-100 text-indigo-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -217,6 +281,100 @@ const PromptManagement = () => {
                 <CardDescription>Select a template to manage</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
+                <div className="mb-4">
+                  <Button 
+                    onClick={() => setShowNewTemplateForm(true)}
+                    className="w-full"
+                    variant="outline"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create New Template
+                  </Button>
+                </div>
+
+                {showNewTemplateForm && (
+                  <Card className="mb-4 border-2 border-blue-200">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">New Template</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div>
+                        <Label htmlFor="template-name">Template Name *</Label>
+                        <Input
+                          id="template-name"
+                          value={newTemplateName}
+                          onChange={(e) => setNewTemplateName(e.target.value)}
+                          placeholder="e.g., Prayer Generation"
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="template-category">Category *</Label>
+                        <Input
+                          id="template-category"
+                          value={newTemplateCategory}
+                          onChange={(e) => setNewTemplateCategory(e.target.value)}
+                          placeholder="e.g., Prayer, Image Generation, Devotional"
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="template-description">Description</Label>
+                        <Input
+                          id="template-description"
+                          value={newTemplateDescription}
+                          onChange={(e) => setNewTemplateDescription(e.target.value)}
+                          placeholder="Brief description of this template"
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="template-prompt">Initial Prompt *</Label>
+                        <Textarea
+                          id="template-prompt"
+                          value={newTemplatePrompt}
+                          onChange={(e) => setNewTemplatePrompt(e.target.value)}
+                          rows={4}
+                          placeholder="Enter the initial prompt content..."
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="template-system">System Message</Label>
+                        <Textarea
+                          id="template-system"
+                          value={newTemplateSystemMessage}
+                          onChange={(e) => setNewTemplateSystemMessage(e.target.value)}
+                          rows={2}
+                          placeholder="Optional system message..."
+                          className="mt-1"
+                        />
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <Button onClick={createNewTemplate} size="sm">
+                          <Save className="w-4 h-4 mr-1" />
+                          Create
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            setShowNewTemplateForm(false);
+                            setNewTemplateName('');
+                            setNewTemplateCategory('');
+                            setNewTemplateDescription('');
+                            setNewTemplatePrompt('');
+                            setNewTemplateSystemMessage('');
+                          }}
+                        >
+                          <X className="w-4 h-4 mr-1" />
+                          Cancel
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {templates.map((template) => (
                   <div
                     key={template.template_id}

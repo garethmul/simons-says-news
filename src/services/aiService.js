@@ -60,7 +60,7 @@ class AIService {
       try {
         this.gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         this.geminiModel = this.gemini.getGenerativeModel({ 
-          model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
+          model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
           generationConfig: {
             maxOutputTokens: parseInt(process.env.MAX_OUTPUT_TOKENS) || 32000,
             temperature: 0.7,
@@ -196,7 +196,7 @@ class AIService {
         article_content: `Title: ${article.title}\n\nContent: ${article.full_text || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`
       });
 
-      const response = await this.gemini.generateContent({
+      const response = await this.geminiModel.generateContent({
         contents: [{ 
           role: 'user', 
           parts: [{ text: promptData.prompt }] 
@@ -444,41 +444,45 @@ class AIService {
         article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
       });
 
-      const response = await this.gemini.generateContent({
+      const response = await this.geminiModel.generateContent({
         contents: [{ 
           role: 'user', 
           parts: [{ text: promptData.prompt }] 
         }],
         systemInstruction: promptData.systemMessage,
         generationConfig: {
-          temperature: 0.8,
-          maxOutputTokens: 1000
+          temperature: 0.8
         }
       });
 
       const generationTime = Date.now() - startTime;
       const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
+      const resultText = response.response.text();
 
-      // Log the generation
-      if (generatedArticleId) {
-        await promptManager.logGeneration(
-          generatedArticleId,
-          promptData.templateId,
-          promptData.versionId,
-          'gemini',
-          'gemini-1.5-flash',
-          tokensUsed,
-          generationTime,
-          true
-        );
+      // Log the generation (only if we have a valid article ID)
+      if (generatedArticleId && generatedArticleId !== 999) {
+        try {
+          await promptManager.logGeneration(
+            generatedArticleId,
+            promptData.templateId,
+            promptData.versionId,
+            'gemini',
+            'gemini-1.5-flash',
+            tokensUsed,
+            generationTime,
+            true
+          );
+        } catch (logError) {
+          console.warn('⚠️ Failed to log generation (non-critical):', logError.message);
+        }
       }
 
-      return response.response.text();
+      return resultText;
     } catch (error) {
       console.error('❌ Error generating social media posts:', error);
       
-      // Log the error
-      if (generatedArticleId) {
+      // Log the error (only if we have a valid article ID)
+      if (generatedArticleId && generatedArticleId !== 999) {
         try {
           const promptManager = await this.ensurePromptManager();
           const promptData = await promptManager.getPromptForGeneration('social_media', {});
@@ -494,7 +498,7 @@ class AIService {
             error.message
           );
         } catch (logError) {
-          console.error('❌ Error logging generation failure:', logError);
+          console.warn('⚠️ Failed to log generation error (non-critical):', logError.message);
         }
       }
       

@@ -11,7 +11,9 @@
     "start": "node server.js",
     "server": "nodemon --config nodemon.json server.js",
     "client": "vite --port 5576",
-    "dev": "node start-dev.js",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "nodemon server.js",
+    "dev:frontend": "vite",
     "restart": "node scripts/kill-ports.js && npm run dev",
     "build": "vite build",
     "heroku-postbuild": "npm run build",
@@ -31,10 +33,12 @@
     "debug:heroku": "node scripts/heroku-debug.js",
     "setup:heroku-production": "node scripts/setup-heroku-production.js",
     "reset:eden": "node scripts/reset-project-eden.js",
-    "reset:eden-all": "node scripts/reset-project-eden.js --clear-all",
+    "reset:eden-all": "node scripts/reset-project-eden.js --all",
     "cleanup:duplicates": "node src/scripts/cleanup-duplicates.js",
     "migrate:unique-constraints": "node src/scripts/add-unique-constraints.js",
-    "setup:prompt-management": "node src/scripts/setup-prompt-management.js"
+    "setup:prompts": "node src/scripts/setup-prompt-management.js",
+    "setup:constraints": "node src/scripts/add-unique-constraints.js",
+    "setup:logs": "node scripts/add-logs-table.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -6,7 +6,7 @@ class PromptManager {
   }
 
   // Get all prompt templates
-  async getTemplates() {
+  async getAllTemplates() {
     try {
       // Ensure database is initialized
       if (!this.db.pool) {
@@ -187,6 +187,8 @@ class PromptManager {
   // Get content generation history for a template
   async getGenerationHistory(templateId, limit = 50) {
     try {
+      const limitValue = parseInt(limit) || 50;
+      
       const [rows] = await this.db.pool.execute(`
         SELECT 
           cgl.*,
@@ -196,11 +198,11 @@ class PromptManager {
           ga.status as content_status
         FROM ssnews_content_generation_log cgl
         JOIN ssnews_prompt_versions pv ON cgl.version_id = pv.version_id
-        LEFT JOIN ssnews_generated_articles ga ON cgl.generated_article_id = ga.article_id
+        LEFT JOIN ssnews_generated_articles ga ON cgl.generated_article_id = ga.gen_article_id
         WHERE cgl.template_id = ?
         ORDER BY cgl.created_at DESC
-        LIMIT ?
-      `, [templateId, limit]);
+        LIMIT ${limitValue}
+      `, [templateId]);
       return rows;
     } catch (error) {
       console.error('❌ Error fetching generation history:', error);
@@ -323,6 +325,47 @@ class PromptManager {
       console.error('❌ Error fetching usage stats:', error);
       throw error;
     }
+  }
+
+  // Create new prompt template
+  async createTemplate({ name, category, description, promptContent, systemMessage, createdBy }) {
+    const connection = await this.db.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      // Insert new template
+      const [templateResult] = await connection.execute(`
+        INSERT INTO ssnews_prompt_templates 
+        (name, category, description, is_active)
+        VALUES (?, ?, ?, TRUE)
+      `, [name, category, description]);
+
+      const templateId = templateResult.insertId;
+
+      // Create initial version
+      const [versionResult] = await connection.execute(`
+        INSERT INTO ssnews_prompt_versions 
+        (template_id, version_number, prompt_content, system_message, created_by, is_current, notes)
+        VALUES (?, 1, ?, ?, ?, TRUE, 'Initial version')
+      `, [templateId, promptContent, systemMessage, createdBy]);
+
+      await connection.commit();
+      
+      console.log(`✅ Created new template "${name}" with ID ${templateId}`);
+      return templateId;
+    } catch (error) {
+      await connection.rollback();
+      console.error('❌ Error creating template:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  // Legacy method name for backward compatibility
+  async getTemplates() {
+    return this.getAllTemplates();
   }
 }
 

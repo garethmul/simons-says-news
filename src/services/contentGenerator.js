@@ -64,32 +64,57 @@ class ContentGenerator {
       const edenAngle = await aiService.generateEdenAngle(sourceContent, story.keywords_ai);
       console.log(`💡 Eden angle: ${edenAngle.angle.substring(0, 50)}...`);
 
-      // Generate blog post using the full source content and story details
-      const blogPost = await aiService.generateBlogPost(sourceContent, edenAngle, 'blog', {
-        originalTitle: story.title,
-        originalUrl: story.url,
-        sourceName: story.source_name,
-        publicationDate: story.publication_date
-      });
-      
-      // Store blog post
+      // Create article object for AI service
+      const articleForAI = {
+        title: story.title,
+        full_text: sourceContent,
+        summary_ai: story.summary_ai,
+        source_name: story.source_name,
+        url: story.url
+      };
+
+      // Generate blog post - first create the article record to get an ID for logging
       const blogId = await db.insertGeneratedArticle({
         based_on_scraped_article_id: story.article_id,
-        title: blogPost.title,
-        body_draft: blogPost.body,
+        title: story.title,
+        body_draft: 'Generating...', // Temporary placeholder
         content_type: 'blog',
-        word_count: this.countWords(blogPost.body),
-        suggested_eden_product_links: JSON.stringify(blogPost.suggestedLinks),
-        status: 'review_pending' // Set to review_pending so it shows up in the interface
+        word_count: 0,
+        suggested_eden_product_links: JSON.stringify([]),
+        status: 'review_pending'
       });
+
+      // Now generate the blog post with the proper ID for logging
+      const blogPostContent = await aiService.generateBlogPost(articleForAI, blogId);
+      
+      // Parse the blog post content if it's JSON, otherwise use as-is
+      let blogPost;
+      try {
+        blogPost = JSON.parse(blogPostContent);
+      } catch {
+        // If not JSON, create a simple structure
+        blogPost = {
+          title: story.title,
+          body: blogPostContent,
+          suggestedLinks: []
+        };
+      }
+
+      // Update the article with the actual content
+      await db.update('ssnews_generated_articles', {
+        title: blogPost.title,
+        body_draft: typeof blogPost.body === 'string' ? blogPost.body : JSON.stringify(blogPost),
+        word_count: this.countWords(blogPost.body || blogPostContent),
+        suggested_eden_product_links: JSON.stringify(blogPost.suggestedLinks || [])
+      }, 'gen_article_id = ?', [blogId]);
 
       console.log(`📝 Blog post created (ID: ${blogId})`);
 
       // Generate social media posts
-      const socialPosts = await this.generateSocialPosts(blogPost, blogId);
+      const socialPosts = await this.generateSocialPosts(articleForAI, blogId);
       
       // Generate video scripts
-      const videoScripts = await this.generateVideoScripts(blogPost, blogId);
+      const videoScripts = await this.generateVideoScripts(articleForAI, blogId);
 
       // Generate and associate images
       const images = await this.generateImages(blogPost, blogId);
@@ -111,40 +136,78 @@ class ContentGenerator {
     }
   }
 
-  async generateSocialPosts(blogPost, blogId) {
+  async generateSocialPosts(article, blogId) {
     console.log('📱 Generating social media posts...');
     
-    const platforms = ['instagram', 'facebook', 'linkedin'];
-    const socialPosts = [];
-
-    for (const platform of platforms) {
+    try {
+      // Generate social media posts using the new prompt system
+      const socialContent = await aiService.generateSocialMediaPosts(article, blogId);
+      
+      // Parse the social content - it should contain posts for different platforms
+      let parsedContent;
       try {
-        const socialContent = await aiService.generateSocialPost(blogPost, platform);
+        // Clean up the response to handle markdown code blocks
+        let cleanContent = socialContent.trim();
         
-        const postId = await db.insertGeneratedSocialPost({
-          based_on_gen_article_id: blogId,
-          platform,
-          text_draft: `${socialContent.text}\n\n${socialContent.hashtags.join(' ')}`,
-          emotional_hook_present_ai_check: platform !== 'linkedin',
-          status: 'draft'
-        });
-
-        socialPosts.push({
-          id: postId,
-          platform,
-          content: socialContent
-        });
-
-        console.log(`📱 ${platform} post created (ID: ${postId})`);
-      } catch (error) {
-        console.error(`❌ Error generating ${platform} post:`, error.message);
+        // Remove markdown code block markers if present
+        if (cleanContent.startsWith('```json')) {
+          cleanContent = cleanContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (cleanContent.startsWith('```')) {
+          cleanContent = cleanContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+        
+        parsedContent = JSON.parse(cleanContent);
+        console.log('✅ Successfully parsed AI response as JSON');
+      } catch (parseError) {
+        console.log('⚠️ AI response is not JSON, using fallback structure');
+        console.log('Raw AI response:', socialContent.substring(0, 200) + '...');
+        
+        // If not JSON, create a simple structure from the raw content
+        const fallbackText = socialContent.substring(0, 200).replace(/```json|```/g, '').trim();
+        parsedContent = {
+          facebook: { text: fallbackText, hashtags: ['#ChristianFaith', '#Eden'] },
+          instagram: { text: fallbackText, hashtags: ['#ChristianLife', '#Eden'] },
+          linkedin: { text: fallbackText, hashtags: ['#ChristianFaith', '#Eden'] }
+        };
       }
-    }
 
-    return socialPosts;
+      const socialPosts = [];
+      const platforms = ['facebook', 'instagram', 'linkedin'];
+
+      for (const platform of platforms) {
+        try {
+          const platformContent = parsedContent[platform] || parsedContent;
+          const text = platformContent.text || socialContent.substring(0, 200);
+          const hashtags = platformContent.hashtags || ['#ChristianFaith', '#Eden'];
+          
+          const postId = await db.insertGeneratedSocialPost({
+            based_on_gen_article_id: blogId,
+            platform,
+            text_draft: `${text}\n\n${hashtags.join(' ')}`,
+            emotional_hook_present_ai_check: platform !== 'linkedin',
+            status: 'draft'
+          });
+
+          socialPosts.push({
+            id: postId,
+            platform,
+            content: { text, hashtags }
+          });
+
+          console.log(`📱 ${platform} post created (ID: ${postId})`);
+        } catch (error) {
+          console.error(`❌ Error creating ${platform} post:`, error.message);
+        }
+      }
+
+      return socialPosts;
+    } catch (error) {
+      console.error('❌ Error generating social media posts:', error.message);
+      return [];
+    }
   }
 
-  async generateVideoScripts(blogPost, blogId) {
+  async generateVideoScripts(article, blogId) {
     console.log('🎬 Generating video scripts...');
     
     const videoConfigs = [
@@ -157,14 +220,26 @@ class ContentGenerator {
 
     for (const config of videoConfigs) {
       try {
-        const videoContent = await aiService.generateVideoScript(blogPost, config.duration);
+        const videoContent = await aiService.generateVideoScript(article, config.duration, blogId);
+        
+        // Parse video content if it's JSON
+        let parsedVideo;
+        try {
+          parsedVideo = JSON.parse(videoContent);
+        } catch {
+          parsedVideo = {
+            title: `${config.duration}s Video Script`,
+            script: videoContent,
+            visualSuggestions: []
+          };
+        }
         
         const scriptId = await db.insertGeneratedVideoScript({
           based_on_gen_article_id: blogId,
-          title: videoContent.title,
+          title: parsedVideo.title,
           duration_target_seconds: config.duration,
-          script_draft: videoContent.script,
-          visual_suggestions: JSON.stringify(videoContent.visualSuggestions),
+          script_draft: parsedVideo.script,
+          visual_suggestions: JSON.stringify(parsedVideo.visualSuggestions || []),
           status: 'draft'
         });
 
@@ -172,7 +247,7 @@ class ContentGenerator {
           id: scriptId,
           duration: config.duration,
           type: config.type,
-          content: videoContent
+          content: parsedVideo
         });
 
         console.log(`🎬 ${config.duration}s video script created (ID: ${scriptId})`);
@@ -257,33 +332,53 @@ class ContentGenerator {
         try {
           console.log(`🌲 Generating content for: ${idea.title_idea}`);
 
-          // Create a mock "news summary" from the evergreen idea
-          const mockSummary = `${idea.brief_description} This evergreen topic focuses on ${idea.target_keywords}.`;
-          
-          // Generate Eden angle
-          const edenAngle = {
-            angle: idea.brief_description,
-            productCategories: idea.relevant_product_types ? idea.relevant_product_types.split(',') : ['christian-books'],
-            themes: idea.target_keywords ? idea.target_keywords.split(',') : ['faith', 'spiritual-growth']
+          // Create a mock article object from the evergreen idea
+          const mockArticle = {
+            title: idea.title_idea,
+            full_text: `${idea.brief_description} This evergreen topic focuses on ${idea.target_keywords}.`,
+            summary_ai: idea.brief_description,
+            source_name: 'Evergreen Content',
+            url: ''
           };
-
-          // Generate blog post
-          const blogPost = await aiService.generateBlogPost(mockSummary, edenAngle, 'blog');
           
-          // Store blog post
+          // Create the article record first to get an ID for logging
           const blogId = await db.insertGeneratedArticle({
             based_on_evergreen_id: idea.evergreen_id,
-            title: blogPost.title,
-            body_draft: blogPost.body,
+            title: idea.title_idea,
+            body_draft: 'Generating...', // Temporary placeholder
             content_type: 'blog',
-            word_count: this.countWords(blogPost.body),
-            suggested_eden_product_links: JSON.stringify(blogPost.suggestedLinks),
+            word_count: 0,
+            suggested_eden_product_links: JSON.stringify([]),
             status: 'draft'
           });
 
+          // Generate blog post with the proper parameters
+          const blogPostContent = await aiService.generateBlogPost(mockArticle, blogId);
+          
+          // Parse the blog post content if it's JSON, otherwise use as-is
+          let blogPost;
+          try {
+            blogPost = JSON.parse(blogPostContent);
+          } catch {
+            // If not JSON, create a simple structure
+            blogPost = {
+              title: idea.title_idea,
+              body: blogPostContent,
+              suggestedLinks: []
+            };
+          }
+          
+          // Update the article with the actual content
+          await db.update('ssnews_generated_articles', {
+            title: blogPost.title,
+            body_draft: typeof blogPost.body === 'string' ? blogPost.body : JSON.stringify(blogPost),
+            word_count: this.countWords(blogPost.body || blogPostContent),
+            suggested_eden_product_links: JSON.stringify(blogPost.suggestedLinks || [])
+          }, 'gen_article_id = ?', [blogId]);
+
           // Generate associated content
-          const socialPosts = await this.generateSocialPosts(blogPost, blogId);
-          const videoScripts = await this.generateVideoScripts(blogPost, blogId);
+          const socialPosts = await this.generateSocialPosts(mockArticle, blogId);
+          const videoScripts = await this.generateVideoScripts(mockArticle, blogId);
           const images = await this.generateImages(blogPost, blogId);
 
           generatedContent.push({
