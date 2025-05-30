@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -101,6 +101,12 @@ const ProjectEden = () => {
   // Additional state variables
   const [analyzingMore, setAnalyzingMore] = useState(false);
   const [generatingContent, setGeneratingContent] = useState(false);
+
+  // Sources tab state
+  const [sourcesSearch, setSourcesSearch] = useState('');
+  const [sourcesFilter, setSourcesFilter] = useState('enabled');
+  const [sourcesSortBy, setSourcesSortBy] = useState('name');
+  const [toggleLoadingMap, setToggleLoadingMap] = useState(new Map());
 
   // Hash routing functionality
   useEffect(() => {
@@ -766,6 +772,114 @@ const ProjectEden = () => {
       Live Logs
     </Button>
   );
+
+  // Sources helper functions
+  const handleSort = (column) => {
+    if (sourcesSortBy === column) {
+      setSourcesSortBy(column + '_desc');
+    } else if (sourcesSortBy === column + '_desc') {
+      setSourcesSortBy(column);
+    } else {
+      setSourcesSortBy(column);
+    }
+  };
+
+  const toggleSourceStatus = async (sourceId) => {
+    try {
+      // Set loading state for this specific source
+      setToggleLoadingMap(prev => new Map(prev.set(sourceId, true)));
+      
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${baseUrl}/api/eden/news/sources/${sourceId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (response.ok) {
+        console.log('✅ Source status updated:', sourceId);
+        // Refresh sources data
+        await fetchData();
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Source status update failed:', errorData.error);
+        alert(`Failed to update source: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Source status update error:', error);
+      alert(`Error updating source: ${error.message}`);
+    } finally {
+      // Clear loading state for this specific source
+      setToggleLoadingMap(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(sourceId);
+        return newMap;
+      });
+    }
+  };
+
+  const filteredAndSortedSources = useMemo(() => {
+    let filtered = sources;
+
+    // Apply search filter
+    if (sourcesSearch) {
+      filtered = filtered.filter(source => 
+        source.name && source.name.toLowerCase().includes(sourcesSearch.toLowerCase())
+      );
+    }
+
+    // Apply status filter
+    if (sourcesFilter === 'enabled') {
+      filtered = filtered.filter(source => source.is_active);
+    } else if (sourcesFilter === 'disabled') {
+      filtered = filtered.filter(source => !source.is_active);
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      switch (sourcesSortBy) {
+        case 'name':
+          return (a.name || '').localeCompare(b.name || '');
+        case 'name_desc':
+          return (b.name || '').localeCompare(a.name || '');
+        case 'status':
+          return (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0);
+        case 'status_desc':
+          return (a.is_active ? 1 : 0) - (b.is_active ? 1 : 0);
+        case 'type':
+          const aType = a.source_type || (a.rss_feed_url ? 'RSS' : 'Web Scraping');
+          const bType = b.source_type || (b.rss_feed_url ? 'RSS' : 'Web Scraping');
+          return aType.localeCompare(bType);
+        case 'type_desc':
+          const aTypeDesc = a.source_type || (a.rss_feed_url ? 'RSS' : 'Web Scraping');
+          const bTypeDesc = b.source_type || (b.rss_feed_url ? 'RSS' : 'Web Scraping');
+          return bTypeDesc.localeCompare(aTypeDesc);
+        case 'articles':
+          return (b.articles_last_24h || 0) - (a.articles_last_24h || 0);
+        case 'articles_desc':
+          return (a.articles_last_24h || 0) - (b.articles_last_24h || 0);
+        case 'success_rate':
+          return (b.success_rate || 0) - (a.success_rate || 0);
+        case 'success_rate_desc':
+          return (a.success_rate || 0) - (b.success_rate || 0);
+        case 'total_articles':
+          return (b.total_articles || 0) - (a.total_articles || 0);
+        case 'total_articles_desc':
+          return (a.total_articles || 0) - (b.total_articles || 0);
+        case 'last_check':
+          const aTime = a.last_checked ? new Date(a.last_checked) : new Date(0);
+          const bTime = b.last_checked ? new Date(b.last_checked) : new Date(0);
+          return bTime - aTime;
+        case 'last_check_desc':
+          const aTimeDesc = a.last_checked ? new Date(a.last_checked) : new Date(0);
+          const bTimeDesc = b.last_checked ? new Date(b.last_checked) : new Date(0);
+          return aTimeDesc - bTimeDesc;
+        default:
+          return (a.name || '').localeCompare(b.name || '');
+      }
+    });
+
+    return filtered;
+  }, [sources, sourcesSearch, sourcesFilter, sourcesSortBy]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
@@ -2039,93 +2153,283 @@ const ProjectEden = () => {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle>Christian News Sources</CardTitle>
+                    <CardTitle>News Source Management</CardTitle>
                     <CardDescription>
-                      Status and performance of configured news sources
+                      Monitor and manage Christian news sources for content aggregation
                     </CardDescription>
                   </div>
-                  <Badge variant="outline" className="text-sm">
-                    {stats.activeSources} active sources
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Button onClick={fetchData} variant="outline" size="sm" disabled={loading}>
+                      <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                    <Badge variant="outline" className="text-sm">
+                      {sources.length} total sources
+                    </Badge>
+                  </div>
                 </div>
                 
                 {/* Explanatory section */}
-                {!loading && (
-                  <div className="mt-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                    <h3 className="font-semibold text-orange-900 mb-2">📡 What you're viewing:</h3>
-                    <p className="text-sm text-orange-800 mb-3">
-                      {sources.length} configured Christian news sources that Project Eden monitors for relevant content. 
-                      Sources include major Christian publications, denominational news, and faith-focused media outlets.
-                    </p>
-                    <h4 className="font-semibold text-orange-900 mb-1">📊 Source performance:</h4>
-                    <ul className="text-sm text-orange-800 list-disc list-inside space-y-1 mb-3">
-                      <li>{stats.activeSources} sources are currently active and being monitored</li>
-                      <li>{sources.filter(s => s.articles_last_24h > 0).length} sources provided articles in the last 24 hours</li>
-                      <li>Total articles discovered: {stats.articlesAggregated} from all sources</li>
-                      <li>RSS feeds are checked regularly for new content</li>
-                    </ul>
-                    <h4 className="font-semibold text-orange-900 mb-1">🔧 Next steps:</h4>
-                    <ul className="text-sm text-orange-800 list-disc list-inside space-y-1">
-                      <li>Monitor source performance and article quality</li>
-                      <li>Add new Christian news sources as needed</li>
-                      <li>Update RSS feed URLs if sources change</li>
-                      <li>Deactivate sources that consistently provide low-relevance content</li>
-                    </ul>
-                  </div>
-                )}
+                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <h3 className="font-semibold text-blue-900 mb-2">📡 News Source Management</h3>
+                  <p className="text-sm text-blue-800 mb-3">
+                    Monitor and manage {sources.length} configured Christian news sources. Track performance, enable/disable sources, 
+                    and view detailed statistics for content aggregation optimization.
+                  </p>
+                  <h4 className="font-semibold text-blue-900 mb-1">📊 Current Status:</h4>
+                  <ul className="text-sm text-blue-800 list-disc list-inside space-y-1">
+                    <li>{sources.filter(s => s.is_active).length} sources are currently enabled and being monitored</li>
+                    <li>{sources.filter(s => s.articles_last_24h > 0).length} sources provided articles in the last 24 hours</li>
+                    <li>{sources.reduce((sum, s) => sum + s.articles_last_24h, 0)} total articles discovered in last 24h</li>
+                    <li>RSS feeds and web scraping targets are monitored automatically</li>
+                  </ul>
+                </div>
               </CardHeader>
               <CardContent>
                 {loading && sources.length === 0 ? (
                   <LoadingState message="Loading news sources..." count={4} />
                 ) : (
-                  <>
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between text-sm text-gray-600">
-                        <span>Showing all {sources.length} configured sources</span>
-                        <span>{sources.reduce((sum, s) => sum + s.articles_last_24h, 0)} articles in last 24h</span>
+                  <div className="space-y-4">
+                    {/* Search and Filter Controls */}
+                    <div className="flex flex-wrap items-center gap-4 p-4 bg-gray-50 rounded-lg">
+                      <div className="flex-1 min-w-64">
+                        <div className="relative">
+                          <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                          <Input
+                            placeholder="Search sources by name..."
+                            value={sourcesSearch}
+                            onChange={(e) => setSourcesSearch(e.target.value)}
+                            className="pl-10"
+                          />
+                        </div>
                       </div>
+                      
+                      <Select value={sourcesFilter} onValueChange={setSourcesFilter}>
+                        <SelectTrigger className="w-48">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="enabled">Enabled Sources</SelectItem>
+                          <SelectItem value="disabled">Disabled Sources</SelectItem>
+                          <SelectItem value="all">All Sources</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      
+                      <Select value={sourcesSortBy} onValueChange={setSourcesSortBy}>
+                        <SelectTrigger className="w-48">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="name">Sort: A-Z</SelectItem>
+                          <SelectItem value="name_desc">Sort: Z-A</SelectItem>
+                          <SelectItem value="status">Sort: Active First</SelectItem>
+                          <SelectItem value="status_desc">Sort: Inactive First</SelectItem>
+                          <SelectItem value="type">Sort: Type A-Z</SelectItem>
+                          <SelectItem value="type_desc">Sort: Type Z-A</SelectItem>
+                          <SelectItem value="articles">Sort: Articles High-Low</SelectItem>
+                          <SelectItem value="articles_desc">Sort: Articles Low-High</SelectItem>
+                          <SelectItem value="success_rate">Sort: Success Rate High-Low</SelectItem>
+                          <SelectItem value="success_rate_desc">Sort: Success Rate Low-High</SelectItem>
+                          <SelectItem value="total_articles">Sort: Total Articles High-Low</SelectItem>
+                          <SelectItem value="total_articles_desc">Sort: Total Articles Low-High</SelectItem>
+                          <SelectItem value="last_check">Sort: Recent First</SelectItem>
+                          <SelectItem value="last_check_desc">Sort: Oldest First</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {sources.map((source, index) => (
-                        <Card key={`source-${source.source_id || index}`} className="border">
-                          <CardHeader className="pb-3">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <CardTitle className="text-base">{source.name}</CardTitle>
-                                <Badge variant="outline" className="text-xs">#{index + 1}</Badge>
-                              </div>
-                              <Badge variant={source.is_active ? 'success' : 'secondary'}>
-                                {source.is_active ? 'Active' : 'Inactive'}
-                              </Badge>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="pt-0">
-                            <div className="space-y-2 text-sm">
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Articles (24h):</span>
-                                <span className="font-medium">{source.articles_last_24h}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Last scraped:</span>
-                                <span className="font-medium">
-                                  {source.last_scraped_at ? 
-                                    new Date(source.last_scraped_at).toLocaleTimeString() : 
-                                    'Never'
-                                  }
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">RSS Feed:</span>
-                                <span className="font-medium">
-                                  {source.rss_feed_url ? '✓' : '✗'}
-                                </span>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  </>
+
+                    {(() => {
+                      const filteredSources = filteredAndSortedSources;
+                      
+                      return (
+                        <>
+                          <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
+                            <span>
+                              Showing {filteredSources.length} of {sources.length} sources
+                              {sourcesFilter === 'enabled' && ` (${sources.filter(s => s.is_active).length} enabled)`}
+                              {sourcesFilter === 'disabled' && ` (${sources.filter(s => !s.is_active).length} disabled)`}
+                            </span>
+                            <span>{sources.reduce((sum, s) => sum + s.articles_last_24h, 0)} articles discovered (24h)</span>
+                          </div>
+
+                          {/* Sources Table */}
+                          <div className="rounded-md border">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => handleSort('name')}
+                                      className="h-auto p-0 font-semibold"
+                                    >
+                                      Source Name
+                                      {sourcesSortBy.startsWith('name') && (
+                                        sourcesSortBy === 'name' ? <ArrowUp className="ml-1 w-3 h-3" /> : <ArrowDown className="ml-1 w-3 h-3" />
+                                      )}
+                                    </Button>
+                                  </TableHead>
+                                  <TableHead>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => handleSort('status')}
+                                      className="h-auto p-0 font-semibold"
+                                    >
+                                      Status
+                                      {sourcesSortBy.startsWith('status') && (
+                                        sourcesSortBy === 'status' ? <ArrowUp className="ml-1 w-3 h-3" /> : <ArrowDown className="ml-1 w-3 h-3" />
+                                      )}
+                                    </Button>
+                                  </TableHead>
+                                  <TableHead>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => handleSort('type')}
+                                      className="h-auto p-0 font-semibold"
+                                    >
+                                      Type
+                                      {sourcesSortBy.startsWith('type') && (
+                                        sourcesSortBy === 'type' ? <ArrowUp className="ml-1 w-3 h-3" /> : <ArrowDown className="ml-1 w-3 h-3" />
+                                      )}
+                                    </Button>
+                                  </TableHead>
+                                  <TableHead>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => handleSort('articles')}
+                                      className="h-auto p-0 font-semibold"
+                                    >
+                                      Articles (24h)
+                                      {sourcesSortBy.startsWith('articles') && (
+                                        sourcesSortBy === 'articles' ? <ArrowUp className="ml-1 w-3 h-3" /> : <ArrowDown className="ml-1 w-3 h-3" />
+                                      )}
+                                    </Button>
+                                  </TableHead>
+                                  <TableHead>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => handleSort('success_rate')}
+                                      className="h-auto p-0 font-semibold"
+                                    >
+                                      Success Rate
+                                      {sourcesSortBy.startsWith('success_rate') && (
+                                        sourcesSortBy === 'success_rate' ? <ArrowUp className="ml-1 w-3 h-3" /> : <ArrowDown className="ml-1 w-3 h-3" />
+                                      )}
+                                    </Button>
+                                  </TableHead>
+                                  <TableHead>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => handleSort('total_articles')}
+                                      className="h-auto p-0 font-semibold"
+                                    >
+                                      Total Articles
+                                      {sourcesSortBy.startsWith('total_articles') && (
+                                        sourcesSortBy === 'total_articles' ? <ArrowUp className="ml-1 w-3 h-3" /> : <ArrowDown className="ml-1 w-3 h-3" />
+                                      )}
+                                    </Button>
+                                  </TableHead>
+                                  <TableHead>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => handleSort('last_check')}
+                                      className="h-auto p-0 font-semibold"
+                                    >
+                                      Last Check
+                                      {sourcesSortBy.startsWith('last_check') && (
+                                        sourcesSortBy === 'last_check' ? <ArrowUp className="ml-1 w-3 h-3" /> : <ArrowDown className="ml-1 w-3 h-3" />
+                                      )}
+                                    </Button>
+                                  </TableHead>
+                                  <TableHead>Actions</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {filteredSources.map((source, index) => (
+                                  <TableRow key={`source-${source.source_id || index}`}>
+                                    <TableCell className="font-medium">
+                                      <div>
+                                        <div className="font-medium text-gray-900">{source.name}</div>
+                                        {source.url && (
+                                          <div className="text-xs text-gray-500 truncate max-w-48">
+                                            {source.url}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant={source.is_active ? 'default' : 'secondary'}>
+                                        {source.is_active ? 'Enabled' : 'Disabled'}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline">
+                                        {source.source_type || (source.rss_feed_url ? 'RSS' : 'Web Scraping')}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                      <span className={`font-medium ${source.articles_last_24h > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                                        {source.articles_last_24h || 0}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell>
+                                      <span className={`font-medium ${(source.success_rate || 0) > 0.7 ? 'text-green-600' : (source.success_rate || 0) > 0.3 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                        {source.success_rate ? `${(source.success_rate * 100).toFixed(0)}%` : 'N/A'}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell>
+                                      <span className="font-medium text-gray-700">
+                                        {source.total_articles || 0}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell>
+                                      <span className="text-sm text-gray-600">
+                                        {source.last_checked ? 
+                                          new Date(source.last_checked).toLocaleDateString() + ' ' + 
+                                          new Date(source.last_checked).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) 
+                                          : 'Never'
+                                        }
+                                      </span>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Button
+                                        size="sm"
+                                        variant={source.is_active ? "outline" : "default"}
+                                        onClick={() => toggleSourceStatus(source.source_id)}
+                                        disabled={toggleLoadingMap.has(source.source_id)}
+                                        className="text-xs"
+                                      >
+                                        {toggleLoadingMap.has(source.source_id) ? (
+                                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                        ) : source.is_active ? (
+                                          <X className="w-3 h-3 mr-1" />
+                                        ) : (
+                                          <Check className="w-3 h-3 mr-1" />
+                                        )}
+                                        {toggleLoadingMap.has(source.source_id) 
+                                          ? 'Updating...' 
+                                          : source.is_active 
+                                            ? 'Disable' 
+                                            : 'Enable'
+                                        }
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
                 )}
               </CardContent>
             </Card>
