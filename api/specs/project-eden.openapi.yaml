@@ -1,0 +1,779 @@
+openapi: 3.0.3
+info:
+  title: Project Eden API
+  description: AI-Powered Content Automation API for Eden.co.uk
+  version: 1.0.0
+  contact:
+    name: Project Eden Support
+    email: support@eden.co.uk
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.eden.co.uk
+    description: Production server
+  - url: http://localhost:3000
+    description: Development server
+
+paths:
+  /api/health:
+    get:
+      summary: Health check endpoint
+      description: Returns the health status of the API
+      tags:
+        - Health
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /api/eden/news/aggregate:
+    post:
+      summary: Aggregate news articles
+      description: Starts the news aggregation process from configured sources
+      tags:
+        - News
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  description: Maximum number of articles to aggregate
+                  default: 100
+      responses:
+        '200':
+          description: Aggregation completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  articlesAggregated:
+                    type: integer
+                  message:
+                    type: string
+
+  /api/eden/news/analyze:
+    post:
+      summary: Analyze articles with AI
+      description: Runs AI analysis on aggregated articles for relevance scoring
+      tags:
+        - News
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  description: Maximum number of articles to analyze
+                  default: 20
+      responses:
+        '200':
+          description: Analysis completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  analyzed:
+                    type: integer
+                  message:
+                    type: string
+
+  /api/eden/news/top-stories:
+    get:
+      summary: Get top analyzed stories
+      description: Returns top stories ranked by AI relevance scoring
+      tags:
+        - News
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of stories to return
+          schema:
+            type: integer
+            default: 10
+        - name: minScore
+          in: query
+          description: Minimum relevance score threshold
+          schema:
+            type: number
+            format: float
+            default: 0.1
+      responses:
+        '200':
+          description: Stories retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Story'
+
+  /api/eden/news/sources/status:
+    get:
+      summary: Get news sources status
+      description: Returns status and metrics for all configured news sources
+      tags:
+        - Sources
+      responses:
+        '200':
+          description: Sources status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NewsSource'
+
+  /api/eden/news/sources/{sourceId}/status:
+    put:
+      summary: Update news source status
+      description: Enable or disable a news source
+      tags:
+        - Sources
+      parameters:
+        - name: sourceId
+          in: path
+          required: true
+          description: ID of the news source
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Source status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/eden/content/generate:
+    post:
+      summary: Generate content from stories
+      description: Creates a job to generate blog posts, social media content, and video scripts
+      tags:
+        - Content
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  description: Maximum number of content pieces to generate
+                  default: 5
+                specificStoryId:
+                  type: integer
+                  description: Generate content for a specific story ID
+      responses:
+        '200':
+          description: Content generation job created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  jobId:
+                    type: string
+                  message:
+                    type: string
+
+  /api/eden/content/review:
+    get:
+      summary: Get content for review
+      description: Returns content pieces awaiting human review
+      tags:
+        - Content
+      parameters:
+        - name: status
+          in: query
+          description: Filter by content status
+          schema:
+            type: string
+            enum: [draft, review_pending, approved, published, rejected]
+      responses:
+        '200':
+          description: Content retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContentPiece'
+
+  /api/eden/content/{contentType}/{contentId}/status:
+    put:
+      summary: Update content status
+      description: Approve, reject, or update the status of a content piece
+      tags:
+        - Content
+      parameters:
+        - name: contentType
+          in: path
+          required: true
+          description: Type of content (article, social_post, video_script)
+          schema:
+            type: string
+            enum: [article, social_post, video_script]
+        - name: contentId
+          in: path
+          required: true
+          description: ID of the content piece
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [draft, review_pending, approved, published, rejected]
+              required:
+                - status
+      responses:
+        '200':
+          description: Content status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/eden/stats/generation:
+    get:
+      summary: Get generation statistics
+      description: Returns statistics about content generation and processing
+      tags:
+        - Analytics
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats:
+                    $ref: '#/components/schemas/GenerationStats'
+
+  /api/eden/jobs/queue/stats:
+    get:
+      summary: Get job queue statistics
+      description: Returns statistics about the job queue and worker status
+      tags:
+        - Jobs
+      responses:
+        '200':
+          description: Job statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats:
+                    $ref: '#/components/schemas/JobStats'
+                  worker:
+                    $ref: '#/components/schemas/WorkerStatus'
+
+  /api/eden/jobs/recent:
+    get:
+      summary: Get recent jobs
+      description: Returns a list of recent jobs with their status
+      tags:
+        - Jobs
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of jobs to return
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Jobs retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+
+  /api/eden/jobs/{jobId}/cancel:
+    post:
+      summary: Cancel a job
+      description: Cancels a queued or processing job
+      tags:
+        - Jobs
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: ID of the job to cancel
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/eden/jobs/{jobId}/retry:
+    post:
+      summary: Retry a failed job
+      description: Retries a failed job
+      tags:
+        - Jobs
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: ID of the job to retry
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job retried successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/eden/jobs/worker/start:
+    post:
+      summary: Start job worker
+      description: Starts the background job worker
+      tags:
+        - Jobs
+      responses:
+        '200':
+          description: Worker started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/eden/bookmarks:
+    get:
+      summary: Get user bookmarks
+      description: Returns bookmarked articles for a user
+      tags:
+        - Bookmarks
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          description: User ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bookmarks retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bookmarks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Bookmark'
+    post:
+      summary: Add bookmark
+      description: Adds an article to user bookmarks
+      tags:
+        - Bookmarks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+                userEmail:
+                  type: string
+                articleId:
+                  type: integer
+              required:
+                - userId
+                - userEmail
+                - articleId
+      responses:
+        '200':
+          description: Bookmark added successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+    delete:
+      summary: Remove bookmark
+      description: Removes an article from user bookmarks
+      tags:
+        - Bookmarks
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          description: User ID
+          schema:
+            type: string
+        - name: articleId
+          in: query
+          required: true
+          description: Article ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Bookmark removed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/eden/automate/full-cycle:
+    post:
+      summary: Run full automation cycle
+      description: Starts a complete automation cycle (aggregate, analyze, generate)
+      tags:
+        - Automation
+      responses:
+        '200':
+          description: Full cycle started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  jobId:
+                    type: string
+                  message:
+                    type: string
+
+components:
+  schemas:
+    Story:
+      type: object
+      properties:
+        article_id:
+          type: integer
+        title:
+          type: string
+        url:
+          type: string
+        source_name:
+          type: string
+        publication_date:
+          type: string
+          format: date-time
+        summary_ai:
+          type: string
+        keywords_ai:
+          type: string
+        relevance_score:
+          type: number
+          format: float
+        created_at:
+          type: string
+          format: date-time
+
+    NewsSource:
+      type: object
+      properties:
+        source_id:
+          type: integer
+        name:
+          type: string
+        url:
+          type: string
+        is_active:
+          type: boolean
+        articles_last_24h:
+          type: integer
+        total_articles:
+          type: integer
+        success_rate:
+          type: number
+          format: float
+        last_checked:
+          type: string
+          format: date-time
+        source_type:
+          type: string
+
+    ContentPiece:
+      type: object
+      properties:
+        gen_article_id:
+          type: integer
+        title:
+          type: string
+        content_type:
+          type: string
+        body_draft:
+          type: string
+        word_count:
+          type: integer
+        status:
+          type: string
+          enum: [draft, review_pending, approved, published, rejected]
+        created_at:
+          type: string
+          format: date-time
+        reviewed_by_human_at:
+          type: string
+          format: date-time
+        sourceArticle:
+          $ref: '#/components/schemas/Story'
+        socialPosts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SocialPost'
+        videoScripts:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideoScript'
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/GeneratedImage'
+
+    SocialPost:
+      type: object
+      properties:
+        gen_social_id:
+          type: integer
+        platform:
+          type: string
+        text_draft:
+          type: string
+        emotional_hook_present_ai_check:
+          type: boolean
+
+    VideoScript:
+      type: object
+      properties:
+        gen_video_script_id:
+          type: integer
+        title:
+          type: string
+        script_draft:
+          type: string
+        duration_target_seconds:
+          type: integer
+        visual_suggestions:
+          type: string
+
+    GeneratedImage:
+      type: object
+      properties:
+        id:
+          type: integer
+        sirvUrl:
+          type: string
+        altText:
+          type: string
+        query:
+          type: string
+
+    GenerationStats:
+      type: object
+      properties:
+        articlesAggregated:
+          type: integer
+        articlesAnalyzed:
+          type: integer
+        contentGenerated:
+          type: integer
+        pendingReview:
+          type: integer
+        approvedContent:
+          type: integer
+        totalArticlesProcessed:
+          type: integer
+        activeSources:
+          type: integer
+
+    JobStats:
+      type: object
+      properties:
+        summary:
+          type: object
+          properties:
+            total_jobs:
+              type: integer
+            queued:
+              type: integer
+            processing:
+              type: integer
+            completed:
+              type: integer
+            failed:
+              type: integer
+        details:
+          type: array
+          items:
+            type: object
+
+    WorkerStatus:
+      type: object
+      properties:
+        isRunning:
+          type: boolean
+        currentJob:
+          type: object
+          properties:
+            job_id:
+              type: string
+            job_type:
+              type: string
+            created_at:
+              type: string
+              format: date-time
+
+    Job:
+      type: object
+      properties:
+        job_id:
+          type: string
+        job_type:
+          type: string
+        status:
+          type: string
+          enum: [queued, processing, completed, failed, cancelled]
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        progress_percentage:
+          type: integer
+        progress_details:
+          type: string
+        error_message:
+          type: string
+        duration:
+          type: integer
+        payload:
+          type: object
+        results:
+          type: object
+
+    Bookmark:
+      type: object
+      properties:
+        bookmark_id:
+          type: integer
+        user_id:
+          type: string
+        article_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: News
+    description: News aggregation and analysis
+  - name: Sources
+    description: News source management
+  - name: Content
+    description: Content generation and management
+  - name: Analytics
+    description: Statistics and analytics
+  - name: Jobs
+    description: Background job management
+  - name: Bookmarks
+    description: User bookmark management
+  - name: Automation
+    description: Automation workflows 

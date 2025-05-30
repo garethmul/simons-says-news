@@ -1,0 +1,789 @@
+{
+  "info": {
+    "name": "Project Eden API Tests",
+    "description": "Comprehensive test collection for Project Eden API endpoints",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{authToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "authToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Health Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "News Management",
+      "item": [
+        {
+          "name": "Aggregate News Articles",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"limit\": 100\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/news/aggregate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "news", "aggregate"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Analyze Articles",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"limit\": 20\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/news/analyze",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "news", "analyze"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Top Stories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/news/top-stories?limit=10&minScore=0.1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "news", "top-stories"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "minScore",
+                  "value": "0.1"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "News Sources",
+      "item": [
+        {
+          "name": "Get Sources Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/news/sources/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "news", "sources", "status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Source Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/news/sources/1/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "news", "sources", "1", "status"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Content Management",
+      "item": [
+        {
+          "name": "Generate Content",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"limit\": 5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/content/generate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "content", "generate"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Content for Specific Story",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"specificStoryId\": 123\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/content/generate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "content", "generate"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Content for Review",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/content/review",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "content", "review"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Approved Content",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/content/review?status=approved",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "content", "review"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "approved"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Approve Content",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"approved\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/content/article/123/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "content", "article", "123", "status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Content",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"rejected\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/content/article/123/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "content", "article", "123", "status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Publish Content",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"published\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/content/article/123/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "content", "article", "123", "status"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "Get Generation Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/stats/generation",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "stats", "generation"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Image Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/stats/images",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "stats", "images"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Job Management",
+      "item": [
+        {
+          "name": "Get Job Queue Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/jobs/queue/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "jobs", "queue", "stats"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Recent Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/jobs/recent?limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "jobs", "recent"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Job by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/jobs/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "jobs", "{{jobId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/jobs/{{jobId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "jobs", "{{jobId}}", "cancel"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retry Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/jobs/{{jobId}}/retry",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "jobs", "{{jobId}}", "retry"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start Worker",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/jobs/worker/start",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "jobs", "worker", "start"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Stop Worker",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/jobs/worker/stop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "jobs", "worker", "stop"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Worker Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/jobs/worker/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "jobs", "worker", "status"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Bookmarks",
+      "item": [
+        {
+          "name": "Get User Bookmarks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/bookmarks?userId={{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "bookmarks"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{userId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Bookmark IDs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/bookmarks/ids?userId={{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "bookmarks", "ids"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{userId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add Bookmark",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"userEmail\": \"{{userEmail}}\",\n  \"articleId\": 123\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/bookmarks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "bookmarks"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Bookmark",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/bookmarks?userId={{userId}}&articleId=123",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "bookmarks"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{userId}}"
+                },
+                {
+                  "key": "articleId",
+                  "value": "123"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Automation",
+      "item": [
+        {
+          "name": "Get Automation Progress",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/automate/progress",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "automate", "progress"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Run Full Cycle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/automate/full-cycle",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "automate", "full-cycle"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Automation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/automate/reset",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "automate", "reset"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Prompt Management",
+      "item": [
+        {
+          "name": "Get Prompt Templates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/prompts/templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "prompts", "templates"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Template by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/prompts/templates/{{templateId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "prompts", "templates", "{{templateId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create New Template",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Template\",\n  \"category\": \"blog\",\n  \"description\": \"Test description\",\n  \"prompt\": \"Test prompt content\",\n  \"systemMessage\": \"You are a helpful assistant\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/prompts/templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "prompts", "templates"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Template Versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/prompts/templates/{{templateId}}/versions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "prompts", "templates", "{{templateId}}", "versions"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create New Version",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Updated prompt content\",\n  \"systemMessage\": \"Updated system message\",\n  \"notes\": \"Version update notes\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/prompts/templates/{{templateId}}/versions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "prompts", "templates", "{{templateId}}", "versions"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Set Current Version",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/prompts/templates/{{templateId}}/versions/{{versionId}}/current",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "prompts", "templates", "{{templateId}}", "versions", "{{versionId}}", "current"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Images",
+      "item": [
+        {
+          "name": "Search Images",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/eden/images/search?query=christian&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "eden", "images", "search"],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "christian"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Set common variables if not already set",
+          "if (!pm.collectionVariables.get('userId')) {",
+          "    pm.collectionVariables.set('userId', 'test-user-123');",
+          "}",
+          "if (!pm.collectionVariables.get('userEmail')) {",
+          "    pm.collectionVariables.set('userEmail', 'test@example.com');",
+          "}",
+          "if (!pm.collectionVariables.get('jobId')) {",
+          "    pm.collectionVariables.set('jobId', 'job-123');",
+          "}",
+          "if (!pm.collectionVariables.get('templateId')) {",
+          "    pm.collectionVariables.set('templateId', '1');",
+          "}",
+          "if (!pm.collectionVariables.get('versionId')) {",
+          "    pm.collectionVariables.set('versionId', '1');",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Common test for all endpoints",
+          "pm.test('Response status code is successful', function () {",
+          "    pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]);",
+          "});",
+          "",
+          "pm.test('Response time is acceptable', function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(30000);",
+          "});",
+          "",
+          "pm.test('Response has valid JSON', function () {",
+          "    pm.response.to.have.jsonBody();",
+          "});",
+          "",
+          "// Extract common values for use in subsequent requests",
+          "if (pm.response.json().jobId) {",
+          "    pm.collectionVariables.set('jobId', pm.response.json().jobId);",
+          "}",
+          "",
+          "if (pm.response.json().template_id) {",
+          "    pm.collectionVariables.set('templateId', pm.response.json().template_id);",
+          "}",
+          "",
+          "if (pm.response.json().version_id) {",
+          "    pm.collectionVariables.set('versionId', pm.response.json().version_id);",
+          "}"
+        ]
+      }
+    }
+  ]
+} 
