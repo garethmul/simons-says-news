@@ -223,19 +223,53 @@ app.put('/api/eden/news/sources/:sourceName/rss', async (req, res) => {
     );
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'News source not found' });
+      return res.status(404).json({ error: 'Source not found' });
     }
 
-    console.log(`📡 Updated RSS feed URL for ${sourceName}: ${rss_feed_url}`);
-    
     res.json({
       success: true,
-      message: `Updated RSS feed URL for ${sourceName}`,
-      sourceName,
-      rss_feed_url
+      message: `RSS feed URL updated for ${sourceName}`
     });
   } catch (error) {
     console.error('❌ Error updating RSS feed URL:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update news source status (enable/disable)
+app.put('/api/eden/news/sources/:sourceId/status', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { sourceId } = req.params;
+    const { is_active } = req.body;
+
+    if (typeof is_active !== 'boolean') {
+      return res.status(400).json({ error: 'is_active must be a boolean value' });
+    }
+
+    // Update the source status in the database
+    const result = await db.update(
+      'ssnews_news_sources',
+      { is_active },
+      'source_id = ?',
+      [sourceId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Source not found' });
+    }
+
+    console.log(`✅ Source ${sourceId} status updated to ${is_active ? 'active' : 'inactive'}`);
+
+    res.json({
+      success: true,
+      message: `Source status updated to ${is_active ? 'active' : 'inactive'}`
+    });
+  } catch (error) {
+    console.error('❌ Error updating source status:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

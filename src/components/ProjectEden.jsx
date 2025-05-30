@@ -5,6 +5,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import ProgressModal from './ProgressModal';
 import PromptManagement from './PromptManagement';
 import LogViewer from './LogViewer';
@@ -33,7 +34,9 @@ import {
   Terminal,
   Search,
   LogOut,
-  Zap
+  Zap,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -70,6 +73,13 @@ const ProjectEden = () => {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const topStoriesPerPage = 10;
 
+  // New filter states for Stories tab
+  const [storiesSourceFilter, setStoriesSourceFilter] = useState('all');
+  const [storiesTagFilter, setStoriesTagFilter] = useState('all');
+  
+  // Loading state for individual Generate Content buttons
+  const [generatingContentMap, setGeneratingContentMap] = useState(new Map());
+
   // State for approved content modal
   const [showApprovedModal, setShowApprovedModal] = useState(false);
   const [selectedApprovedContent, setSelectedApprovedContent] = useState(null);
@@ -97,7 +107,7 @@ const ProjectEden = () => {
     // Function to get tab from URL hash
     const getTabFromHash = () => {
       const hash = window.location.hash.substring(1); // Remove the #
-      const validTabs = ['dashboard', 'review', 'approved', 'stories', 'jobs', 'prompts'];
+      const validTabs = ['dashboard', 'review', 'approved', 'stories', 'queued', 'jobs', 'sources', 'prompts'];
       return validTabs.includes(hash) ? hash : 'dashboard';
     };
 
@@ -235,9 +245,9 @@ const ProjectEden = () => {
     return () => clearInterval(interval);
   }, [currentUser]);
 
-  // Fetch jobs when Jobs tab is accessed
+  // Fetch jobs when Jobs or Queued tab is accessed
   useEffect(() => {
-    if (activeTab === 'jobs') {
+    if (activeTab === 'jobs' || activeTab === 'queued') {
       fetchJobs();
     }
   }, [activeTab]);
@@ -541,6 +551,19 @@ const ProjectEden = () => {
       });
     }
 
+    // Apply source filter
+    if (storiesSourceFilter !== 'all') {
+      filtered = filtered.filter(story => story.source_name === storiesSourceFilter);
+    }
+
+    // Apply tag/topic filter  
+    if (storiesTagFilter !== 'all') {
+      filtered = filtered.filter(story => {
+        const keywords = story.keywords_ai ? story.keywords_ai.toLowerCase() : '';
+        return keywords.includes(storiesTagFilter.toLowerCase());
+      });
+    }
+
     // Apply favorites filter
     if (showFavoritesOnly) {
       filtered = filtered.filter(story => favoriteStories.has(story.article_id));
@@ -603,7 +626,8 @@ const ProjectEden = () => {
 
   const generateContentFromStory = async (storyId) => {
     try {
-      setGenerating(true);
+      // Set loading state for this specific story
+      setGeneratingContentMap(prev => new Map(prev.set(storyId, true)));
       console.log('Creating content generation job for story:', storyId);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
@@ -617,11 +641,14 @@ const ProjectEden = () => {
         const data = await response.json();
         console.log('✅ Content generation job created:', data.jobId);
         
-        // Show success notification
-        alert(`Content generation job created! Job ID: ${data.jobId}\nCheck the Jobs tab to monitor progress.`);
+        // Refresh data to update all tabs
+        await fetchData();
         
-        // Refresh jobs list
-        fetchJobs();
+        // Switch to queued tab to show the new job
+        handleTabChange('queued');
+        
+        // Show success notification
+        alert(`Content generation job created! Job ID: ${data.jobId}\nSwitched to Queued tab to monitor progress.`);
       } else {
         const errorData = await response.json();
         console.error('❌ Job creation failed:', errorData.error);
@@ -631,7 +658,12 @@ const ProjectEden = () => {
       console.error('❌ Job creation error:', error);
       alert(`Error creating job: ${error.message}`);
     } finally {
-      setGenerating(false);
+      // Clear loading state for this specific story
+      setGeneratingContentMap(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(storyId);
+        return newMap;
+      });
     }
   };
 
@@ -832,12 +864,14 @@ const ProjectEden = () => {
 
         {/* Main Interface */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="review">Review ({contentForReview.length})</TabsTrigger>
             <TabsTrigger value="approved">Approved ({approvedContent.length})</TabsTrigger>
             <TabsTrigger value="stories">Stories ({allArticles.length})</TabsTrigger>
+            <TabsTrigger value="queued">Queued ({jobStats.summary.queued || 0})</TabsTrigger>
             <TabsTrigger value="jobs">Jobs</TabsTrigger>
+            <TabsTrigger value="sources">Sources ({sources.length})</TabsTrigger>
             <TabsTrigger value="prompts">Prompts</TabsTrigger>
           </TabsList>
 
@@ -1571,6 +1605,40 @@ const ProjectEden = () => {
                         </div>
                       </div>
                       
+                      <Select value={storiesSourceFilter} onValueChange={(value) => {
+                        setStoriesSourceFilter(value);
+                        setTopStoriesPage(1);
+                      }}>
+                        <SelectTrigger className="w-48">
+                          <SelectValue placeholder="Filter by Source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Sources</SelectItem>
+                          {[...new Set(allArticles.map(story => story.source_name))].filter(Boolean).sort().map(source => (
+                            <SelectItem key={source} value={source}>{source}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      <Select value={storiesTagFilter} onValueChange={(value) => {
+                        setStoriesTagFilter(value);
+                        setTopStoriesPage(1);
+                      }}>
+                        <SelectTrigger className="w-48">
+                          <SelectValue placeholder="Filter by Topic" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Topics</SelectItem>
+                          {[...new Set(
+                            allArticles
+                              .flatMap(story => story.keywords_ai ? story.keywords_ai.split(',').map(k => k.trim()) : [])
+                              .filter(Boolean)
+                          )].sort().slice(0, 20).map(tag => (
+                            <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      
                       <Select value={topStoriesSortBy} onValueChange={setTopStoriesSortBy}>
                         <SelectTrigger className="w-48">
                           <SelectValue />
@@ -1656,10 +1724,14 @@ const ProjectEden = () => {
                                     size="sm" 
                                     variant="default"
                                     onClick={() => generateContentFromStory(story.article_id)}
-                                    disabled={loading}
+                                    disabled={generatingContentMap.has(story.article_id)}
                                   >
-                                    <FileText className="w-4 h-4 mr-2" />
-                                    Generate Content
+                                    {generatingContentMap.has(story.article_id) ? (
+                                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    ) : (
+                                      <FileText className="w-4 h-4 mr-2" />
+                                    )}
+                                    {generatingContentMap.has(story.article_id) ? 'Generating...' : 'Generate Content'}
                                   </Button>
                                 </div>
                               </CardContent>
@@ -1897,10 +1969,14 @@ const ProjectEden = () => {
                                     size="sm" 
                                     variant="default"
                                     onClick={() => generateContentFromStory(article.article_id)}
-                                    disabled={loading}
+                                    disabled={generatingContentMap.has(article.article_id)}
                                   >
-                                    <FileText className="w-4 h-4 mr-2" />
-                                    Generate Content
+                                    {generatingContentMap.has(article.article_id) ? (
+                                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    ) : (
+                                      <FileText className="w-4 h-4 mr-2" />
+                                    )}
+                                    {generatingContentMap.has(article.article_id) ? 'Generating...' : 'Generate Content'}
                                   </Button>
                                 </div>
                               </CardContent>
@@ -2138,6 +2214,152 @@ const ProjectEden = () => {
               </CardHeader>
               <CardContent>
                 <PromptManagement />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Queued Jobs Tab */}
+          <TabsContent value="queued" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Queued Content Generation Jobs</CardTitle>
+                    <CardDescription>
+                      Content generation jobs waiting to be processed
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button onClick={fetchJobs} variant="outline" size="sm" disabled={jobsLoading}>
+                      <RefreshCw className={`w-4 h-4 mr-2 ${jobsLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                    <Badge variant="outline" className="text-sm">
+                      {jobStats.summary.queued || 0} queued
+                    </Badge>
+                  </div>
+                </div>
+                
+                {/* Explanatory section */}
+                <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                  <h3 className="font-semibold text-yellow-900 mb-2">⏳ What you're viewing:</h3>
+                  <p className="text-sm text-yellow-800 mb-3">
+                    Content generation jobs that have been created but are waiting to be processed by the job worker. 
+                    These are typically created when you click "Generate Content" on stories.
+                  </p>
+                  <h4 className="font-semibold text-yellow-900 mb-1">🔄 How jobs are processed:</h4>
+                  <ul className="text-sm text-yellow-800 list-disc list-inside space-y-1">
+                    <li>Jobs are processed in first-in-first-out (FIFO) order</li>
+                    <li>Each job generates blog posts, social media content, and video scripts</li>
+                    <li>Completed content moves to the Review tab for human approval</li>
+                    <li>Job worker must be running to process queued jobs</li>
+                  </ul>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loading || jobsLoading ? (
+                  <LoadingState message="Loading queued jobs..." count={3} />
+                ) : (() => {
+                  const queuedJobs = jobs.filter(job => job.status === 'queued');
+                  
+                  return queuedJobs.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p>No jobs currently queued</p>
+                      <p className="text-sm">Generate content from stories to see jobs here</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
+                        <span>Showing {queuedJobs.length} queued job{queuedJobs.length !== 1 ? 's' : ''}</span>
+                        <span>Worker status: {workerStatus.isRunning ? 'Running' : 'Stopped'}</span>
+                      </div>
+                      
+                      {!workerStatus.isRunning && (
+                        <div className="p-4 bg-orange-50 rounded-lg border border-orange-200 mb-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h3 className="font-medium text-orange-900">Job Worker Stopped</h3>
+                              <p className="text-sm text-orange-800">Start the job worker to process queued jobs</p>
+                            </div>
+                            <Button 
+                              onClick={startJobWorker} 
+                              size="sm"
+                              className="bg-orange-600 hover:bg-orange-700"
+                            >
+                              <Play className="w-4 h-4 mr-2" />
+                              Start Worker
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {queuedJobs.map((job, index) => (
+                        <Card key={`queued-job-${job.job_id}`} className="border-l-4 border-l-yellow-500">
+                          <CardHeader>
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <CardTitle className="text-lg">Job #{job.job_id}</CardTitle>
+                                  <Badge variant="outline" className="text-xs">#{index + 1} in queue</Badge>
+                                  <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+                                    {job.job_type.replace('_', ' ')}
+                                  </Badge>
+                                </div>
+                                <CardDescription className="mt-2">
+                                  Created {new Date(job.created_at).toLocaleDateString()} at {new Date(job.created_at).toLocaleTimeString()}
+                                </CardDescription>
+                                
+                                {/* Job Details */}
+                                <div className="mt-3 p-3 bg-gray-50 rounded-lg border">
+                                  <div className="text-sm space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-gray-600">Job Type:</span>
+                                      <span className="font-medium">{job.job_type}</span>
+                                    </div>
+                                    {job.payload?.specificStoryId && (
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-gray-600">Story ID:</span>
+                                        <span className="font-medium">#{job.payload.specificStoryId}</span>
+                                      </div>
+                                    )}
+                                    {job.payload?.limit && (
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-gray-600">Content Limit:</span>
+                                        <span className="font-medium">{job.payload.limit}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-gray-600">Position in Queue:</span>
+                                      <span className="font-medium">#{index + 1}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-gray-600">Estimated Wait:</span>
+                                      <span className="font-medium">
+                                        {index === 0 ? 'Processing next' : `~${index * 2} minutes`}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => cancelJob(job.job_id)}
+                                  className="text-red-600 border-red-300 hover:bg-red-50"
+                                >
+                                  <X className="w-4 h-4 mr-2" />
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          </CardHeader>
+                        </Card>
+                      ))}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           </TabsContent>

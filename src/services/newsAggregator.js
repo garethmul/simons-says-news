@@ -313,22 +313,43 @@ class NewsAggregator {
 
   async getSourceStatus() {
     try {
-      const sources = await db.getActiveNewsSources();
+      // Get ALL sources, not just active ones
+      const sources = await db.query(
+        'SELECT * FROM ssnews_news_sources ORDER BY name'
+      );
       const status = [];
 
       for (const source of sources) {
+        // Get articles count for last 24 hours
         const recentArticles = await db.query(
           'SELECT COUNT(*) as count FROM ssnews_scraped_articles WHERE source_id = ? AND scraped_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)',
           [source.source_id]
         );
 
+        // Get total articles count
+        const totalArticles = await db.query(
+          'SELECT COUNT(*) as count FROM ssnews_scraped_articles WHERE source_id = ?',
+          [source.source_id]
+        );
+
+        // Determine source type based on whether it has RSS feed
+        const sourceType = source.rss_feed_url ? 'RSS' : 'Web Scraping';
+
         status.push({
+          source_id: source.source_id,
           name: source.name,
           url: source.url,
           rss_feed_url: source.rss_feed_url,
-          last_scraped_at: source.last_scraped_at,
+          description: source.description,
+          last_checked: source.last_scraped_at, // Map last_scraped_at to last_checked for frontend
+          last_scraped_at: source.last_scraped_at, // Keep original field too
           articles_last_24h: recentArticles[0].count,
-          is_active: source.is_active
+          total_articles: totalArticles[0].count,
+          is_active: source.is_active,
+          source_type: sourceType,
+          success_rate: null, // TODO: Calculate actual success rate from scraping attempts
+          created_at: source.created_at,
+          updated_at: source.updated_at
         });
       }
 

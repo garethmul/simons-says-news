@@ -133,9 +133,10 @@ const LogViewer = ({ isOpen, onClose }) => {
             
             if (exists) return prevLogs;
             
-            const newLogs = [logEntry, ...prevLogs];
+            // Append new logs to the end for chronological order (oldest first, newest last)
+            const newLogs = [...prevLogs, logEntry];
             // Keep only last 200 logs in memory for performance
-            return newLogs.slice(0, 200);
+            return newLogs.slice(-200);
           });
         } catch (error) {
           console.error('Error parsing log entry:', error);
@@ -476,7 +477,7 @@ const LogViewer = ({ isOpen, onClose }) => {
           
           <div className="flex items-center gap-2">
             <Clock className="w-3 h-3" />
-            <span>Last update: {logs.length > 0 ? new Date(logs[0]?.timestamp).toLocaleTimeString() : 'Never'}</span>
+            <span>Last update: {logs.length > 0 ? new Date(logs[logs.length - 1]?.timestamp).toLocaleTimeString() : 'Never'}</span>
           </div>
         </div>
       </Card>
