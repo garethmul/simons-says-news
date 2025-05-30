@@ -26,7 +26,7 @@ export const getDaysAgo = (dateString) => {
   if (!dateString) return 'Unknown';
   const date = new Date(dateString);
   const days = Math.floor((new Date() - date) / (1000 * 60 * 60 * 24));
-  return `${days} day${days !== 1 ? 's' : ''} ago`;
+  return days === 0 ? 'Today' : days === 1 ? '1 day ago' : `${days} days ago`;
 };
 
 /**
@@ -49,25 +49,21 @@ export const getRelevanceDisplay = (score) => {
  * Get badge variant for relevance score
  */
 export const getRelevanceBadgeVariant = (score) => {
-  const category = getRelevanceCategory(score);
-  switch (category) {
-    case 'high': return 'default';
-    case 'moderate': return 'secondary';
-    case 'low': return 'outline';
-    default: return 'outline';
-  }
+  if (score >= RELEVANCE_SCORE_THRESHOLDS.HIGH) return 'default';
+  if (score >= RELEVANCE_SCORE_THRESHOLDS.MODERATE) return 'secondary';
+  return 'outline';
 };
 
 /**
  * Truncate text to specified length
  */
-export const truncateText = (text, length = 300) => {
+export const truncateText = (text, maxLength = 300) => {
   if (!text) return '';
-  return text.length > length ? text.substring(0, length) + '...' : text;
+  return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
 };
 
 /**
- * Parse keywords from comma-separated string
+ * Parse keywords string into array
  */
 export const parseKeywords = (keywordsString) => {
   if (!keywordsString) return [];
@@ -84,19 +80,19 @@ export const getSourceType = (source) => {
 /**
  * Get success rate color class
  */
-export const getSuccessRateColor = (rate) => {
-  if (!rate) return 'text-gray-500';
-  if (rate > 0.7) return 'text-green-600';
-  if (rate > 0.3) return 'text-yellow-600';
+export const getSuccessRateColor = (successRate) => {
+  if (!successRate) return 'text-gray-500';
+  if (successRate > 0.7) return 'text-green-600';
+  if (successRate > 0.3) return 'text-yellow-600';
   return 'text-red-600';
 };
 
 /**
- * Calculate estimated wait time for job queue position
+ * Get estimated wait time for job queue position
  */
-export const getEstimatedWaitTime = (position) => {
-  if (position === 0) return 'Processing next';
-  return `~${position * 2} minutes`;
+export const getEstimatedWaitTime = (queuePosition) => {
+  if (queuePosition === 0) return 'Processing next';
+  return `~${queuePosition * 2} minutes`;
 };
 
 /**
@@ -107,6 +103,7 @@ export const getContentTypeIcon = (contentType) => {
     case 'article': return 'FileText';
     case 'social_post': return 'Share2';
     case 'video_script': return 'Video';
+    case 'prayer_points': return 'Heart';
     default: return 'FileText';
   }
 };
@@ -132,11 +129,11 @@ export const getTabUrl = (tabValue) => {
 };
 
 /**
- * Extract tab from URL hash
+ * Get current tab from URL hash
  */
-export const getTabFromHash = (validTabs = []) => {
-  const hash = window.location.hash.substring(1);
-  return validTabs.includes(hash) ? hash : validTabs[0] || 'dashboard';
+export const getTabFromHash = (validTabs, defaultTab = 'dashboard') => {
+  const hash = window.location.hash.substring(1); // Remove the #
+  return validTabs.includes(hash) ? hash : defaultTab;
 };
 
 /**
@@ -148,7 +145,8 @@ export const filterBySearch = (items, searchText, fields) => {
   const searchLower = searchText.toLowerCase();
   return items.filter(item => {
     return fields.some(field => {
-      const value = getNestedValue(item, field);
+      // Use getNestedValue for nested paths (e.g., 'sourceArticle.source_name')
+      const value = field.includes('.') ? getNestedValue(item, field) : item[field];
       return value && value.toString().toLowerCase().includes(searchLower);
     });
   });
@@ -177,14 +175,14 @@ export const debounce = (func, wait) => {
 };
 
 /**
- * Handle async operations with error handling
+ * Error handling wrapper for async functions
  */
 export const withErrorHandling = async (asyncFn, errorMessage = 'An error occurred') => {
   try {
     return await asyncFn();
   } catch (error) {
     console.error(errorMessage, error);
-    throw new Error(errorMessage);
+    throw new Error(`${errorMessage}: ${error.message}`);
   }
 };
 

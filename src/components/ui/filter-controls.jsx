@@ -2,7 +2,7 @@ import React from 'react';
 import { Input } from './input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
 import { Button } from './button';
-import { Search, Star } from 'lucide-react';
+import { Search, Star, X } from 'lucide-react';
 
 /**
  * Reusable filter controls component
@@ -16,6 +16,9 @@ export const FilterControls = ({
   showFavoritesToggle = false,
   showFavoritesOnly = false,
   onFavoritesToggle,
+  showRejectedToggle = false,
+  showRejectedStories = false,
+  onRejectedToggle,
   onFilterReset,
   className = ""
 }) => {
@@ -75,6 +78,18 @@ export const FilterControls = ({
         >
           <Star className={`w-4 h-4 mr-2 ${showFavoritesOnly ? 'fill-current' : ''}`} />
           {showFavoritesOnly ? 'Show All' : 'Favorites Only'}
+        </Button>
+      )}
+
+      {/* Rejected Stories Toggle */}
+      {showRejectedToggle && (
+        <Button
+          variant={showRejectedStories ? "destructive" : "outline"}
+          size="sm"
+          onClick={onRejectedToggle}
+        >
+          <X className={`w-4 h-4 mr-2`} />
+          {showRejectedStories ? 'Hide Rejected' : 'Show Rejected'}
         </Button>
       )}
       

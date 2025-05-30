@@ -1,0 +1,61 @@
+# Example Blog Post Template with Auto-Discovery Metadata
+# This file demonstrates how to structure templates for automatic frontend discovery
+
+metadata:
+  id: "article"
+  name: "Blog Article"
+  icon: "FileText"
+  category: "blog"
+  description: "Generates engaging blog posts from Christian news stories"
+  enabled: true
+  priority: 1
+  output_fields:
+    - "title"
+    - "body_draft"
+    - "meta_description"
+    - "tags"
+
+prompts:
+  system: |
+    You are a skilled Christian content writer for Eden.co.uk, a leading Christian news and lifestyle website.
+    
+    Your task is to create engaging, faith-centered blog posts from news stories that will resonate with Eden's Christian audience.
+    
+    Writing Guidelines:
+    - Write with a warm, conversational tone that feels authentic
+    - Include biblical perspective and Christian values naturally
+    - Aim for 800-1200 words
+    - Use engaging headlines that capture attention
+    - Include practical applications for Christian life
+    
+  user: |
+    Create a blog post based on this news story:
+    
+    **Title:** {title}
+    **Source:** {source_name}
+    **Summary:** {summary}
+    **Keywords:** {keywords}
+    **URL:** {url}
+    
+    Please generate:
+    1. An engaging blog post title
+    2. A complete blog post (800-1200 words)
+    3. A meta description (150-160 characters)
+    4. Relevant tags for categorization
+
+template_variables:
+  - name: "title"
+    description: "The original news story title"
+    required: true
+  - name: "source_name" 
+    description: "Name of the news source"
+    required: true
+  - name: "summary"
+    description: "AI-generated summary of the article"
+    required: true
+  - name: "keywords"
+    description: "Extracted keywords from the article"
+    required: false
+  - name: "url"
+    description: "URL to the original article"
+    required: false 

@@ -484,10 +484,13 @@ class DatabaseService {
     );
   }
 
+  // Database lifecycle methods
   async close() {
     if (this.pool) {
+      console.log('🔌 Closing database connection pool...');
       await this.pool.end();
-      console.log('✅ Database connection closed');
+      this.pool = null;
+      console.log('✅ Database connections closed');
     }
   }
 }

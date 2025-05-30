@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { API_ENDPOINTS, REFRESH_INTERVALS, ERROR_MESSAGES } from '../utils/constants';
-import { withErrorHandling } from '../utils/helpers';
 
 /**
  * Custom hook for managing Project Eden data
@@ -22,6 +21,7 @@ export const useProjectEdenData = () => {
   
   const [contentForReview, setContentForReview] = useState([]);
   const [approvedContent, setApprovedContent] = useState([]);
+  const [rejectedContent, setRejectedContent] = useState([]);
   const [allArticles, setAllArticles] = useState([]);
   const [sources, setSources] = useState([]);
   const [jobStats, setJobStats] = useState({
@@ -34,18 +34,6 @@ export const useProjectEdenData = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  // Build API URL
-  const buildUrl = useCallback((endpoint, params = {}) => {
-    const baseUrl = import.meta.env.VITE_API_URL || '';
-    const url = new URL(endpoint, baseUrl || window.location.origin);
-    Object.keys(params).forEach(key => {
-      if (params[key] !== undefined && params[key] !== null) {
-        url.searchParams.append(key, params[key]);
-      }
-    });
-    return url.toString();
-  }, []);
-
   // Fetch all data
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -58,6 +46,7 @@ export const useProjectEdenData = () => {
       const [
         reviewResponse,
         approvedResponse,
+        rejectedResponse,
         articlesResponse,
         statsResponse,
         jobStatsResponse,
@@ -66,9 +55,10 @@ export const useProjectEdenData = () => {
       ] = await Promise.all([
         fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_REVIEW}`),
         fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_REVIEW}?status=approved`),
-        fetch(`${baseUrl}${API_ENDPOINTS.NEWS_STORIES}?limit=100&minScore=0.1`),
+        fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_REVIEW}?status=rejected`),
+        fetch(`${baseUrl}${API_ENDPOINTS.TOP_STORIES}?limit=100&minScore=0.1`),
         fetch(`${baseUrl}${API_ENDPOINTS.GENERATION_STATS}`),
-        fetch(`${baseUrl}${API_ENDPOINTS.JOB_STATS}`),
+        fetch(`${baseUrl}${API_ENDPOINTS.JOBS_STATS}`),
         currentUser?.uid ? fetch(`${baseUrl}${API_ENDPOINTS.BOOKMARKS}/ids?userId=${currentUser.uid}`) : 
           Promise.resolve({ json: () => ({ articleIds: [] }) }),
         fetch(`${baseUrl}${API_ENDPOINTS.SOURCES_STATUS}`)
@@ -77,11 +67,13 @@ export const useProjectEdenData = () => {
       // Process responses
       const reviewData = reviewResponse.ok ? await reviewResponse.json() : { content: [] };
       const approvedData = approvedResponse.ok ? await approvedResponse.json() : { content: [] };
+      const rejectedData = rejectedResponse.ok ? await rejectedResponse.json() : { content: [] };
       const articlesData = articlesResponse.ok ? await articlesResponse.json() : { stories: [] };
       const sourcesData = sourcesResponse.ok ? await sourcesResponse.json() : { sources: [] };
 
       setContentForReview(reviewData.content || []);
       setApprovedContent(approvedData.content || []);
+      setRejectedContent(rejectedData.content || []);
       setAllArticles(articlesData.stories || []);
       setSources(sourcesData.sources || []);
 
@@ -129,7 +121,7 @@ export const useProjectEdenData = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentUser, buildUrl]);
+  }, [currentUser]);
 
   // Fetch jobs data
   const fetchJobs = useCallback(async () => {
@@ -137,7 +129,7 @@ export const useProjectEdenData = () => {
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const [jobsResponse, statsResponse] = await Promise.all([
         fetch(`${baseUrl}${API_ENDPOINTS.JOBS_RECENT}?limit=20`),
-        fetch(`${baseUrl}${API_ENDPOINTS.JOB_STATS}`)
+        fetch(`${baseUrl}${API_ENDPOINTS.JOBS_STATS}`)
       ]);
       
       if (jobsResponse.ok && statsResponse.ok) {
@@ -209,7 +201,7 @@ export const useProjectEdenData = () => {
   useEffect(() => {
     fetchData();
     
-    const interval = setInterval(fetchData, REFRESH_INTERVALS.DATA_REFRESH);
+    const interval = setInterval(fetchData, REFRESH_INTERVALS.DATA);
     
     return () => clearInterval(interval);
   }, [fetchData]);
@@ -219,6 +211,7 @@ export const useProjectEdenData = () => {
     stats,
     contentForReview,
     approvedContent,
+    rejectedContent,
     allArticles,
     sources,
     jobStats,
@@ -237,6 +230,7 @@ export const useProjectEdenData = () => {
     // Setters for external updates
     setContentForReview,
     setApprovedContent,
+    setRejectedContent,
     setAllArticles,
     setSources,
     setJobStats,

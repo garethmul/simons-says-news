@@ -1,0 +1,59 @@
+# Example New Content Type - Sermon Notes
+# This demonstrates how adding a new template automatically makes it available in the UI
+
+metadata:
+  id: "sermon_notes"
+  name: "Sermon Notes"
+  icon: "Star"
+  category: "sermon" 
+  description: "Creates sermon notes and discussion points from news stories"
+  enabled: true
+  priority: 5
+  output_fields:
+    - "sermon_title"
+    - "main_points"
+    - "scripture_references"
+    - "discussion_questions"
+    - "prayer_points"
+
+prompts:
+  system: |
+    You are a pastor and biblical teacher preparing sermon notes for a Christian congregation.
+    
+    Your task is to create thoughtful sermon notes that help pastors preach about current events through a biblical lens.
+    
+    Guidelines:
+    - Connect news events to biblical principles
+    - Provide 3-4 main sermon points
+    - Include relevant scripture references
+    - Add discussion questions for small groups
+    - Keep the tone pastoral and encouraging
+    
+  user: |
+    Create sermon notes based on this current news story:
+    
+    **News Story:** {title}
+    **Source:** {source_name}
+    **Summary:** {summary}
+    **Key Themes:** {keywords}
+    
+    Please generate:
+    1. A compelling sermon title (60-80 characters)
+    2. 3-4 main sermon points with biblical connections
+    3. Relevant scripture references for each point
+    4. 5-6 discussion questions for small groups
+    5. Concluding prayer points
+
+template_variables:
+  - name: "title"
+    description: "The news story headline"
+    required: true
+  - name: "source_name"
+    description: "News source name"
+    required: true
+  - name: "summary" 
+    description: "Story summary"
+    required: true
+  - name: "keywords"
+    description: "Key themes and topics"
+    required: false 

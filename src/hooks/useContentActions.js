@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import { API_ENDPOINTS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../utils/constants';
-import { withErrorHandling } from '../utils/helpers';
 
 /**
  * Custom hook for content actions (approve, reject, generate, etc.)
@@ -175,7 +174,7 @@ export const useContentActions = (onDataRefresh) => {
       console.log('🧠 Analyzing more articles...');
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
-      const response = await fetch(`${baseUrl}${API_ENDPOINTS.NEWS_ANALYZE}`, {
+      const response = await fetch(`${baseUrl}${API_ENDPOINTS.ANALYZE_ARTICLES}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit: 20 })

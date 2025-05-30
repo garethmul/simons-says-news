@@ -9,14 +9,32 @@ class NewsAggregator {
     this.rssParser = new Parser({
       timeout: 30000,
       headers: {
-        'User-Agent': 'Eden Content Bot 1.0 (https://eden.co.uk)'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Eden-Content-Bot/1.0',
+        'Accept': 'application/rss+xml, application/xml, text/xml, application/atom+xml, text/html',
+        'Accept-Language': 'en-GB,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
       }
     });
 
     this.axiosConfig = {
       timeout: 30000,
       headers: {
-        'User-Agent': 'Eden Content Bot 1.0 (https://eden.co.uk)'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Eden-Content-Bot/1.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-GB,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none'
+      },
+      maxRedirects: 5,
+      validateStatus: function (status) {
+        return status < 500; // Accept anything less than 500 as valid
       }
     };
   }
@@ -122,52 +140,194 @@ class NewsAggregator {
       const $ = cheerio.load(response.data);
       const articles = [];
 
-      // Generic article selectors (can be customized per source)
+      // Enhanced article selectors for Christian news sites
       const articleSelectors = [
+        // Semantic HTML5
         'article',
+        'main article',
+        
+        // Common blog/news patterns
         '.post',
         '.news-item',
         '.article',
         '.entry',
+        '.story',
+        '.content-item',
+        
+        // Christian-specific patterns
+        '.news-article',
+        '.blog-post',
+        '.sermon',
+        '.bulletin-item',
+        '.ministry-update',
+        
+        // Generic content patterns
         '[class*="article"]',
-        '[class*="post"]'
+        '[class*="post"]',
+        '[class*="news"]',
+        '[class*="story"]',
+        '[class*="content"]',
+        
+        // Container patterns
+        '.item',
+        '.card',
+        '.tile',
+        
+        // List item patterns (for article lists)
+        'li[class*="post"]',
+        'li[class*="article"]',
+        'li[class*="news"]',
+        
+        // Fallback: look for divs with links and headings
+        'div:has(h1 a), div:has(h2 a), div:has(h3 a)'
       ];
 
+      console.log(`📄 Page title: "${$('title').text()}"`);
+      console.log(`📝 Page content length: ${response.data.length} characters`);
+
+      let selectorUsed = null;
+      let elementsFound = 0;
+
       for (const selector of articleSelectors) {
-        const elements = $(selector).slice(0, 10); // Limit to 10 articles
+        const elements = $(selector);
+        console.log(`🔍 Selector "${selector}": ${elements.length} elements found`);
         
         if (elements.length > 0) {
-          elements.each((i, element) => {
+          selectorUsed = selector;
+          elementsFound = elements.length;
+          
+          // Process up to 15 elements (increased from 10)
+          elements.slice(0, 15).each((i, element) => {
             const $el = $(element);
             
-            const titleEl = $el.find('h1, h2, h3, .title, [class*="title"]').first();
-            const linkEl = $el.find('a').first();
-            const contentEl = $el.find('p, .content, .excerpt, [class*="content"]').first();
+            // Enhanced title extraction
+            const titleSelectors = [
+              'h1', 'h2', 'h3', 'h4',
+              '.title', '.headline', '.post-title', '.entry-title',
+              '[class*="title"]', '[class*="headline"]',
+              'a[title]' // Sometimes the title is in the link's title attribute
+            ];
             
-            const title = this.cleanText(titleEl.text());
-            const relativeUrl = linkEl.attr('href');
-            const content = this.cleanText(contentEl.text());
+            let title = '';
+            let titleEl = null;
+            for (const titleSel of titleSelectors) {
+              titleEl = $el.find(titleSel).first();
+              if (titleEl.length > 0 && titleEl.text().trim()) {
+                title = this.cleanText(titleEl.text());
+                break;
+              }
+            }
             
-            if (title && relativeUrl && content.length > 50) {
+            // Enhanced link extraction
+            let linkEl = $el.find('a').first();
+            if (!linkEl.length || !linkEl.attr('href')) {
+              // Try to find a link in the title element
+              linkEl = titleEl && titleEl.is('a') ? titleEl : titleEl?.find('a').first();
+            }
+            
+            const relativeUrl = linkEl?.attr('href');
+            
+            // Enhanced content extraction
+            const contentSelectors = [
+              'p', '.excerpt', '.summary', '.content', '.description',
+              '.post-excerpt', '.entry-summary',
+              '[class*="excerpt"]', '[class*="summary"]', '[class*="content"]',
+              '.lead' // Common for news sites
+            ];
+            
+            let content = '';
+            for (const contentSel of contentSelectors) {
+              const contentEl = $el.find(contentSel).first();
+              if (contentEl.length > 0 && contentEl.text().trim().length > 20) {
+                content = this.cleanText(contentEl.text());
+                break;
+              }
+            }
+            
+            // If no content found in specific elements, try getting text from the whole element
+            if (!content || content.length < 20) {
+              // Get all text but exclude common navigation elements
+              const textContent = $el.clone()
+                .find('nav, .nav, .navigation, .menu, .sidebar, script, style')
+                .remove()
+                .end()
+                .text();
+              
+              if (textContent.trim().length > 50) {
+                content = this.cleanText(textContent);
+              }
+            }
+            
+            // More lenient filtering - reduced minimum content length
+            if (title && relativeUrl && content.length > 30) {
               const fullUrl = this.resolveUrl(relativeUrl, source.url);
               
-              articles.push({
-                title,
-                url: fullUrl,
-                publication_date: new Date(),
-                full_text: content,
-                source_name: source.name
-              });
+              // Additional validation
+              if (fullUrl && fullUrl.startsWith('http') && title.length > 5) {
+                const article = {
+                  title,
+                  url: fullUrl,
+                  publication_date: new Date(),
+                  full_text: content,
+                  source_name: source.name
+                };
+                
+                articles.push(article);
+                console.log(`✅ Found article: "${title.substring(0, 50)}..." (${content.length} chars)`);
+              }
             }
           });
           
-          break; // Use first successful selector
+          console.log(`📊 Selector "${selector}" yielded ${articles.length} valid articles`);
+          
+          if (articles.length > 0) {
+            break; // Use first successful selector that yields articles
+          }
         }
       }
 
+      if (articles.length === 0) {
+        console.log(`⚠️  No articles found with any selector. Debug info:`);
+        console.log(`   - Elements found with best selector (${selectorUsed}): ${elementsFound}`);
+        console.log(`   - Page has ${$('a').length} links total`);
+        console.log(`   - Page has ${$('h1, h2, h3').length} headings total`);
+        
+        // Try a desperate fallback: look for any links with meaningful text
+        const fallbackArticles = [];
+        $('a').each((i, link) => {
+          if (i >= 10) return false; // Limit to first 10 links
+          
+          const $link = $(link);
+          const href = $link.attr('href');
+          const linkText = $link.text().trim();
+          
+          if (href && linkText.length > 20 && linkText.length < 200) {
+            const fullUrl = this.resolveUrl(href, source.url);
+            if (fullUrl && fullUrl.startsWith('http')) {
+              fallbackArticles.push({
+                title: this.cleanText(linkText),
+                url: fullUrl,
+                publication_date: new Date(),
+                full_text: linkText + ' (extracted from link)',
+                source_name: source.name
+              });
+            }
+          }
+        });
+        
+        if (fallbackArticles.length > 0) {
+          console.log(`🔄 Fallback method found ${fallbackArticles.length} potential articles`);
+          articles.push(...fallbackArticles);
+        }
+      }
+
+      console.log(`🎉 Web scraping complete: ${articles.length} articles extracted from ${source.name}`);
       return articles;
+      
     } catch (error) {
       console.error(`❌ Website scraping failed for ${source.name}:`, error.message);
+      console.error(`   URL: ${source.url}`);
+      console.error(`   Error type: ${error.code || 'Unknown'}`);
       return [];
     }
   }

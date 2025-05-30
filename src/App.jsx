@@ -1,5 +1,5 @@
 import React from 'react';
-import ProjectEden from './components/ProjectEden';
+import ProjectEden from './components/ProjectEdenRefactored';
 import Login from './components/Login';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Loader2 } from 'lucide-react';

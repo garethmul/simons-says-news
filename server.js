@@ -274,6 +274,194 @@ app.put('/api/eden/news/sources/:sourceId/status', async (req, res) => {
   }
 });
 
+// Debug endpoint to test individual source scraping
+app.post('/api/eden/news/sources/:sourceName/test', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { sourceName } = req.params;
+    const { verbose = false } = req.body;
+
+    console.log(`🧪 Testing source: ${sourceName}`);
+    
+    // Get source details
+    const source = await db.findOne('ssnews_news_sources', 'name = ?', [sourceName]);
+    if (!source) {
+      return res.status(404).json({ error: `Source not found: ${sourceName}` });
+    }
+
+    // Test the source and capture detailed results
+    const startTime = Date.now();
+    let testResults = {
+      source: {
+        name: source.name,
+        url: source.url,
+        rss_feed_url: source.rss_feed_url,
+        type: source.rss_feed_url ? 'RSS' : 'Web Scraping',
+        is_active: source.is_active
+      },
+      test_started_at: new Date().toISOString(),
+      articles_found: 0,
+      articles: [],
+      errors: [],
+      debug_info: {},
+      duration_ms: 0
+    };
+
+    try {
+      if (source.rss_feed_url) {
+        // Test RSS feed
+        testResults.debug_info.rss_url = source.rss_feed_url;
+        
+        try {
+          const feed = await newsAggregator.rssParser.parseURL(source.rss_feed_url);
+          testResults.debug_info.rss_title = feed.title;
+          testResults.debug_info.rss_description = feed.description;
+          testResults.debug_info.total_rss_items = feed.items.length;
+          
+          const articles = [];
+          for (const item of feed.items.slice(0, 5)) { // Test first 5 items
+            const article = {
+              title: item.title,
+              url: item.link,
+              publication_date: item.pubDate,
+              content_length: (item.contentSnippet || item.content || item.summary || '').length,
+              has_required_content: !!(item.title && item.link && (item.contentSnippet || item.content || item.summary || '').length > 100)
+            };
+            articles.push(article);
+            if (article.has_required_content) testResults.articles_found++;
+          }
+          testResults.articles = articles;
+          
+        } catch (rssError) {
+          testResults.errors.push({
+            type: 'RSS_PARSING_ERROR',
+            message: rssError.message,
+            stack: verbose ? rssError.stack : undefined
+          });
+        }
+        
+      } else {
+        // Test web scraping
+        testResults.debug_info.scraping_url = source.url;
+        
+        try {
+          const axios = (await import('axios')).default;
+          const cheerio = (await import('cheerio')).default;
+          
+          const response = await axios.get(source.url, {
+            timeout: 30000,
+            headers: {
+              'User-Agent': 'Eden Content Bot 1.0 (https://eden.co.uk)'
+            }
+          });
+          
+          testResults.debug_info.http_status = response.status;
+          testResults.debug_info.content_type = response.headers['content-type'];
+          testResults.debug_info.content_length = response.data.length;
+          
+          const $ = cheerio.load(response.data);
+          
+          // Test each selector
+          const articleSelectors = [
+            'article',
+            '.post', 
+            '.news-item',
+            '.article',
+            '.entry',
+            '[class*="article"]',
+            '[class*="post"]'
+          ];
+          
+          testResults.debug_info.selector_results = {};
+          
+          for (const selector of articleSelectors) {
+            const elements = $(selector);
+            testResults.debug_info.selector_results[selector] = elements.length;
+            
+            if (elements.length > 0) {
+              testResults.debug_info.successful_selector = selector;
+              
+              // Test first few elements
+              const sampleArticles = [];
+              elements.slice(0, 3).each((i, element) => {
+                const $el = $(element);
+                
+                const titleEl = $el.find('h1, h2, h3, .title, [class*="title"]').first();
+                const linkEl = $el.find('a').first();
+                const contentEl = $el.find('p, .content, .excerpt, [class*="content"]').first();
+                
+                const title = titleEl.text().trim();
+                const relativeUrl = linkEl.attr('href');
+                const content = contentEl.text().trim();
+                
+                sampleArticles.push({
+                  index: i,
+                  title: title.substring(0, 100),
+                  url: relativeUrl,
+                  content_preview: content.substring(0, 100),
+                  content_length: content.length,
+                  has_required_fields: !!(title && relativeUrl && content.length > 50)
+                });
+                
+                if (title && relativeUrl && content.length > 50) {
+                  testResults.articles_found++;
+                }
+              });
+              
+              testResults.articles = sampleArticles;
+              break; // Use first successful selector
+            }
+          }
+          
+          // Additional debug info
+          testResults.debug_info.page_title = $('title').text();
+          testResults.debug_info.meta_description = $('meta[name="description"]').attr('content');
+          
+        } catch (scrapingError) {
+          testResults.errors.push({
+            type: 'WEB_SCRAPING_ERROR',
+            message: scrapingError.message,
+            stack: verbose ? scrapingError.stack : undefined
+          });
+        }
+      }
+      
+    } catch (generalError) {
+      testResults.errors.push({
+        type: 'GENERAL_ERROR',
+        message: generalError.message,
+        stack: verbose ? generalError.stack : undefined
+      });
+    }
+    
+    testResults.duration_ms = Date.now() - startTime;
+    testResults.success = testResults.errors.length === 0;
+    
+    console.log(`✅ Test complete for ${sourceName}: ${testResults.articles_found} articles found`);
+
+    res.json({
+      success: true,
+      test_results: testResults
+    });
+    
+  } catch (error) {
+    console.error(`❌ Source test failed for ${req.params.sourceName}:`, error.message);
+    res.status(500).json({ 
+      error: error.message,
+      test_results: {
+        success: false,
+        errors: [{
+          type: 'ENDPOINT_ERROR',
+          message: error.message
+        }]
+      }
+    });
+  }
+});
+
 // Content generation endpoints
 app.post('/api/eden/content/generate', async (req, res) => {
   try {
@@ -380,13 +568,25 @@ app.put('/api/eden/content/:contentType/:contentId/status', async (req, res) => 
     const { contentType, contentId } = req.params;
     const { status, finalContent } = req.body;
     
-    if (!['article', 'social', 'video'].includes(contentType)) {
-      return res.status(400).json({ error: 'Invalid content type' });
+    // Map frontend content types to backend content types
+    const contentTypeMapping = {
+      'blog': 'article',
+      'article': 'article',
+      'social': 'social',
+      'video': 'video'
+    };
+    
+    const mappedContentType = contentTypeMapping[contentType];
+    
+    if (!mappedContentType) {
+      return res.status(400).json({ 
+        error: `Invalid content type: ${contentType}. Valid types are: blog, article, social, video` 
+      });
     }
 
     await contentGenerator.updateContentStatus(
       parseInt(contentId), 
-      contentType, 
+      mappedContentType, 
       status, 
       finalContent
     );
