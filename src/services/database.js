@@ -184,26 +184,62 @@ class DatabaseService {
     }
   }
 
-  // News Sources methods
-  async getActiveNewsSources() {
+  // Account-aware helper methods
+  async findOneByAccount(table, accountId, where = '1=1', whereParams = []) {
+    const accountWhere = where === '1=1' ? 'account_id = ?' : `${where} AND account_id = ?`;
+    return this.findOne(table, accountWhere, [...whereParams, accountId]);
+  }
+
+  async findManyByAccount(table, accountId, where = '1=1', whereParams = [], orderBy = '', limit = '') {
+    const accountWhere = where === '1=1' ? 'account_id = ?' : `${where} AND account_id = ?`;
+    return this.findMany(table, accountWhere, [...whereParams, accountId], orderBy, limit);
+  }
+
+  async insertWithAccount(table, data, accountId) {
+    return this.insert(table, { ...data, account_id: accountId });
+  }
+
+  // News Sources methods - updated for account context
+  async getActiveNewsSources(accountId = null) {
+    if (accountId) {
+      return this.findManyByAccount('ssnews_news_sources', accountId, 'is_active = ?', [true]);
+    }
     return this.findMany('ssnews_news_sources', 'is_active = ?', [true]);
   }
 
-  async updateSourceLastScraped(sourceId) {
+  async updateSourceLastScraped(sourceId, accountId = null) {
+    const whereClause = accountId 
+      ? 'source_id = ? AND account_id = ?' 
+      : 'source_id = ?';
+    const whereParams = accountId ? [sourceId, accountId] : [sourceId];
+    
     return this.update(
       'ssnews_news_sources',
       { last_scraped_at: new Date() },
-      'source_id = ?',
-      [sourceId]
+      whereClause,
+      whereParams
     );
   }
 
-  // Scraped Articles methods
-  async insertScrapedArticle(articleData) {
+  // Scraped Articles methods - updated for account context
+  async insertScrapedArticle(articleData, accountId = null) {
+    if (accountId) {
+      return this.insertWithAccount('ssnews_scraped_articles', articleData, accountId);
+    }
     return this.insert('ssnews_scraped_articles', articleData);
   }
 
-  async getUnanalyzedArticles(limit = 50) {
+  async getUnanalyzedArticles(limit = 50, accountId = null) {
+    if (accountId) {
+      return this.findManyByAccount(
+        'ssnews_scraped_articles',
+        accountId,
+        'status = ?',
+        ['scraped'],
+        'scraped_at DESC',
+        limit
+      );
+    }
     return this.findMany(
       'ssnews_scraped_articles',
       'status = ?',
@@ -213,16 +249,31 @@ class DatabaseService {
     );
   }
 
-  async updateArticleAnalysis(articleId, analysisData) {
+  async updateArticleAnalysis(articleId, analysisData, accountId = null) {
+    const whereClause = accountId 
+      ? 'article_id = ? AND account_id = ?' 
+      : 'article_id = ?';
+    const whereParams = accountId ? [articleId, accountId] : [articleId];
+    
     return this.update(
       'ssnews_scraped_articles',
       { ...analysisData, status: 'analyzed' },
-      'article_id = ?',
-      [articleId]
+      whereClause,
+      whereParams
     );
   }
 
-  async getTopArticlesByRelevance(limit = 10, minScore = 0.5) {
+  async getTopArticlesByRelevance(limit = 10, minScore = 0.5, accountId = null) {
+    if (accountId) {
+      return this.findManyByAccount(
+        'ssnews_scraped_articles',
+        accountId,
+        'status = ? AND relevance_score >= ?',
+        ['analyzed', minScore],
+        'relevance_score DESC, publication_date DESC',
+        limit
+      );
+    }
     return this.findMany(
       'ssnews_scraped_articles',
       'status = ? AND relevance_score >= ?',
@@ -232,36 +283,54 @@ class DatabaseService {
     );
   }
 
-  // Generated Content methods
-  async insertGeneratedArticle(articleData) {
+  // Generated Content methods - updated for account context
+  async insertGeneratedArticle(articleData, accountId = null) {
+    if (accountId) {
+      return this.insertWithAccount('ssnews_generated_articles', articleData, accountId);
+    }
     return this.insert('ssnews_generated_articles', articleData);
   }
 
-  async insertGeneratedSocialPost(postData) {
+  async insertGeneratedSocialPost(postData, accountId = null) {
+    if (accountId) {
+      return this.insertWithAccount('ssnews_generated_social_posts', postData, accountId);
+    }
     return this.insert('ssnews_generated_social_posts', postData);
   }
 
-  async insertGeneratedVideoScript(scriptData) {
+  async insertGeneratedVideoScript(scriptData, accountId = null) {
+    if (accountId) {
+      return this.insertWithAccount('ssnews_generated_video_scripts', scriptData, accountId);
+    }
     return this.insert('ssnews_generated_video_scripts', scriptData);
   }
 
-  async getContentForReview(status = 'draft', limit = 20) {
+  async getContentForReview(status = 'draft', limit = 20, accountId = null) {
     try {
       // Handle multiple statuses separated by commas
       const statuses = typeof status === 'string' ? status.split(',').map(s => s.trim()) : [status];
-      console.log('📋 getContentForReview called with statuses:', statuses, 'limit:', limit);
+      console.log('📋 getContentForReview called with statuses:', statuses, 'limit:', limit, 'accountId:', accountId);
       
       let articles = [];
       
       // Get articles for each status using the original working approach
       for (const singleStatus of statuses) {
-        const statusArticles = await this.findMany(
-          'ssnews_generated_articles',
-          'status = ?',
-          [singleStatus],
-          'created_at DESC',
-          limit
-        );
+        const statusArticles = accountId
+          ? await this.findManyByAccount(
+              'ssnews_generated_articles',
+              accountId,
+              'status = ?',
+              [singleStatus],
+              'created_at DESC',
+              limit
+            )
+          : await this.findMany(
+              'ssnews_generated_articles',
+              'status = ?',
+              [singleStatus],
+              'created_at DESC',
+              limit
+            );
         articles = articles.concat(statusArticles);
       }
       
@@ -273,25 +342,46 @@ class DatabaseService {
       // Get associated content and source article information for each article
       for (const article of uniqueArticles) {
         // Get social posts
-        article.socialPosts = await this.findMany(
-          'ssnews_generated_social_posts',
-          'based_on_gen_article_id = ?',
-          [article.gen_article_id]
-        );
+        article.socialPosts = accountId
+          ? await this.findManyByAccount(
+              'ssnews_generated_social_posts',
+              accountId,
+              'based_on_gen_article_id = ?',
+              [article.gen_article_id]
+            )
+          : await this.findMany(
+              'ssnews_generated_social_posts',
+              'based_on_gen_article_id = ?',
+              [article.gen_article_id]
+            );
 
         // Get video scripts
-        article.videoScripts = await this.findMany(
-          'ssnews_generated_video_scripts',
-          'based_on_gen_article_id = ?',
-          [article.gen_article_id]
-        );
+        article.videoScripts = accountId
+          ? await this.findManyByAccount(
+              'ssnews_generated_video_scripts',
+              accountId,
+              'based_on_gen_article_id = ?',
+              [article.gen_article_id]
+            )
+          : await this.findMany(
+              'ssnews_generated_video_scripts',
+              'based_on_gen_article_id = ?',
+              [article.gen_article_id]
+            );
 
         // Get images
-        article.images = await this.findMany(
-          'ssnews_image_assets',
-          'associated_content_type = ? AND associated_content_id = ?',
-          ['gen_article', article.gen_article_id]
-        );
+        article.images = accountId
+          ? await this.findManyByAccount(
+              'ssnews_image_assets',
+              accountId,
+              'associated_content_type = ? AND associated_content_id = ?',
+              ['gen_article', article.gen_article_id]
+            )
+          : await this.findMany(
+              'ssnews_image_assets',
+              'associated_content_type = ? AND associated_content_id = ?',
+              ['gen_article', article.gen_article_id]
+            );
 
         // Map image field names to camelCase for frontend compatibility
         article.images = article.images.map(img => ({
@@ -304,7 +394,7 @@ class DatabaseService {
         // Get source article information if available
         if (article.based_on_scraped_article_id) {
           try {
-            const sourceArticleQuery = `
+            let sourceArticleQuery = `
               SELECT 
                 sa.title,
                 sa.url,
@@ -319,7 +409,14 @@ class DatabaseService {
               WHERE sa.article_id = ?
             `;
             
-            const [sourceRows] = await this.pool.execute(sourceArticleQuery, [article.based_on_scraped_article_id]);
+            const queryParams = [article.based_on_scraped_article_id];
+            
+            if (accountId) {
+              sourceArticleQuery += ' AND sa.account_id = ?';
+              queryParams.push(accountId);
+            }
+            
+            const [sourceRows] = await this.pool.execute(sourceArticleQuery, queryParams);
             
             if (sourceRows.length > 0) {
               const sourceData = sourceRows[0];
@@ -350,20 +447,29 @@ class DatabaseService {
     }
   }
 
-  // Image Assets methods
-  async insertImageAsset(imageData) {
+  // Image Assets methods - updated for account context
+  async insertImageAsset(imageData, accountId = null) {
+    if (accountId) {
+      return this.insertWithAccount('ssnews_image_assets', imageData, accountId);
+    }
     return this.insert('ssnews_image_assets', imageData);
   }
 
   // System Logs methods
-  async insertLog(level, message, source = 'server', metadata = null) {
+  async insertLog(level, message, source = 'server', metadata = null, accountId = null) {
     try {
-      return await this.insert('ssnews_system_logs', {
+      const logData = {
         level,
         message,
         source,
         metadata: metadata ? JSON.stringify(metadata) : null
-      });
+      };
+      
+      if (accountId) {
+        logData.account_id = accountId;
+      }
+      
+      return await this.insert('ssnews_system_logs', logData);
     } catch (error) {
       // Don't throw errors for logging failures to avoid infinite loops
       console.error('❌ Failed to insert log to database:', error.message);
@@ -371,7 +477,7 @@ class DatabaseService {
     }
   }
 
-  async getLogs(limit = 100, level = null, source = null) {
+  async getLogs(limit = 100, level = null, source = null, accountId = null) {
     try {
       let whereClause = '1=1';
       const whereParams = [];
@@ -386,6 +492,12 @@ class DatabaseService {
         whereParams.push(source);
       }
 
+      // CRITICAL: Filter by account ID for security
+      if (accountId) {
+        whereClause += ' AND (account_id = ? OR account_id IS NULL)'; // Include system logs too
+        whereParams.push(accountId);
+      }
+
       // Use string interpolation for LIMIT to avoid parameter binding issues
       const limitValue = parseInt(limit) || 100;
 
@@ -397,6 +509,7 @@ class DatabaseService {
           message,
           source,
           metadata,
+          account_id,
           created_at
         FROM ssnews_system_logs 
         WHERE ${whereClause}
@@ -432,14 +545,25 @@ class DatabaseService {
     }
   }
 
-  async clearLogs(olderThanDays = null) {
+  async clearLogs(olderThanDays = null, accountId = null) {
     try {
       let sql = 'DELETE FROM ssnews_system_logs';
       const whereParams = [];
+      const whereConditions = [];
 
       if (olderThanDays) {
-        sql += ' WHERE timestamp < DATE_SUB(NOW(), INTERVAL ? DAY)';
+        whereConditions.push('timestamp < DATE_SUB(NOW(), INTERVAL ? DAY)');
         whereParams.push(olderThanDays);
+      }
+
+      // CRITICAL: Only clear logs for specific account
+      if (accountId) {
+        whereConditions.push('account_id = ?');
+        whereParams.push(accountId);
+      }
+
+      if (whereConditions.length > 0) {
+        sql += ' WHERE ' + whereConditions.join(' AND ');
       }
 
       const [result] = await this.pool.execute(sql, whereParams);
@@ -451,18 +575,27 @@ class DatabaseService {
     }
   }
 
-  async getLogStats() {
+  async getLogStats(accountId = null) {
     try {
+      let whereClause = 'timestamp > DATE_SUB(NOW(), INTERVAL 7 DAY)';
+      const whereParams = [];
+
+      // CRITICAL: Filter stats by account
+      if (accountId) {
+        whereClause += ' AND (account_id = ? OR account_id IS NULL)';
+        whereParams.push(accountId);
+      }
+
       const [rows] = await this.pool.execute(`
         SELECT 
           level,
           COUNT(*) as count,
           DATE(timestamp) as date
         FROM ssnews_system_logs 
-        WHERE timestamp > DATE_SUB(NOW(), INTERVAL 7 DAY)
+        WHERE ${whereClause}
         GROUP BY level, DATE(timestamp)
         ORDER BY date DESC, level
-      `);
+      `, whereParams);
 
       return rows;
     } catch (error) {

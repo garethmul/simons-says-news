@@ -1,10 +1,12 @@
 import { useState, useCallback } from 'react';
+import { useAccount } from '../contexts/AccountContext';
 import { API_ENDPOINTS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../utils/constants';
 
 /**
  * Custom hook for job management actions
  */
 export const useJobActions = (onDataRefresh) => {
+  const { selectedAccount, withAccountContext } = useAccount();
   const [actionLoadingMap, setActionLoadingMap] = useState(new Map());
 
   // Set loading state for specific job action
@@ -24,16 +26,22 @@ export const useJobActions = (onDataRefresh) => {
   const cancelJob = useCallback(async (jobId) => {
     const actionId = `cancel-${jobId}`;
     
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setActionLoading(actionId, true);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/jobs/${jobId}/cancel`, {
-        method: 'POST'
+        ...withAccountContext({
+          method: 'POST'
+        })
       });
 
       if (response.ok) {
-        console.log('✅ Job cancelled:', jobId);
+        console.log(`✅ Job cancelled: ${jobId} for account ${selectedAccount.name}`);
         if (onDataRefresh) await onDataRefresh();
         return { success: true, message: 'Job cancelled successfully' };
       } else {
@@ -47,22 +55,28 @@ export const useJobActions = (onDataRefresh) => {
     } finally {
       setActionLoading(actionId, false);
     }
-  }, [onDataRefresh, setActionLoading]);
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
   // Retry a failed job
   const retryJob = useCallback(async (jobId) => {
     const actionId = `retry-${jobId}`;
+    
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
     
     try {
       setActionLoading(actionId, true);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/jobs/${jobId}/retry`, {
-        method: 'POST'
+        ...withAccountContext({
+          method: 'POST'
+        })
       });
 
       if (response.ok) {
-        console.log('✅ Job retried:', jobId);
+        console.log(`✅ Job retried: ${jobId} for account ${selectedAccount.name}`);
         if (onDataRefresh) await onDataRefresh();
         return { success: true, message: 'Job retried successfully' };
       } else {
@@ -76,7 +90,7 @@ export const useJobActions = (onDataRefresh) => {
     } finally {
       setActionLoading(actionId, false);
     }
-  }, [onDataRefresh, setActionLoading]);
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
   // Start job worker
   const startJobWorker = useCallback(async () => {

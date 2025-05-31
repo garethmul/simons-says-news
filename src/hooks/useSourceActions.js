@@ -1,10 +1,12 @@
 import { useState, useCallback } from 'react';
+import { useAccount } from '../contexts/AccountContext';
 import { API_ENDPOINTS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../utils/constants';
 
 /**
  * Custom hook for source management actions
  */
 export const useSourceActions = (onDataRefresh) => {
+  const { selectedAccount, withAccountContext } = useAccount();
   const [toggleLoadingMap, setToggleLoadingMap] = useState(new Map());
 
   // Set loading state for specific source toggle
@@ -22,17 +24,23 @@ export const useSourceActions = (onDataRefresh) => {
 
   // Toggle source status (enable/disable)
   const toggleSourceStatus = useCallback(async (sourceId) => {
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setToggleLoading(sourceId, true);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/news/sources/${sourceId}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' }
+        ...withAccountContext({
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' }
+        })
       });
 
       if (response.ok) {
-        console.log('✅ Source status updated:', sourceId);
+        console.log(`✅ Source status updated: ${sourceId} for account ${selectedAccount.name}`);
         if (onDataRefresh) await onDataRefresh();
         return { success: true, message: SUCCESS_MESSAGES.SOURCE_UPDATED };
       } else {
@@ -46,7 +54,7 @@ export const useSourceActions = (onDataRefresh) => {
     } finally {
       setToggleLoading(sourceId, false);
     }
-  }, [onDataRefresh, setToggleLoading]);
+  }, [onDataRefresh, setToggleLoading, selectedAccount, withAccountContext]);
 
   // Check if source toggle is loading
   const isToggleLoading = useCallback((sourceId) => {

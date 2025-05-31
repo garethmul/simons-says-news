@@ -13,7 +13,8 @@ import {
   BookOpen,
   Eye,
   Edit,
-  Zap
+  Zap,
+  Users
 } from 'lucide-react';
 
 /**
@@ -125,6 +126,12 @@ const DashboardTab = ({
                   icon={<Edit className="w-4 h-4 mr-2" />}
                   text="Manage Prompts"
                   onClick={() => onTabChange('prompts')}
+                  variant="outline"
+                />
+                <ActionButton
+                  icon={<Users className="w-4 h-4 mr-2" />}
+                  text="Manage Users"
+                  onClick={() => onTabChange('users')}
                   variant="outline"
                 />
                 {!workerStatus.isRunning && (

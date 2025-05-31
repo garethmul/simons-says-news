@@ -361,18 +361,18 @@ class NewsAggregator {
     }
   }
 
-  async analyzeScrapedArticles() {
-    console.log('🧠 Starting AI analysis of scraped articles...');
+  async analyzeScrapedArticles(accountId = null) {
+    console.log(`🧠 Starting AI analysis of scraped articles (accountId: ${accountId})...`);
     
     try {
-      const articles = await db.getUnanalyzedArticles(20); // Process 20 at a time
-      console.log(`📊 Analyzing ${articles.length} articles`);
+      const articles = await db.getUnanalyzedArticles(20, accountId); // Process 20 at a time with account filtering
+      console.log(`📊 Analyzing ${articles.length} articles for account ${accountId || 'all accounts'}`);
 
       let analyzed = 0;
 
       for (const article of articles) {
         try {
-          console.log(`🔍 Analyzing: ${article.title.substring(0, 50)}...`);
+          console.log(`🔍 Analyzing: ${article.title.substring(0, 50)}... (accountId: ${accountId})`);
 
           // Generate AI summary
           const summary = await aiService.summarizeArticle(article.full_text, article.title);
@@ -383,15 +383,15 @@ class NewsAggregator {
           // Analyze relevance
           const relevanceScore = await aiService.analyzeRelevance(summary, keywords);
 
-          // Update article with analysis
+          // Update article with analysis - with account filtering
           await db.updateArticleAnalysis(article.article_id, {
             summary_ai: summary,
             keywords_ai: keywords,
             relevance_score: relevanceScore
-          });
+          }, accountId);
 
           analyzed++;
-          console.log(`✅ Analyzed: ${article.title.substring(0, 30)}... (Score: ${relevanceScore})`);
+          console.log(`✅ Analyzed: ${article.title.substring(0, 30)}... (Score: ${relevanceScore}) (accountId: ${accountId})`);
 
           // Small delay to avoid rate limiting
           await this.delay(1000);
@@ -400,7 +400,7 @@ class NewsAggregator {
         }
       }
 
-      console.log(`🎉 Analysis complete: ${analyzed} articles analyzed`);
+      console.log(`🎉 Analysis complete: ${analyzed} articles analyzed for account ${accountId || 'all accounts'}`);
       return analyzed;
     } catch (error) {
       console.error('❌ Article analysis failed:', error.message);
@@ -408,11 +408,11 @@ class NewsAggregator {
     }
   }
 
-  async getTopStories(limit = 5, minScore = 0.6) {
+  async getTopStories(limit = 5, minScore = 0.6, accountId = null) {
     try {
-      console.log(`📈 Fetching top ${limit} stories (min score: ${minScore})`);
+      console.log(`📈 Fetching top ${limit} stories (min score: ${minScore}, accountId: ${accountId})`);
       
-      const articles = await db.getTopArticlesByRelevance(limit, minScore);
+      const articles = await db.getTopArticlesByRelevance(limit, minScore, accountId);
       
       console.log(`🏆 Found ${articles.length} top stories`);
       return articles;
@@ -471,26 +471,46 @@ class NewsAggregator {
     }
   }
 
-  async getSourceStatus() {
+  async getSourceStatus(accountId = null) {
     try {
-      // Get ALL sources, not just active ones
-      const sources = await db.query(
-        'SELECT * FROM ssnews_news_sources ORDER BY name'
-      );
+      console.log(`📊 Getting source status (accountId: ${accountId})`);
+      
+      // Get sources filtered by account if accountId is provided
+      let sourcesQuery = 'SELECT * FROM ssnews_news_sources';
+      let queryParams = [];
+      
+      if (accountId) {
+        sourcesQuery += ' WHERE account_id = ?';
+        queryParams.push(accountId);
+      }
+      
+      sourcesQuery += ' ORDER BY name';
+      
+      const sources = await db.query(sourcesQuery, queryParams);
       const status = [];
 
       for (const source of sources) {
         // Get articles count for last 24 hours
-        const recentArticles = await db.query(
-          'SELECT COUNT(*) as count FROM ssnews_scraped_articles WHERE source_id = ? AND scraped_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)',
-          [source.source_id]
-        );
+        let recentQuery = 'SELECT COUNT(*) as count FROM ssnews_scraped_articles WHERE source_id = ? AND scraped_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)';
+        let recentParams = [source.source_id];
+        
+        if (accountId) {
+          recentQuery += ' AND account_id = ?';
+          recentParams.push(accountId);
+        }
+        
+        const recentArticles = await db.query(recentQuery, recentParams);
 
         // Get total articles count
-        const totalArticles = await db.query(
-          'SELECT COUNT(*) as count FROM ssnews_scraped_articles WHERE source_id = ?',
-          [source.source_id]
-        );
+        let totalQuery = 'SELECT COUNT(*) as count FROM ssnews_scraped_articles WHERE source_id = ?';
+        let totalParams = [source.source_id];
+        
+        if (accountId) {
+          totalQuery += ' AND account_id = ?';
+          totalParams.push(accountId);
+        }
+        
+        const totalArticles = await db.query(totalQuery, totalParams);
 
         // Determine source type based on whether it has RSS feed
         const sourceType = source.rss_feed_url ? 'RSS' : 'Web Scraping';
@@ -509,7 +529,8 @@ class NewsAggregator {
           source_type: sourceType,
           success_rate: null, // TODO: Calculate actual success rate from scraping attempts
           created_at: source.created_at,
-          updated_at: source.updated_at
+          updated_at: source.updated_at,
+          account_id: source.account_id
         });
       }
 

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import db from './database.js'; // Import database service
 
 class ImageService {
   constructor() {
@@ -292,22 +293,78 @@ class ImageService {
     }
   }
 
-  async getImageStats() {
+  async getImageStats(accountId = null) {
     try {
-      console.log('📊 Getting image usage statistics...');
+      console.log(`📊 Getting image usage statistics (accountId: ${accountId})...`);
       
-      // This would typically query your database for image usage stats
-      // For now, return a placeholder structure
+      // Add account filtering to queries if accountId is provided
+      let accountFilter = '';
+      let accountParams = [];
+      
+      if (accountId) {
+        accountFilter = ' AND account_id = ?';
+        accountParams = [accountId];
+      }
+      
+      // Get total images
+      const totalResult = await db.query(`
+        SELECT COUNT(*) as total
+        FROM ssnews_image_assets
+        WHERE 1=1${accountFilter}
+      `, accountParams);
+      
+      // Get images this week
+      const weekResult = await db.query(`
+        SELECT COUNT(*) as count
+        FROM ssnews_image_assets
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)${accountFilter}
+      `, accountParams);
+      
+      // Get top search queries (approximate from alt text)
+      const topQueriesResult = await db.query(`
+        SELECT 
+          alt_text_suggestion_ai as query,
+          COUNT(*) as count
+        FROM ssnews_image_assets
+        WHERE alt_text_suggestion_ai IS NOT NULL${accountFilter}
+        GROUP BY alt_text_suggestion_ai
+        ORDER BY count DESC
+        LIMIT 10
+      `, accountParams);
+      
+      // Calculate approximate storage used (this is a rough estimate)
+      const storageResult = await db.query(`
+        SELECT COUNT(*) * 0.5 as approx_mb
+        FROM ssnews_image_assets
+        WHERE 1=1${accountFilter}
+      `, accountParams);
+      
+      const stats = {
+        totalImages: totalResult[0]?.total || 0,
+        imagesThisWeek: weekResult[0]?.count || 0,
+        topQueries: topQueriesResult.map(row => ({
+          query: row.query,
+          count: row.count
+        })),
+        storageUsed: `${Math.round(storageResult[0]?.approx_mb || 0)} MB (approx)`,
+        accountId: accountId,
+        lastUpdated: new Date()
+      };
+      
+      console.log(`📊 Image stats: ${stats.totalImages} total, ${stats.imagesThisWeek} this week`);
+      return stats;
+    } catch (error) {
+      console.error('❌ Error getting image stats:', error.message);
+      // Return safe fallback data
       return {
         totalImages: 0,
         imagesThisWeek: 0,
         topQueries: [],
         storageUsed: '0 MB',
-        lastUpdated: new Date()
+        accountId: accountId,
+        lastUpdated: new Date(),
+        error: 'Failed to load stats'
       };
-    } catch (error) {
-      console.error('❌ Error getting image stats:', error.message);
-      throw error;
     }
   }
 

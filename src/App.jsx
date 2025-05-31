@@ -2,6 +2,7 @@ import React from 'react';
 import ProjectEden from './components/ProjectEdenRefactored';
 import Login from './components/Login';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AccountProvider } from './contexts/AccountContext';
 import { Loader2 } from 'lucide-react';
 import './index.css';
 
@@ -57,7 +58,12 @@ function AuthenticatedApp() {
   }
 
   // Show the main app if authenticated and authorized
-  return <ProjectEden />;
+  // Wrap with AccountProvider for multi-tenant support
+  return (
+    <AccountProvider>
+      <ProjectEden />
+    </AccountProvider>
+  );
 }
 
 function App() {

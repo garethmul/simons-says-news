@@ -6,7 +6,7 @@ class JobManager {
   }
 
   // Create a new job
-  async createJob(jobType, payload, priority = 0, createdBy = 'system') {
+  async createJob(jobType, payload, priority = 0, createdBy = 'system', accountId = null) {
     try {
       console.log(`📋 Creating ${jobType} job with payload:`, payload);
       
@@ -20,8 +20,13 @@ class JobManager {
         progress_percentage: 0
       };
 
+      // Add account_id if provided
+      if (accountId) {
+        jobData.account_id = accountId;
+      }
+
       const jobId = await db.insert('ssnews_jobs', jobData);
-      console.log(`✅ Job created with ID: ${jobId}`);
+      console.log(`✅ Job created with ID: ${jobId}${accountId ? ` for account ${accountId}` : ''}`);
       
       return jobId;
     } catch (error) {
@@ -31,14 +36,23 @@ class JobManager {
   }
 
   // Get next job to process (highest priority, oldest first)
-  async getNextJob() {
+  async getNextJob(accountId = null) {
     try {
-      const jobs = await db.query(`
+      let query = `
         SELECT * FROM ssnews_jobs 
         WHERE status = 'queued' 
-        ORDER BY priority DESC, created_at ASC 
-        LIMIT 1
-      `);
+      `;
+      
+      const params = [];
+      
+      if (accountId) {
+        query += ` AND account_id = ?`;
+        params.push(accountId);
+      }
+      
+      query += ` ORDER BY priority DESC, created_at ASC LIMIT 1`;
+      
+      const jobs = await db.query(query, params);
 
       return jobs.length > 0 ? jobs[0] : null;
     } catch (error) {
@@ -48,16 +62,25 @@ class JobManager {
   }
 
   // Claim a job for processing
-  async claimJob(jobId) {
+  async claimJob(jobId, accountId = null) {
     try {
-      const result = await db.query(`
+      let query = `
         UPDATE ssnews_jobs 
         SET status = 'processing', 
             worker_id = ?, 
             started_at = NOW(),
             updated_at = NOW()
         WHERE job_id = ? AND status = 'queued'
-      `, [this.workerId, jobId]);
+      `;
+      
+      const params = [this.workerId, jobId];
+      
+      if (accountId) {
+        query += ` AND account_id = ?`;
+        params.push(accountId);
+      }
+
+      const result = await db.query(query, params);
 
       return result.affectedRows > 0;
     } catch (error) {
@@ -67,7 +90,7 @@ class JobManager {
   }
 
   // Update job progress
-  async updateJobProgress(jobId, percentage, details = null) {
+  async updateJobProgress(jobId, percentage, details = null, accountId = null) {
     try {
       const updateData = {
         progress_percentage: percentage,
@@ -78,7 +101,15 @@ class JobManager {
         updateData.progress_details = details;
       }
 
-      await db.update('ssnews_jobs', updateData, 'job_id = ?', [jobId]);
+      let whereClause = 'job_id = ?';
+      const params = [jobId];
+      
+      if (accountId) {
+        whereClause += ' AND account_id = ?';
+        params.push(accountId);
+      }
+
+      await db.update('ssnews_jobs', updateData, whereClause, params);
       console.log(`📊 Job ${jobId} progress: ${percentage}% - ${details || ''}`);
     } catch (error) {
       console.error('❌ Error updating job progress:', error.message);
@@ -87,7 +118,7 @@ class JobManager {
   }
 
   // Complete a job successfully
-  async completeJob(jobId, results = null) {
+  async completeJob(jobId, results = null, accountId = null) {
     try {
       const updateData = {
         status: 'completed',
@@ -100,7 +131,15 @@ class JobManager {
         updateData.results = results; // MySQL will handle the JSON conversion
       }
 
-      await db.update('ssnews_jobs', updateData, 'job_id = ?', [jobId]);
+      let whereClause = 'job_id = ?';
+      const params = [jobId];
+      
+      if (accountId) {
+        whereClause += ' AND account_id = ?';
+        params.push(accountId);
+      }
+
+      await db.update('ssnews_jobs', updateData, whereClause, params);
       console.log(`✅ Job ${jobId} completed successfully`);
     } catch (error) {
       console.error('❌ Error completing job:', error.message);
@@ -109,7 +148,7 @@ class JobManager {
   }
 
   // Fail a job
-  async failJob(jobId, errorMessage) {
+  async failJob(jobId, errorMessage, accountId = null) {
     try {
       const updateData = {
         status: 'failed',
@@ -118,7 +157,15 @@ class JobManager {
         updated_at: new Date()
       };
 
-      await db.update('ssnews_jobs', updateData, 'job_id = ?', [jobId]);
+      let whereClause = 'job_id = ?';
+      const params = [jobId];
+      
+      if (accountId) {
+        whereClause += ' AND account_id = ?';
+        params.push(accountId);
+      }
+
+      await db.update('ssnews_jobs', updateData, whereClause, params);
       console.log(`❌ Job ${jobId} failed: ${errorMessage}`);
     } catch (error) {
       console.error('❌ Error failing job:', error.message);
@@ -126,10 +173,18 @@ class JobManager {
     }
   }
 
-  // Get job by ID
-  async getJob(jobId) {
+  // Get job by ID (account-aware)
+  async getJob(jobId, accountId = null) {
     try {
-      const job = await db.findOne('ssnews_jobs', 'job_id = ?', [jobId]);
+      let whereClause = 'job_id = ?';
+      const params = [jobId];
+      
+      if (accountId) {
+        whereClause += ' AND account_id = ?';
+        params.push(accountId);
+      }
+
+      const job = await db.findOne('ssnews_jobs', whereClause, params);
       if (!job) return null;
       
       // MySQL JSON columns return objects directly, no parsing needed
@@ -149,15 +204,24 @@ class JobManager {
     }
   }
 
-  // Get jobs by status
-  async getJobsByStatus(status, limit = 50) {
+  // Get jobs by status (account-aware)
+  async getJobsByStatus(status, limit = 50, accountId = null) {
     try {
-      const jobs = await db.query(`
+      let query = `
         SELECT * FROM ssnews_jobs 
         WHERE status = ? 
-        ORDER BY created_at DESC 
-        LIMIT ${parseInt(limit)}
-      `, [status]);
+      `;
+      
+      const params = [status];
+      
+      if (accountId) {
+        query += ` AND account_id = ?`;
+        params.push(accountId);
+      }
+      
+      query += ` ORDER BY created_at DESC LIMIT ${parseInt(limit)}`;
+      
+      const jobs = await db.query(query, params);
 
       // MySQL JSON columns return objects directly, no parsing needed
       return jobs.map(job => ({
@@ -171,10 +235,10 @@ class JobManager {
     }
   }
 
-  // Get queue statistics
-  async getQueueStats() {
+  // Get queue statistics (account-aware)
+  async getQueueStats(accountId = null) {
     try {
-      const stats = await db.query(`
+      let detailQuery = `
         SELECT 
           status,
           job_type,
@@ -182,11 +246,9 @@ class JobManager {
           AVG(progress_percentage) as avg_progress
         FROM ssnews_jobs 
         WHERE created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
-        GROUP BY status, job_type
-        ORDER BY status, job_type
-      `);
+      `;
 
-      const summary = await db.query(`
+      let summaryQuery = `
         SELECT 
           COUNT(*) as total_jobs,
           SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued,
@@ -195,7 +257,22 @@ class JobManager {
           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
         FROM ssnews_jobs 
         WHERE created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
-      `);
+      `;
+      
+      const params = [];
+      
+      if (accountId) {
+        detailQuery += ` AND account_id = ?`;
+        summaryQuery += ` AND account_id = ?`;
+        params.push(accountId);
+      }
+      
+      detailQuery += ` GROUP BY status, job_type ORDER BY status, job_type`;
+
+      const [stats, summary] = await Promise.all([
+        db.query(detailQuery, params),
+        db.query(summaryQuery, params)
+      ]);
 
       return {
         summary: summary[0] || {
@@ -213,10 +290,10 @@ class JobManager {
     }
   }
 
-  // Get recent jobs (for UI)
-  async getRecentJobs(limit = 20) {
+  // Get recent jobs (for UI) - account-aware
+  async getRecentJobs(limit = 20, accountId = null) {
     try {
-      const jobs = await db.query(`
+      let query = `
         SELECT 
           job_id,
           job_type,
@@ -230,11 +307,21 @@ class JobManager {
           created_at,
           started_at,
           completed_at,
-          created_by
+          created_by,
+          account_id
         FROM ssnews_jobs 
-        ORDER BY created_at DESC 
-        LIMIT ${parseInt(limit)}
-      `);
+      `;
+      
+      const params = [];
+      
+      if (accountId) {
+        query += ` WHERE account_id = ?`;
+        params.push(accountId);
+      }
+      
+      query += ` ORDER BY created_at DESC LIMIT ${parseInt(limit)}`;
+      
+      const jobs = await db.query(query, params);
 
       // MySQL JSON columns return objects directly, no parsing needed
       return jobs.map(job => ({
@@ -251,8 +338,8 @@ class JobManager {
     }
   }
 
-  // Cancel a job
-  async cancelJob(jobId) {
+  // Cancel a job (account-aware)
+  async cancelJob(jobId, accountId = null) {
     try {
       const updateData = {
         status: 'cancelled',
@@ -260,7 +347,15 @@ class JobManager {
         updated_at: new Date()
       };
 
-      await db.update('ssnews_jobs', updateData, 'job_id = ? AND status IN ("queued", "processing")', [jobId]);
+      let whereClause = 'job_id = ? AND status IN ("queued", "processing")';
+      const params = [jobId];
+      
+      if (accountId) {
+        whereClause += ' AND account_id = ?';
+        params.push(accountId);
+      }
+
+      await db.update('ssnews_jobs', updateData, whereClause, params);
       console.log(`🚫 Job ${jobId} cancelled`);
     } catch (error) {
       console.error('❌ Error cancelling job:', error.message);
@@ -268,10 +363,10 @@ class JobManager {
     }
   }
 
-  // Retry a failed job
-  async retryJob(jobId) {
+  // Retry a failed job (account-aware)
+  async retryJob(jobId, accountId = null) {
     try {
-      const job = await this.getJob(jobId);
+      const job = await this.getJob(jobId, accountId);
       if (!job || job.status !== 'failed') {
         throw new Error('Job not found or not in failed status');
       }
@@ -292,7 +387,15 @@ class JobManager {
         updated_at: new Date()
       };
 
-      await db.update('ssnews_jobs', updateData, 'job_id = ?', [jobId]);
+      let whereClause = 'job_id = ?';
+      const params = [jobId];
+      
+      if (accountId) {
+        whereClause += ' AND account_id = ?';
+        params.push(accountId);
+      }
+
+      await db.update('ssnews_jobs', updateData, whereClause, params);
       console.log(`🔄 Job ${jobId} queued for retry (attempt ${job.retry_count + 1})`);
     } catch (error) {
       console.error('❌ Error retrying job:', error.message);
@@ -300,16 +403,25 @@ class JobManager {
     }
   }
 
-  // Clean up old completed/failed jobs
-  async cleanupOldJobs(daysOld = 7) {
+  // Clean up old completed/failed jobs (account-aware)
+  async cleanupOldJobs(daysOld = 7, accountId = null) {
     try {
-      const result = await db.query(`
+      let query = `
         DELETE FROM ssnews_jobs 
         WHERE status IN ('completed', 'failed', 'cancelled') 
         AND completed_at < DATE_SUB(NOW(), INTERVAL ? DAY)
-      `, [daysOld]);
+      `;
+      
+      const params = [daysOld];
+      
+      if (accountId) {
+        query += ` AND account_id = ?`;
+        params.push(accountId);
+      }
 
-      console.log(`🧹 Cleaned up ${result.affectedRows} old jobs`);
+      const result = await db.query(query, params);
+
+      console.log(`🧹 Cleaned up ${result.affectedRows} old jobs${accountId ? ` for account ${accountId}` : ''}`);
       return result.affectedRows;
     } catch (error) {
       console.error('❌ Error cleaning up old jobs:', error.message);

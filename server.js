@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORTS } from './ports.config.js';
+import fs from 'fs';
 
 // Project Eden services
 import db from './src/services/database.js';
@@ -15,6 +16,12 @@ import imageService from './src/services/imageService.js';
 import PromptManager from './src/services/promptManager.js';
 import jobManager from './src/services/jobManager.js';
 import jobWorker from './src/services/jobWorker.js';
+
+// Multi-tenant imports
+import organizationRoutes from './src/routes/organizationRoutes.js';
+import promptRoutes from './src/routes/promptRoutes.js';
+import userManagementRoutes from './src/routes/userManagementRoutes.js';
+import { accountContext, optionalAccountContext } from './src/middleware/accountContext.js';
 
 // Load environment variables
 dotenv.config();
@@ -117,10 +124,19 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Mount organization routes
+app.use('/api', organizationRoutes);
+
+// Mount prompt routes
+app.use('/api', promptRoutes);
+
+// Mount user management routes
+app.use('/api/user-management', userManagementRoutes);
+
 // Project Eden API endpoints
 
 // News aggregation endpoints
-app.post('/api/eden/news/aggregate', async (req, res) => {
+app.post('/api/eden/news/aggregate', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
@@ -140,19 +156,27 @@ app.post('/api/eden/news/aggregate', async (req, res) => {
   }
 });
 
-app.post('/api/eden/news/analyze', async (req, res) => {
+app.post('/api/eden/news/analyze', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    console.log('🧠 Manual news analysis triggered');
-    const analyzed = await newsAggregator.analyzeScrapedArticles();
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`🧠 Manual news analysis triggered for account ${accountId}`);
+    const analyzed = await newsAggregator.analyzeScrapedArticles(accountId);
     
     res.json({
       success: true,
-      message: `Analyzed ${analyzed} articles`,
-      analyzed
+      message: `Analyzed ${analyzed} articles for account ${accountId}`,
+      analyzed,
+      accountId
     });
   } catch (error) {
     console.error('❌ News analysis failed:', error.message);
@@ -160,7 +184,7 @@ app.post('/api/eden/news/analyze', async (req, res) => {
   }
 });
 
-app.get('/api/eden/news/top-stories', async (req, res) => {
+app.get('/api/eden/news/top-stories', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
@@ -168,8 +192,9 @@ app.get('/api/eden/news/top-stories', async (req, res) => {
 
     const limit = parseInt(req.query.limit) || 10;
     const minScore = parseFloat(req.query.minScore) || 0.6;
+    const accountId = req.accountContext.accountId;
     
-    const topStories = await newsAggregator.getTopStories(limit, minScore);
+    const topStories = await newsAggregator.getTopStories(limit, minScore, accountId);
     
     res.json({
       success: true,
@@ -182,13 +207,14 @@ app.get('/api/eden/news/top-stories', async (req, res) => {
   }
 });
 
-app.get('/api/eden/news/sources/status', async (req, res) => {
+app.get('/api/eden/news/sources/status', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    const status = await newsAggregator.getSourceStatus();
+    const accountId = req.accountContext.accountId;
+    const status = await newsAggregator.getSourceStatus(accountId);
     
     res.json({
       success: true,
@@ -201,34 +227,41 @@ app.get('/api/eden/news/sources/status', async (req, res) => {
 });
 
 // Update news source RSS feed URL
-app.put('/api/eden/news/sources/:sourceName/rss', async (req, res) => {
+app.put('/api/eden/news/sources/:sourceName/rss', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
     const { sourceName } = req.params;
     const { rss_feed_url } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
 
     if (!rss_feed_url) {
       return res.status(400).json({ error: 'RSS feed URL is required' });
     }
 
-    // Update the RSS feed URL in the database
+    // Update the RSS feed URL in the database - FILTERED BY ACCOUNT
     const result = await db.update(
       'ssnews_news_sources',
       { rss_feed_url },
-      'name = ?',
-      [sourceName]
+      'name = ? AND account_id = ?',
+      [sourceName, accountId]
     );
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Source not found' });
+      return res.status(404).json({ error: 'Source not found in this account' });
     }
 
     res.json({
       success: true,
-      message: `RSS feed URL updated for ${sourceName}`
+      message: `RSS feed URL updated for ${sourceName} in account ${accountId}`,
+      accountId
     });
   } catch (error) {
     console.error('❌ Error updating RSS feed URL:', error.message);
@@ -237,36 +270,43 @@ app.put('/api/eden/news/sources/:sourceName/rss', async (req, res) => {
 });
 
 // Update news source status (enable/disable)
-app.put('/api/eden/news/sources/:sourceId/status', async (req, res) => {
+app.put('/api/eden/news/sources/:sourceId/status', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
     const { sourceId } = req.params;
     const { is_active } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
 
     if (typeof is_active !== 'boolean') {
       return res.status(400).json({ error: 'is_active must be a boolean value' });
     }
 
-    // Update the source status in the database
+    // Update the source status in the database - FILTERED BY ACCOUNT
     const result = await db.update(
       'ssnews_news_sources',
       { is_active },
-      'source_id = ?',
-      [sourceId]
+      'source_id = ? AND account_id = ?',
+      [sourceId, accountId]
     );
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Source not found' });
+      return res.status(404).json({ error: 'Source not found in this account' });
     }
 
-    console.log(`✅ Source ${sourceId} status updated to ${is_active ? 'active' : 'inactive'}`);
+    console.log(`✅ Source ${sourceId} status updated to ${is_active ? 'active' : 'inactive'} for account ${accountId}`);
 
     res.json({
       success: true,
-      message: `Source status updated to ${is_active ? 'active' : 'inactive'}`
+      message: `Source status updated to ${is_active ? 'active' : 'inactive'} for account ${accountId}`,
+      accountId
     });
   } catch (error) {
     console.error('❌ Error updating source status:', error.message);
@@ -275,21 +315,27 @@ app.put('/api/eden/news/sources/:sourceId/status', async (req, res) => {
 });
 
 // Debug endpoint to test individual source scraping
-app.post('/api/eden/news/sources/:sourceName/test', async (req, res) => {
+app.post('/api/eden/news/sources/:sourceName/test', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
     const { sourceName } = req.params;
     const { verbose = false } = req.body;
-
-    console.log(`🧪 Testing source: ${sourceName}`);
     
-    // Get source details
-    const source = await db.findOne('ssnews_news_sources', 'name = ?', [sourceName]);
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`🧪 Testing source: ${sourceName} for account ${accountId}`);
+    
+    // Get source details - FILTERED BY ACCOUNT
+    const source = await db.findOne('ssnews_news_sources', 'name = ? AND account_id = ?', [sourceName, accountId]);
     if (!source) {
-      return res.status(404).json({ error: `Source not found: ${sourceName}` });
+      return res.status(404).json({ error: `Source not found: ${sourceName} in account ${accountId}` });
     }
 
     // Test the source and capture detailed results
@@ -463,7 +509,75 @@ app.post('/api/eden/news/sources/:sourceName/test', async (req, res) => {
 });
 
 // Content generation endpoints
-app.post('/api/eden/content/generate', async (req, res) => {
+app.get('/api/eden/content/types', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Return available content types based on prompt templates
+    const contentTypes = [
+      {
+        id: 'article',
+        name: 'Blog Article',
+        icon: 'FileText',
+        category: 'blog',
+        description: 'Generates engaging blog posts and articles',
+        template: 'Blog Post Generator'
+      },
+      {
+        id: 'social_post',
+        name: 'Social Media Post',
+        icon: 'Share2',
+        category: 'social',
+        description: 'Creates social media content for various platforms',
+        template: 'Social Media Generator'
+      },
+      {
+        id: 'video_script',
+        name: 'Video Script',
+        icon: 'Video',
+        category: 'video',
+        description: 'Generates scripts for video content',
+        template: 'Video Script Generator'
+      },
+      {
+        id: 'prayer_points',
+        name: 'Prayer Points',
+        icon: 'Heart',
+        category: 'prayer',
+        description: 'Creates prayer points from news content',
+        template: 'Prayer Points Generator'
+      },
+      {
+        id: 'sermon_outline',
+        name: 'Sermon Outline',
+        icon: 'BookOpen',
+        category: 'sermon',
+        description: 'Generates sermon outlines and talking points',
+        template: 'Sermon Outline Generator'
+      }
+    ];
+
+    res.json({
+      success: true,
+      contentTypes,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error fetching content types:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/eden/content/generate', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
@@ -471,8 +585,9 @@ app.post('/api/eden/content/generate', async (req, res) => {
 
     const limit = parseInt(req.body.limit) || 5;
     const specificStoryId = req.body.specificStoryId;
+    const accountId = req.accountContext.accountId;
     
-    console.log(`🎨 Creating content generation job (limit: ${limit}${specificStoryId ? `, specific story: ${specificStoryId}` : ''})`);
+    console.log(`🎨 Creating content generation job (limit: ${limit}${specificStoryId ? `, specific story: ${specificStoryId}` : ''}) for account ${accountId}`);
     
     // Create job instead of processing synchronously
     const jobPayload = { limit };
@@ -484,7 +599,8 @@ app.post('/api/eden/content/generate', async (req, res) => {
       'content_generation',
       jobPayload,
       1, // priority
-      'user'
+      'user',
+      accountId // pass account ID
     );
     
     res.json({
@@ -499,25 +615,32 @@ app.post('/api/eden/content/generate', async (req, res) => {
   }
 });
 
-app.post('/api/eden/content/generate-evergreen', async (req, res) => {
+app.post('/api/eden/content/generate-evergreen', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
     const { category, count = 1 } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     
     if (!category) {
       return res.status(400).json({ error: 'Category is required' });
     }
 
-    console.log(`🌲 Evergreen content generation triggered (category: ${category})`);
-    const generatedContent = await contentGenerator.generateEvergreenContent(category, count);
+    console.log(`🌲 Evergreen content generation triggered (category: ${category}) for account ${accountId}`);
+    const generatedContent = await contentGenerator.generateEvergreenContent(category, count, accountId);
     
     res.json({
       success: true,
-      message: `Generated ${generatedContent.length} evergreen content pieces`,
-      content: generatedContent
+      message: `Generated ${generatedContent.length} evergreen content pieces for account ${accountId}`,
+      content: generatedContent,
+      accountId
     });
   } catch (error) {
     console.error('❌ Evergreen content generation failed:', error.message);
@@ -525,7 +648,7 @@ app.post('/api/eden/content/generate-evergreen', async (req, res) => {
   }
 });
 
-app.get('/api/eden/content/review', async (req, res) => {
+app.get('/api/eden/content/review', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
@@ -533,13 +656,15 @@ app.get('/api/eden/content/review', async (req, res) => {
 
     const statusParam = req.query.status || 'draft';
     const limit = parseInt(req.query.limit) || 20;
+    const accountId = req.accountContext.accountId;
     
     // Handle multiple statuses separated by commas
     const statuses = statusParam.split(',').map(s => s.trim());
     
     let content = [];
     for (const status of statuses) {
-      const statusContent = await contentGenerator.getContentForReview(status, limit);
+      // Pass account ID to filter content by account
+      const statusContent = await contentGenerator.getContentForReview(status, limit, accountId);
       content = content.concat(statusContent);
     }
     
@@ -559,7 +684,7 @@ app.get('/api/eden/content/review', async (req, res) => {
   }
 });
 
-app.put('/api/eden/content/:contentType/:contentId/status', async (req, res) => {
+app.put('/api/eden/content/:contentType/:contentId/status', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
@@ -567,6 +692,7 @@ app.put('/api/eden/content/:contentType/:contentId/status', async (req, res) => 
 
     const { contentType, contentId } = req.params;
     const { status, finalContent } = req.body;
+    const accountId = req.accountContext.accountId;
     
     // Map frontend content types to backend content types
     const contentTypeMapping = {
@@ -588,7 +714,8 @@ app.put('/api/eden/content/:contentType/:contentId/status', async (req, res) => 
       parseInt(contentId), 
       mappedContentType, 
       status, 
-      finalContent
+      finalContent,
+      accountId
     );
     
     res.json({
@@ -602,13 +729,19 @@ app.put('/api/eden/content/:contentType/:contentId/status', async (req, res) => 
 });
 
 // Image service endpoints
-app.get('/api/eden/images/search', async (req, res) => {
+app.get('/api/eden/images/search', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
     const { query, count = 5 } = req.query;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     
     if (!query) {
       return res.status(400).json({ error: 'Query is required' });
@@ -619,7 +752,8 @@ app.get('/api/eden/images/search', async (req, res) => {
     res.json({
       success: true,
       images,
-      count: images.length
+      count: images.length,
+      accountId
     });
   } catch (error) {
     console.error('❌ Image search failed:', error.message);
@@ -628,13 +762,14 @@ app.get('/api/eden/images/search', async (req, res) => {
 });
 
 // System status and stats endpoints
-app.get('/api/eden/stats/generation', async (req, res) => {
+app.get('/api/eden/stats/generation', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    const stats = await contentGenerator.getGenerationStats();
+    const accountId = req.accountContext.accountId;
+    const stats = await contentGenerator.getGenerationStats(accountId);
     
     res.json({
       success: true,
@@ -646,17 +781,25 @@ app.get('/api/eden/stats/generation', async (req, res) => {
   }
 });
 
-app.get('/api/eden/stats/images', async (req, res) => {
+app.get('/api/eden/stats/images', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    const stats = await imageService.getImageStats();
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const stats = await imageService.getImageStats(accountId);
     
     res.json({
       success: true,
-      stats
+      stats,
+      accountId
     });
   } catch (error) {
     console.error('❌ Error getting image stats:', error.message);
@@ -667,19 +810,20 @@ app.get('/api/eden/stats/images', async (req, res) => {
 // ===== USER BOOKMARKS API ENDPOINTS =====
 
 // Get user's bookmarked articles
-app.get('/api/eden/bookmarks', async (req, res) => {
+app.get('/api/eden/bookmarks', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const userId = req.query.userId;
+    const accountId = req.accountContext.accountId;
     
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
     }
 
-    // Get all bookmarked article IDs for the user
+    // Get all bookmarked article IDs for the user within this account
     const bookmarks = await db.query(`
       SELECT 
         b.bookmark_id,
@@ -695,9 +839,9 @@ app.get('/api/eden/bookmarks', async (req, res) => {
       FROM ssnews_user_bookmarks b
       JOIN ssnews_scraped_articles a ON b.article_id = a.article_id
       JOIN ssnews_news_sources s ON a.source_id = s.source_id
-      WHERE b.user_id = ?
+      WHERE b.user_id = ? AND a.account_id = ?
       ORDER BY b.bookmarked_at DESC
-    `, [userId]);
+    `, [userId, accountId]);
 
     res.json({
       success: true,
@@ -710,16 +854,28 @@ app.get('/api/eden/bookmarks', async (req, res) => {
 });
 
 // Add a bookmark
-app.post('/api/eden/bookmarks', async (req, res) => {
+app.post('/api/eden/bookmarks', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const { userId, userEmail, articleId } = req.body;
+    const accountId = req.accountContext.accountId;
     
     if (!userId || !articleId) {
       return res.status(400).json({ error: 'User ID and Article ID are required' });
+    }
+
+    // Verify article belongs to current account
+    const article = await db.findOne(
+      'ssnews_scraped_articles',
+      'article_id = ? AND account_id = ?',
+      [articleId, accountId]
+    );
+
+    if (!article) {
+      return res.status(404).json({ error: 'Article not found in current account' });
     }
 
     // Check if bookmark already exists
@@ -744,7 +900,7 @@ app.post('/api/eden/bookmarks', async (req, res) => {
       article_id: articleId
     });
 
-    console.log(`⭐ User ${userId} bookmarked article ${articleId}`);
+    console.log(`⭐ User ${userId} bookmarked article ${articleId} in account ${accountId}`);
 
     res.json({
       success: true,
@@ -758,16 +914,28 @@ app.post('/api/eden/bookmarks', async (req, res) => {
 });
 
 // Remove a bookmark
-app.delete('/api/eden/bookmarks', async (req, res) => {
+app.delete('/api/eden/bookmarks', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const { userId, articleId } = req.query;
+    const accountId = req.accountContext.accountId;
     
     if (!userId || !articleId) {
       return res.status(400).json({ error: 'User ID and Article ID are required' });
+    }
+
+    // Verify article belongs to current account before removing bookmark
+    const article = await db.findOne(
+      'ssnews_scraped_articles',
+      'article_id = ? AND account_id = ?',
+      [articleId, accountId]
+    );
+
+    if (!article) {
+      return res.status(404).json({ error: 'Article not found in current account' });
     }
 
     const result = await db.query(
@@ -779,7 +947,7 @@ app.delete('/api/eden/bookmarks', async (req, res) => {
       return res.status(404).json({ error: 'Bookmark not found' });
     }
 
-    console.log(`⭐ User ${userId} removed bookmark for article ${articleId}`);
+    console.log(`⭐ User ${userId} removed bookmark for article ${articleId} in account ${accountId}`);
 
     res.json({
       success: true,
@@ -792,22 +960,26 @@ app.delete('/api/eden/bookmarks', async (req, res) => {
 });
 
 // Get bookmarked article IDs only (for quick checking)
-app.get('/api/eden/bookmarks/ids', async (req, res) => {
+app.get('/api/eden/bookmarks/ids', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const userId = req.query.userId;
+    const accountId = req.accountContext.accountId;
     
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
     }
 
-    const bookmarks = await db.query(
-      'SELECT article_id FROM ssnews_user_bookmarks WHERE user_id = ?',
-      [userId]
-    );
+    // Only get bookmarks for articles in the current account
+    const bookmarks = await db.query(`
+      SELECT b.article_id 
+      FROM ssnews_user_bookmarks b
+      JOIN ssnews_scraped_articles a ON b.article_id = a.article_id
+      WHERE b.user_id = ? AND a.account_id = ?
+    `, [userId, accountId]);
 
     const articleIds = bookmarks.map(b => b.article_id);
 
@@ -841,8 +1013,8 @@ const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
 
 function logToDatabase(level, message, metadata = null) {
-  // Don't await this to avoid blocking the main thread
-  if (isSystemReady && db) {
+  // Only log to database if system is ready and database is available
+  if (isSystemReady && db && db.pool) {
     db.insertLog(level, message, 'server', metadata).catch(() => {
       // Silently fail to avoid infinite loops
     });
@@ -893,7 +1065,7 @@ console.warn = (...args) => {
 };
 
 // Server-Sent Events endpoint for real-time logs
-app.get('/api/eden/logs/stream', async (req, res) => {
+app.get('/api/eden/logs/stream', accountContext, async (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -903,9 +1075,17 @@ app.get('/api/eden/logs/stream', async (req, res) => {
   });
 
   try {
-    // Send recent logs immediately from database
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      res.write(`data: ${JSON.stringify({ error: 'Authentication required' })}\n\n`);
+      return;
+    }
+
+    // Send recent logs immediately from database - FILTERED BY ACCOUNT
     if (isSystemReady && db) {
-      const recentLogs = await db.getLogs(50); // Get last 50 logs
+      const recentLogs = await db.getLogs(50, null, null, accountId); // Add account filtering
       recentLogs.forEach(log => {
         res.write(`data: ${JSON.stringify(log)}\n\n`);
       });
@@ -939,22 +1119,31 @@ app.get('/api/eden/logs/stream', async (req, res) => {
 });
 
 // Get log history endpoint
-app.get('/api/eden/logs/history', async (req, res) => {
+app.get('/api/eden/logs/history', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
     const limit = parseInt(req.query.limit) || 100;
     const level = req.query.level; // optional filter by level
     const source = req.query.source; // optional filter by source
     
-    const logs = await db.getLogs(limit, level, source);
+    // FILTER LOGS BY ACCOUNT
+    const logs = await db.getLogs(limit, level, source, accountId);
     
     res.json({
       success: true,
       logs,
-      total: logs.length
+      total: logs.length,
+      accountId
     });
   } catch (error) {
     console.error('Error fetching log history:', error);
@@ -963,19 +1152,29 @@ app.get('/api/eden/logs/history', async (req, res) => {
 });
 
 // Clear logs endpoint
-app.delete('/api/eden/logs', async (req, res) => {
+app.delete('/api/eden/logs', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
     const olderThanDays = req.query.olderThanDays ? parseInt(req.query.olderThanDays) : null;
-    const deletedCount = await db.clearLogs(olderThanDays);
+    
+    // CLEAR ONLY LOGS FOR THIS ACCOUNT
+    const deletedCount = await db.clearLogs(olderThanDays, accountId);
     
     res.json({ 
       success: true, 
-      message: `Cleared ${deletedCount} log entries`,
-      deletedCount 
+      message: `Cleared ${deletedCount} log entries for account ${accountId}`,
+      deletedCount,
+      accountId
     });
   } catch (error) {
     console.error('Error clearing logs:', error);
@@ -984,17 +1183,26 @@ app.delete('/api/eden/logs', async (req, res) => {
 });
 
 // Get log statistics endpoint
-app.get('/api/eden/logs/stats', async (req, res) => {
+app.get('/api/eden/logs/stats', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    const stats = await db.getLogStats();
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // GET STATS ONLY FOR THIS ACCOUNT
+    const stats = await db.getLogStats(accountId);
     
     res.json({
       success: true,
-      stats
+      stats,
+      accountId
     });
   } catch (error) {
     console.error('Error fetching log stats:', error);
@@ -1003,7 +1211,15 @@ app.get('/api/eden/logs/stats', async (req, res) => {
 });
 
 // Server-Sent Events endpoint for progress updates
-app.get('/api/eden/automate/progress', (req, res) => {
+app.get('/api/eden/automate/progress', accountContext, (req, res) => {
+  const { currentUserId } = req;
+  const { accountId } = req.accountContext;
+  
+  if (!currentUserId) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -1012,17 +1228,50 @@ app.get('/api/eden/automate/progress', (req, res) => {
     'Access-Control-Allow-Headers': 'Cache-Control'
   });
 
-  // Send current progress immediately
-  res.write(`data: ${JSON.stringify(automationProgress)}\n\n`);
+  // Send current progress immediately - SCOPED TO ACCOUNT
+  const accountProgress = { ...automationProgress, accountId };
+  res.write(`data: ${JSON.stringify(accountProgress)}\n\n`);
 
   // Keep connection alive
   const heartbeat = setInterval(() => {
-    res.write(`data: ${JSON.stringify(automationProgress)}\n\n`);
+    const accountProgress = { ...automationProgress, accountId };
+    res.write(`data: ${JSON.stringify(accountProgress)}\n\n`);
   }, 5000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
   });
+});
+
+// Reset automation progress endpoint
+app.post('/api/eden/automate/reset', accountContext, async (req, res) => {
+  try {
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    automationProgress = {
+      isRunning: false,
+      currentStep: '',
+      progress: 0,
+      totalSteps: 3,
+      stepDetails: '',
+      startTime: null,
+      results: {}
+    };
+    
+    res.json({ 
+      success: true, 
+      message: `Automation progress reset for account ${accountId}`,
+      accountId 
+    });
+  } catch (error) {
+    console.error('❌ Error resetting automation progress:', error);
+    res.status(500).json({ error: 'Failed to reset automation progress' });
+  }
 });
 
 // Helper function to update progress
@@ -1038,20 +1287,22 @@ function updateProgress(step, progress, details = '', results = {}) {
 }
 
 // Full automation endpoint (news aggregation + analysis + content generation)
-app.post('/api/eden/automate/full-cycle', async (req, res) => {
+app.post('/api/eden/automate/full-cycle', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    console.log('🤖 Creating full automation cycle job');
+    const accountId = req.accountContext.accountId;
+    console.log(`🤖 Creating full automation cycle job for account ${accountId}`);
     
     // Create job instead of using old progress tracking
     const jobId = await jobManager.createJob(
       'full_cycle',
       {}, // no specific parameters needed
       5, // high priority
-      'user'
+      'user',
+      accountId // pass account ID
     );
     
     res.json({
@@ -1066,260 +1317,19 @@ app.post('/api/eden/automate/full-cycle', async (req, res) => {
   }
 });
 
-// Reset automation progress endpoint
-app.post('/api/eden/automate/reset', async (req, res) => {
-  try {
-    automationProgress = {
-      isRunning: false,
-      currentStep: '',
-      progress: 0,
-      totalSteps: 3,
-      stepDetails: '',
-      startTime: null,
-      results: {}
-    };
-    
-    res.json({ success: true, message: 'Automation progress reset' });
-  } catch (error) {
-    console.error('❌ Error resetting automation progress:', error);
-    res.status(500).json({ error: 'Failed to reset automation progress' });
-  }
-});
-
-async function runFullCycleAsync() {
-  try {
-    // Step 1: Aggregate news
-    updateProgress('Aggregating News', 10, 'Fetching articles from news sources...');
-    console.log('📰 Step 1: Aggregating news...');
-    const totalArticles = await newsAggregator.aggregateAllSources();
-    updateProgress('Aggregating News', 33, `Aggregated ${totalArticles} articles`, { articlesAggregated: totalArticles });
-    
-    // Step 2: Analyze articles
-    updateProgress('Analyzing Articles', 40, 'Running AI analysis on scraped articles...');
-    console.log('🧠 Step 2: Analyzing articles...');
-    const analyzed = await newsAggregator.analyzeScrapedArticles();
-    updateProgress('Analyzing Articles', 66, `Analyzed ${analyzed} articles with AI`, { articlesAnalyzed: analyzed });
-    
-    // Step 3: Generate content
-    updateProgress('Generating Content', 70, 'Creating blog posts, social content, and video scripts...');
-    console.log('🎨 Step 3: Generating content...');
-    const generatedContent = await contentGenerator.generateContentFromTopStories(5);
-    updateProgress('Generating Content', 90, `Generated ${generatedContent.length} content pieces`);
-    
-    // Complete
-    updateProgress('Complete', 100, 'Automation cycle completed successfully!', {
-      articlesAggregated: totalArticles,
-      articlesAnalyzed: analyzed,
-      contentGenerated: generatedContent.length,
-      completedAt: new Date()
-    });
-
-    // Reset after 30 seconds
-    setTimeout(() => {
-      automationProgress.isRunning = false;
-      console.log('✅ Automation cycle finished - ready for next cycle');
-    }, 30000);
-
-  } catch (error) {
-    console.error('❌ Full automation cycle failed:', error.message);
-    updateProgress('Error', 0, `Failed: ${error.message}`);
-    automationProgress.isRunning = false;
-  }
-}
-
-// ===== PROMPT MANAGEMENT API ENDPOINTS =====
-
-// Get all prompt templates
-app.get('/api/eden/prompts/templates', async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const templates = await promptManager.getAllTemplates();
-    res.json({ success: true, templates });
-  } catch (error) {
-    console.error('❌ Error fetching prompt templates:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get specific template with current version
-app.get('/api/eden/prompts/templates/:templateId', async (req, res) => {
-  try {
-    if (!isSystemReady || !promptManager) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-    
-    const { templateId } = req.params;
-    const template = await promptManager.getTemplate(templateId);
-    
-    if (!template) {
-      return res.status(404).json({ error: 'Template not found' });
-    }
-    
-    res.json({ success: true, template });
-  } catch (error) {
-    console.error('❌ Error fetching prompt template:', error);
-    res.status(500).json({ error: 'Failed to fetch prompt template' });
-  }
-});
-
-// Get all versions for a template
-app.get('/api/eden/prompts/templates/:templateId/versions', async (req, res) => {
-  try {
-    if (!isSystemReady || !promptManager) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-    
-    const { templateId } = req.params;
-    const versions = await promptManager.getTemplateVersions(templateId);
-    res.json({ success: true, versions });
-  } catch (error) {
-    console.error('❌ Error fetching template versions:', error);
-    res.status(500).json({ error: 'Failed to fetch template versions' });
-  }
-});
-
-// Create new template version
-app.post('/api/eden/prompts/templates/:templateId/versions', async (req, res) => {
-  try {
-    if (!isSystemReady || !promptManager) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-    
-    const { templateId } = req.params;
-    const { promptContent, systemMessage, parameters, notes, createdBy } = req.body;
-    
-    if (!promptContent) {
-      return res.status(400).json({ error: 'Prompt content is required' });
-    }
-    
-    const result = await promptManager.createTemplateVersion(
-      templateId, 
-      promptContent, 
-      systemMessage, 
-      parameters, 
-      createdBy || 'user', 
-      notes || ''
-    );
-    
-    res.json({ success: true, ...result });
-  } catch (error) {
-    console.error('❌ Error creating template version:', error);
-    res.status(500).json({ error: 'Failed to create template version' });
-  }
-});
-
-// Set current version for a template
-app.put('/api/eden/prompts/templates/:templateId/versions/:versionId/current', async (req, res) => {
-  try {
-    if (!isSystemReady || !promptManager) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-    
-    const { templateId, versionId } = req.params;
-    await promptManager.setCurrentVersion(templateId, versionId);
-    res.json({ success: true, message: 'Current version updated' });
-  } catch (error) {
-    console.error('❌ Error setting current version:', error);
-    res.status(500).json({ error: 'Failed to set current version' });
-  }
-});
-
-// Test a prompt with sample variables
-app.post('/api/eden/prompts/templates/:templateId/versions/:versionId/test', async (req, res) => {
-  try {
-    if (!isSystemReady || !promptManager) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-    
-    const { templateId, versionId } = req.params;
-    const { testVariables } = req.body;
-    
-    const result = await promptManager.testPrompt(templateId, versionId, testVariables || {});
-    res.json({ success: true, result });
-  } catch (error) {
-    console.error('❌ Error testing prompt:', error);
-    res.status(500).json({ error: 'Failed to test prompt' });
-  }
-});
-
-// Get generation history for a template
-app.get('/api/eden/prompts/templates/:templateId/history', async (req, res) => {
-  try {
-    if (!isSystemReady || !promptManager) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-    
-    const { templateId } = req.params;
-    const { limit } = req.query;
-    
-    const history = await promptManager.getGenerationHistory(templateId, parseInt(limit) || 50);
-    res.json({ success: true, history });
-  } catch (error) {
-    console.error('❌ Error fetching generation history:', error);
-    res.status(500).json({ error: 'Failed to fetch generation history' });
-  }
-});
-
-// Get usage statistics for a template
-app.get('/api/eden/prompts/templates/:templateId/stats', async (req, res) => {
-  try {
-    if (!isSystemReady || !promptManager) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-    
-    const { templateId } = req.params;
-    const stats = await promptManager.getUsageStats(templateId);
-    res.json({ success: true, stats });
-  } catch (error) {
-    console.error('❌ Error fetching usage stats:', error);
-    res.status(500).json({ error: 'Failed to fetch usage stats' });
-  }
-});
-
-// Create new prompt template
-app.post('/api/eden/prompts/templates', async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { name, category, description, promptContent, systemMessage, createdBy } = req.body;
-    
-    if (!name || !category || !promptContent) {
-      return res.status(400).json({ error: 'Name, category, and prompt content are required' });
-    }
-
-    const templateId = await promptManager.createTemplate({
-      name,
-      category,
-      description: description || '',
-      promptContent,
-      systemMessage: systemMessage || '',
-      createdBy: createdBy || 'user'
-    });
-
-    res.json({ success: true, templateId });
-  } catch (error) {
-    console.error('❌ Error creating prompt template:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // ===== END PROMPT MANAGEMENT API ENDPOINTS =====
 
 // ===== JOB MANAGEMENT API ENDPOINTS =====
 
 // Get job queue status and statistics
-app.get('/api/eden/jobs/queue/stats', async (req, res) => {
+app.get('/api/eden/jobs/queue/stats', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    const stats = await jobManager.getQueueStats();
+    const accountId = req.accountContext.accountId;
+    const stats = await jobManager.getQueueStats(accountId);
     const workerStatus = jobWorker.getStatus();
     
     res.json({
@@ -1334,14 +1344,15 @@ app.get('/api/eden/jobs/queue/stats', async (req, res) => {
 });
 
 // Get recent jobs
-app.get('/api/eden/jobs/recent', async (req, res) => {
+app.get('/api/eden/jobs/recent', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const limit = parseInt(req.query.limit) || 20;
-    const jobs = await jobManager.getRecentJobs(limit);
+    const accountId = req.accountContext.accountId;
+    const jobs = await jobManager.getRecentJobs(limit, accountId);
     
     res.json({
       success: true,
@@ -1355,7 +1366,7 @@ app.get('/api/eden/jobs/recent', async (req, res) => {
 });
 
 // Get jobs by status
-app.get('/api/eden/jobs/status/:status', async (req, res) => {
+app.get('/api/eden/jobs/status/:status', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
@@ -1363,12 +1374,13 @@ app.get('/api/eden/jobs/status/:status', async (req, res) => {
 
     const { status } = req.params;
     const limit = parseInt(req.query.limit) || 50;
+    const accountId = req.accountContext.accountId;
     
     if (!['queued', 'processing', 'completed', 'failed', 'cancelled'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    const jobs = await jobManager.getJobsByStatus(status, limit);
+    const jobs = await jobManager.getJobsByStatus(status, limit, accountId);
     
     res.json({
       success: true,
@@ -1383,14 +1395,15 @@ app.get('/api/eden/jobs/status/:status', async (req, res) => {
 });
 
 // Get specific job details
-app.get('/api/eden/jobs/:jobId', async (req, res) => {
+app.get('/api/eden/jobs/:jobId', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const { jobId } = req.params;
-    const job = await jobManager.getJob(parseInt(jobId));
+    const accountId = req.accountContext.accountId;
+    const job = await jobManager.getJob(parseInt(jobId), accountId);
     
     if (!job) {
       return res.status(404).json({ error: 'Job not found' });
@@ -1407,14 +1420,15 @@ app.get('/api/eden/jobs/:jobId', async (req, res) => {
 });
 
 // Cancel a job
-app.post('/api/eden/jobs/:jobId/cancel', async (req, res) => {
+app.post('/api/eden/jobs/:jobId/cancel', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const { jobId } = req.params;
-    await jobManager.cancelJob(parseInt(jobId));
+    const accountId = req.accountContext.accountId;
+    await jobManager.cancelJob(parseInt(jobId), accountId);
     
     res.json({
       success: true,
@@ -1427,14 +1441,15 @@ app.post('/api/eden/jobs/:jobId/cancel', async (req, res) => {
 });
 
 // Retry a failed job
-app.post('/api/eden/jobs/:jobId/retry', async (req, res) => {
+app.post('/api/eden/jobs/:jobId/retry', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const { jobId } = req.params;
-    await jobManager.retryJob(parseInt(jobId));
+    const accountId = req.accountContext.accountId;
+    await jobManager.retryJob(parseInt(jobId), accountId);
     
     res.json({
       success: true,
@@ -1447,7 +1462,7 @@ app.post('/api/eden/jobs/:jobId/retry', async (req, res) => {
 });
 
 // Server-Sent Events endpoint for real-time job updates
-app.get('/api/eden/jobs/stream', async (req, res) => {
+app.get('/api/eden/jobs/stream', accountContext, async (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -1457,9 +1472,10 @@ app.get('/api/eden/jobs/stream', async (req, res) => {
   });
 
   try {
+    const accountId = req.accountContext.accountId;
     // Send current queue stats immediately
-    const stats = await jobManager.getQueueStats();
-    const recentJobs = await jobManager.getRecentJobs(5);
+    const stats = await jobManager.getQueueStats(accountId);
+    const recentJobs = await jobManager.getRecentJobs(5, accountId);
     const workerStatus = jobWorker.getStatus();
     
     res.write(`data: ${JSON.stringify({
@@ -1476,7 +1492,8 @@ app.get('/api/eden/jobs/stream', async (req, res) => {
   // Send updates every 5 seconds
   const updateInterval = setInterval(async () => {
     try {
-      const stats = await jobManager.getQueueStats();
+      const accountId = req.accountContext.accountId;
+      const stats = await jobManager.getQueueStats(accountId);
       const workerStatus = jobWorker.getStatus();
       
       res.write(`data: ${JSON.stringify({
@@ -1499,7 +1516,7 @@ app.get('/api/eden/jobs/stream', async (req, res) => {
   });
 });
 
-// Worker control endpoints
+// Worker control endpoints (these don't need account filtering as they're system-level)
 app.post('/api/eden/jobs/worker/start', async (req, res) => {
   try {
     jobWorker.start();
@@ -1531,14 +1548,15 @@ app.get('/api/eden/jobs/worker/status', async (req, res) => {
 });
 
 // Cleanup old jobs endpoint
-app.delete('/api/eden/jobs/cleanup', async (req, res) => {
+app.delete('/api/eden/jobs/cleanup', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
     const daysOld = parseInt(req.query.daysOld) || 7;
-    const deletedCount = await jobManager.cleanupOldJobs(daysOld);
+    const accountId = req.accountContext.accountId;
+    const deletedCount = await jobManager.cleanupOldJobs(daysOld, accountId);
     
     res.json({
       success: true,
@@ -1620,6 +1638,24 @@ const server = app.listen(PORT, () => {
   }
 });
 
+// Initialize system in background after server starts
+initializeSystem().catch(error => {
+  console.error('❌ System initialization failed:', error.message);
+  // Don't exit the process, just log the error
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  await db.close();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully');
+  await db.close();
+  process.exit(0);
+}); 
 // Initialize system in background after server starts
 initializeSystem().catch(error => {
   console.error('❌ System initialization failed:', error.message);

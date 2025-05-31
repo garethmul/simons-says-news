@@ -5,15 +5,15 @@ class PromptManager {
     this.db = db;
   }
 
-  // Get all prompt templates
-  async getAllTemplates() {
+  // Get all prompt templates for an account
+  async getAllTemplates(accountId = null) {
     try {
       // Ensure database is initialized
       if (!this.db.pool) {
         await this.db.initialize();
       }
       
-      const [rows] = await this.db.pool.execute(`
+      let query = `
         SELECT 
           pt.*,
           pv.version_id as current_version_id,
@@ -25,8 +25,18 @@ class PromptManager {
         FROM ssnews_prompt_templates pt
         LEFT JOIN ssnews_prompt_versions pv ON pt.template_id = pv.template_id AND pv.is_current = TRUE
         WHERE pt.is_active = TRUE
-        ORDER BY pt.category, pt.name
-      `);
+      `;
+      
+      const params = [];
+      
+      if (accountId) {
+        query += ` AND pt.account_id = ?`;
+        params.push(accountId);
+      }
+      
+      query += ` ORDER BY pt.category, pt.name`;
+      
+      const [rows] = await this.db.pool.execute(query, params);
       return rows;
     } catch (error) {
       console.error('❌ Error fetching prompt templates:', error);
@@ -34,15 +44,15 @@ class PromptManager {
     }
   }
 
-  // Get template by ID with current version
-  async getTemplate(templateId) {
+  // Get template by ID with current version (account-aware)
+  async getTemplate(templateId, accountId = null) {
     try {
       // Ensure database is initialized
       if (!this.db.pool) {
         await this.db.initialize();
       }
       
-      const [rows] = await this.db.pool.execute(`
+      let query = `
         SELECT 
           pt.*,
           pv.version_id as current_version_id,
@@ -56,7 +66,16 @@ class PromptManager {
         FROM ssnews_prompt_templates pt
         LEFT JOIN ssnews_prompt_versions pv ON pt.template_id = pv.template_id AND pv.is_current = TRUE
         WHERE pt.template_id = ?
-      `, [templateId]);
+      `;
+      
+      const params = [templateId];
+      
+      if (accountId) {
+        query += ` AND pt.account_id = ?`;
+        params.push(accountId);
+      }
+      
+      const [rows] = await this.db.pool.execute(query, params);
       
       return rows[0] || null;
     } catch (error) {
@@ -65,9 +84,17 @@ class PromptManager {
     }
   }
 
-  // Get all versions for a template
-  async getTemplateVersions(templateId) {
+  // Get all versions for a template (account-aware)
+  async getTemplateVersions(templateId, accountId = null) {
     try {
+      // First verify the template belongs to the account
+      if (accountId) {
+        const template = await this.getTemplate(templateId, accountId);
+        if (!template) {
+          throw new Error('Template not found or access denied');
+        }
+      }
+      
       const [rows] = await this.db.pool.execute(`
         SELECT 
           pv.*,
@@ -85,12 +112,24 @@ class PromptManager {
     }
   }
 
-  // Create new template version
-  async createTemplateVersion(templateId, promptContent, systemMessage, parameters = null, createdBy = 'user', notes = '') {
+  // Create new template version (account-aware)
+  async createTemplateVersion(templateId, promptContent, systemMessage, parameters = null, createdBy = 'user', notes = '', accountId = null) {
     const connection = await this.db.pool.getConnection();
     
     try {
       await connection.beginTransaction();
+
+      // Verify template belongs to account if accountId provided
+      if (accountId) {
+        const [templateCheck] = await connection.execute(`
+          SELECT template_id FROM ssnews_prompt_templates 
+          WHERE template_id = ? AND account_id = ?
+        `, [templateId, accountId]);
+        
+        if (templateCheck.length === 0) {
+          throw new Error('Template not found or access denied');
+        }
+      }
 
       // Get next version number
       const [versionRows] = await connection.execute(`
@@ -138,12 +177,24 @@ class PromptManager {
     }
   }
 
-  // Set a specific version as current
-  async setCurrentVersion(templateId, versionId) {
+  // Set a specific version as current (account-aware)
+  async setCurrentVersion(templateId, versionId, accountId = null) {
     const connection = await this.db.pool.getConnection();
     
     try {
       await connection.beginTransaction();
+
+      // Verify template belongs to account if accountId provided
+      if (accountId) {
+        const [templateCheck] = await connection.execute(`
+          SELECT template_id FROM ssnews_prompt_templates 
+          WHERE template_id = ? AND account_id = ?
+        `, [templateId, accountId]);
+        
+        if (templateCheck.length === 0) {
+          throw new Error('Template not found or access denied');
+        }
+      }
 
       // Set all versions as not current
       await connection.execute(`
@@ -170,9 +221,17 @@ class PromptManager {
     }
   }
 
-  // Log content generation
-  async logGeneration(generatedArticleId, templateId, versionId, aiService, modelUsed, tokensUsed, generationTimeMs, success = true, errorMessage = null) {
+  // Log content generation (account-aware)
+  async logGeneration(generatedArticleId, templateId, versionId, aiService, modelUsed, tokensUsed, generationTimeMs, success = true, errorMessage = null, accountId = null) {
     try {
+      // Verify template belongs to account if accountId provided
+      if (accountId) {
+        const template = await this.getTemplate(templateId, accountId);
+        if (!template) {
+          throw new Error('Template not found or access denied');
+        }
+      }
+      
       await this.db.pool.execute(`
         INSERT INTO ssnews_content_generation_log 
         (generated_article_id, template_id, version_id, ai_service, model_used, tokens_used, generation_time_ms, success, error_message)
@@ -184,9 +243,17 @@ class PromptManager {
     }
   }
 
-  // Get content generation history for a template
-  async getGenerationHistory(templateId, limit = 50) {
+  // Get content generation history for a template (account-aware)
+  async getGenerationHistory(templateId, limit = 50, accountId = null) {
     try {
+      // Verify template belongs to account if accountId provided
+      if (accountId) {
+        const template = await this.getTemplate(templateId, accountId);
+        if (!template) {
+          throw new Error('Template not found or access denied');
+        }
+      }
+      
       const limitValue = parseInt(limit) || 50;
       
       const [rows] = await this.db.pool.execute(`
@@ -210,12 +277,12 @@ class PromptManager {
     }
   }
 
-  // Get prompt for content generation (with variable substitution)
-  async getPromptForGeneration(category, variables = {}) {
+  // Get prompt for content generation (with variable substitution) - account-aware
+  async getPromptForGeneration(category, variables = {}, accountId = null) {
     try {
-      const template = await this.getTemplateByCategory(category);
+      const template = await this.getTemplateByCategory(category, accountId);
       if (!template) {
-        throw new Error(`No active template found for category: ${category}`);
+        throw new Error(`No active template found for category: ${category}${accountId ? ` in account ${accountId}` : ''}`);
       }
 
       let prompt = template.current_prompt;
@@ -243,10 +310,10 @@ class PromptManager {
     }
   }
 
-  // Get template by category
-  async getTemplateByCategory(category) {
+  // Get template by category (account-aware)
+  async getTemplateByCategory(category, accountId = null) {
     try {
-      const [rows] = await this.db.pool.execute(`
+      let query = `
         SELECT 
           pt.*,
           pv.version_id as current_version_id,
@@ -257,8 +324,18 @@ class PromptManager {
         FROM ssnews_prompt_templates pt
         JOIN ssnews_prompt_versions pv ON pt.template_id = pv.template_id AND pv.is_current = TRUE
         WHERE pt.category = ? AND pt.is_active = TRUE
-        LIMIT 1
-      `, [category]);
+      `;
+      
+      const params = [category];
+      
+      if (accountId) {
+        query += ` AND pt.account_id = ?`;
+        params.push(accountId);
+      }
+      
+      query += ` LIMIT 1`;
+      
+      const [rows] = await this.db.pool.execute(query, params);
       
       return rows[0] || null;
     } catch (error) {
@@ -267,9 +344,17 @@ class PromptManager {
     }
   }
 
-  // Test a prompt (dry run)
-  async testPrompt(templateId, versionId, testVariables = {}) {
+  // Test a prompt (dry run) - account-aware
+  async testPrompt(templateId, versionId, testVariables = {}, accountId = null) {
     try {
+      // Verify template belongs to account if accountId provided
+      if (accountId) {
+        const template = await this.getTemplate(templateId, accountId);
+        if (!template) {
+          throw new Error('Template not found or access denied');
+        }
+      }
+      
       const [rows] = await this.db.pool.execute(`
         SELECT prompt_content, system_message, parameters
         FROM ssnews_prompt_versions 
@@ -303,9 +388,17 @@ class PromptManager {
     }
   }
 
-  // Get usage statistics
-  async getUsageStats(templateId) {
+  // Get usage statistics (account-aware)
+  async getUsageStats(templateId, accountId = null) {
     try {
+      // Verify template belongs to account if accountId provided
+      if (accountId) {
+        const template = await this.getTemplate(templateId, accountId);
+        if (!template) {
+          throw new Error('Template not found or access denied');
+        }
+      }
+      
       const [rows] = await this.db.pool.execute(`
         SELECT 
           pv.version_number,
@@ -327,19 +420,23 @@ class PromptManager {
     }
   }
 
-  // Create new prompt template
-  async createTemplate({ name, category, description, promptContent, systemMessage, createdBy }) {
+  // Create new prompt template (account-aware)
+  async createTemplate({ name, category, description, promptContent, systemMessage, createdBy, accountId }) {
     const connection = await this.db.pool.getConnection();
     
     try {
       await connection.beginTransaction();
 
+      if (!accountId) {
+        throw new Error('Account ID is required for creating templates');
+      }
+
       // Insert new template
       const [templateResult] = await connection.execute(`
         INSERT INTO ssnews_prompt_templates 
-        (name, category, description, is_active)
-        VALUES (?, ?, ?, TRUE)
-      `, [name, category, description]);
+        (name, category, description, is_active, account_id)
+        VALUES (?, ?, ?, TRUE, ?)
+      `, [name, category, description, accountId]);
 
       const templateId = templateResult.insertId;
 
@@ -352,7 +449,7 @@ class PromptManager {
 
       await connection.commit();
       
-      console.log(`✅ Created new template "${name}" with ID ${templateId}`);
+      console.log(`✅ Created new template "${name}" with ID ${templateId} for account ${accountId}`);
       return templateId;
     } catch (error) {
       await connection.rollback();
@@ -364,8 +461,8 @@ class PromptManager {
   }
 
   // Legacy method name for backward compatibility
-  async getTemplates() {
-    return this.getAllTemplates();
+  async getTemplates(accountId = null) {
+    return this.getAllTemplates(accountId);
   }
 }
 

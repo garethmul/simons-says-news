@@ -1,10 +1,12 @@
 import { useState, useCallback } from 'react';
+import { useAccount } from '../contexts/AccountContext';
 import { API_ENDPOINTS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../utils/constants';
 
 /**
  * Custom hook for content actions (approve, reject, generate, etc.)
  */
 export const useContentActions = (onDataRefresh) => {
+  const { selectedAccount, withAccountContext } = useAccount();
   const [actionLoadingMap, setActionLoadingMap] = useState(new Map());
   const [generatingContentMap, setGeneratingContentMap] = useState(new Map());
   
@@ -38,15 +40,21 @@ export const useContentActions = (onDataRefresh) => {
   const approveContent = useCallback(async (contentId, contentType) => {
     const actionId = `approve-${contentType}-${contentId}`;
     
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setActionLoading(actionId, true);
-      console.log(`✅ Approving ${contentType} ${contentId}`);
+      console.log(`✅ Approving ${contentType} ${contentId} for account ${selectedAccount.name}`);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
+        ...withAccountContext({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'approved' })
+        })
       });
       
       if (response.ok) {
@@ -62,21 +70,27 @@ export const useContentActions = (onDataRefresh) => {
     } finally {
       setActionLoading(actionId, false);
     }
-  }, [onDataRefresh, setActionLoading]);
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
   // Reject content
   const rejectContent = useCallback(async (contentId, contentType) => {
     const actionId = `reject-${contentType}-${contentId}`;
     
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setActionLoading(actionId, true);
-      console.log(`❌ Rejecting ${contentType} ${contentId}`);
+      console.log(`❌ Rejecting ${contentType} ${contentId} for account ${selectedAccount.name}`);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
+        ...withAccountContext({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'rejected' })
+        })
       });
       
       if (response.ok) {
@@ -92,49 +106,61 @@ export const useContentActions = (onDataRefresh) => {
     } finally {
       setActionLoading(actionId, false);
     }
-  }, [onDataRefresh, setActionLoading]);
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
   // Update content status
   const updateContentStatus = useCallback(async (contentType, contentId, newStatus) => {
     const actionId = `update-${contentType}-${contentId}`;
     
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setActionLoading(actionId, true);
-      console.log(`📝 Updating ${contentType} ${contentId} to ${newStatus}`);
+      console.log(`📝 Updating ${contentType} ${contentId} to ${newStatus} for account ${selectedAccount.name}`);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}/api/eden/content/${contentType}/${contentId}/status`, {
+        ...withAccountContext({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
+        })
       });
       
       if (response.ok) {
-        console.log(`✅ Status updated successfully`);
+        console.log(`✅ Content updated successfully`);
         if (onDataRefresh) await onDataRefresh();
         return { success: true, message: 'Status updated successfully' };
       } else {
         throw new Error('Failed to update status');
       }
     } catch (error) {
-      console.error('Error updating status:', error);
+      console.error('Error updating content:', error);
       throw error;
     } finally {
       setActionLoading(actionId, false);
     }
-  }, [onDataRefresh, setActionLoading]);
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
   // Generate content from story
   const generateContentFromStory = useCallback(async (storyId, onTabChange) => {
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setContentGenerationLoading(storyId, true);
-      console.log('Creating content generation job for story:', storyId);
+      console.log(`Creating content generation job for story: ${storyId} in account ${selectedAccount.name}`);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_GENERATE}`, {
+        ...withAccountContext({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit: 1, specificStoryId: storyId })
+        })
       });
 
       if (response.ok) {
@@ -163,21 +189,27 @@ export const useContentActions = (onDataRefresh) => {
     } finally {
       setContentGenerationLoading(storyId, false);
     }
-  }, [onDataRefresh, setContentGenerationLoading]);
+  }, [onDataRefresh, setContentGenerationLoading, selectedAccount, withAccountContext]);
 
   // Analyze more articles
   const analyzeMoreArticles = useCallback(async () => {
     const actionId = 'analyze-more';
     
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setActionLoading(actionId, true);
-      console.log('🧠 Analyzing more articles...');
+      console.log(`🧠 Analyzing more articles for account ${selectedAccount.name}...`);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}${API_ENDPOINTS.ANALYZE_ARTICLES}`, {
+        ...withAccountContext({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit: 20 })
+        })
       });
       
       if (response.ok) {
@@ -194,20 +226,26 @@ export const useContentActions = (onDataRefresh) => {
     } finally {
       setActionLoading(actionId, false);
     }
-  }, [onDataRefresh, setActionLoading]);
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
   // Run full automation cycle
   const runFullCycle = useCallback(async () => {
     const actionId = 'full-cycle';
     
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setActionLoading(actionId, true);
-      console.log('🤖 Starting full automation cycle...');
+      console.log(`🤖 Starting full automation cycle for account ${selectedAccount.name}...`);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${baseUrl}${API_ENDPOINTS.FULL_CYCLE}`, {
+        ...withAccountContext({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
+        })
       });
       
       if (response.ok) {
@@ -224,15 +262,19 @@ export const useContentActions = (onDataRefresh) => {
     } finally {
       setActionLoading(actionId, false);
     }
-  }, [onDataRefresh, setActionLoading]);
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
   // Create content job
   const createContentJob = useCallback(async (specificStoryId = null, onTabChange) => {
     const actionId = 'create-content-job';
     
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
     try {
       setActionLoading(actionId, true);
-      console.log('📝 Creating content generation job...');
+      console.log(`📝 Creating content generation job for account ${selectedAccount.name}...`);
       
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const payload = specificStoryId 
@@ -240,9 +282,11 @@ export const useContentActions = (onDataRefresh) => {
         : { limit: 5 };
       
       const response = await fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_GENERATE}`, {
+        ...withAccountContext({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
+        })
       });
       
       if (response.ok) {
@@ -264,7 +308,7 @@ export const useContentActions = (onDataRefresh) => {
     } finally {
       setActionLoading(actionId, false);
     }
-  }, [onDataRefresh, setActionLoading]);
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
   // Check if action is loading
   const isActionLoading = useCallback((actionId) => {

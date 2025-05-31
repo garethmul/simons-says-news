@@ -193,9 +193,9 @@ const SourceArticleInfo = ({ sourceArticle }) => (
       </span>
       <span>{sourceArticle.source_name}</span>
     </div>
-    <p className="text-xs text-gray-700 line-clamp-2 mb-2">
+    <div className="text-xs text-gray-700 line-clamp-2 mb-2">
       {sourceArticle.summary}
-    </p>
+    </div>
     <div className="flex items-center justify-between">
       <div className="flex flex-wrap gap-1">
         {parseKeywords(sourceArticle.keywords).slice(0, 3).map((keyword, index) => (

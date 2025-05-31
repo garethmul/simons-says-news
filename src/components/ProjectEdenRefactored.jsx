@@ -12,6 +12,7 @@ import JobsTab from './jobs/JobsTab';
 import SourcesTab from './sources/SourcesTab';
 import ProgressModal from './ProgressModal';
 import PromptManagement from './PromptManagement';
+import AccountUserManagement from './AccountUserManagement';
 import LogViewer from './LogViewer';
 import DetailModal from './content/DetailModal';
 import { 
@@ -27,6 +28,8 @@ import { useSourceActions } from '../hooks/useSourceActions';
 import { useJobActions } from '../hooks/useJobActions';
 import { TAB_ROUTES } from '../utils/constants';
 import { getTabFromHash } from '../utils/helpers';
+import { useAccount } from '../contexts/AccountContext';
+import AccountSwitcher from './AccountSwitcher';
 
 /**
  * Refactored Project Eden Main Component
@@ -251,7 +254,7 @@ const ProjectEden = () => {
 
           {/* Main Interface */}
           <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-9">
+            <TabsList className="grid w-full grid-cols-10">
               <TabsTrigger value={TAB_ROUTES.DASHBOARD}>Dashboard</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.REVIEW}>Review ({contentForReview.length})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.APPROVED}>Approved ({approvedContent.length})</TabsTrigger>
@@ -261,6 +264,7 @@ const ProjectEden = () => {
               <TabsTrigger value={TAB_ROUTES.JOBS}>Jobs</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.SOURCES}>Sources ({sources.length})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.PROMPTS}>Prompts</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.USERS}>Users</TabsTrigger>
             </TabsList>
 
             {/* Automation Running Message */}
@@ -364,6 +368,10 @@ const ProjectEden = () => {
             <TabsContent value={TAB_ROUTES.PROMPTS}>
               <PromptManagement />
             </TabsContent>
+
+            <TabsContent value={TAB_ROUTES.USERS}>
+              <AccountUserManagement />
+            </TabsContent>
           </Tabs>
         </div>
 
@@ -410,9 +418,13 @@ const Header = ({
 }) => (
   <div className="mb-8">
     <div className="flex items-center justify-between">
+      <div className="flex items-center gap-6">
+        {/* Account Switcher in top-left */}
+        <AccountSwitcher />
       <div>
         <h1 className="text-4xl font-bold text-gray-900 mb-2">Project Eden</h1>
         <p className="text-lg text-gray-600">AI-Powered Content Automation for Eden.co.uk</p>
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <Button onClick={onRefresh} variant="outline" disabled={loading || showProgressModal}>

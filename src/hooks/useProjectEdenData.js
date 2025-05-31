@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useAccount } from '../contexts/AccountContext';
 import { API_ENDPOINTS, REFRESH_INTERVALS, ERROR_MESSAGES } from '../utils/constants';
 
 /**
@@ -7,6 +8,7 @@ import { API_ENDPOINTS, REFRESH_INTERVALS, ERROR_MESSAGES } from '../utils/const
  */
 export const useProjectEdenData = () => {
   const { currentUser } = useAuth();
+  const { selectedAccount, withAccountContext, hasAccess } = useAccount();
   
   // State
   const [stats, setStats] = useState({
@@ -34,15 +36,28 @@ export const useProjectEdenData = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
+  // Helper function to make API requests with account context
+  const fetchWithAccountContext = async (endpoint, options = {}) => {
+    const baseUrl = import.meta.env.VITE_API_URL || '';
+    const accountOptions = withAccountContext(options);
+    
+    const response = await fetch(`${baseUrl}${endpoint}`, accountOptions);
+    return response;
+  };
+  
   // Fetch all data
   const fetchData = useCallback(async () => {
+    // Skip fetching if no account is selected
+    if (!hasAccess || !selectedAccount) {
+      console.log('No account selected, skipping data fetch');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || '';
-      
-      // Fetch all data in parallel
+      // Fetch all data in parallel with account context
       const [
         reviewResponse,
         approvedResponse,
@@ -53,15 +68,15 @@ export const useProjectEdenData = () => {
         bookmarksResponse,
         sourcesResponse
       ] = await Promise.all([
-        fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_REVIEW}`),
-        fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_REVIEW}?status=approved`),
-        fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_REVIEW}?status=rejected`),
-        fetch(`${baseUrl}${API_ENDPOINTS.TOP_STORIES}?limit=100&minScore=0.1`),
-        fetch(`${baseUrl}${API_ENDPOINTS.GENERATION_STATS}`),
-        fetch(`${baseUrl}${API_ENDPOINTS.JOBS_STATS}`),
-        currentUser?.uid ? fetch(`${baseUrl}${API_ENDPOINTS.BOOKMARKS}/ids?userId=${currentUser.uid}`) : 
+        fetchWithAccountContext(API_ENDPOINTS.CONTENT_REVIEW),
+        fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=approved`),
+        fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=rejected`),
+        fetchWithAccountContext(`${API_ENDPOINTS.TOP_STORIES}?limit=100&minScore=0.1`),
+        fetchWithAccountContext(API_ENDPOINTS.GENERATION_STATS),
+        fetchWithAccountContext(API_ENDPOINTS.JOBS_STATS),
+        currentUser?.uid ? fetchWithAccountContext(`${API_ENDPOINTS.BOOKMARKS}/ids?userId=${currentUser.uid}`) : 
           Promise.resolve({ json: () => ({ articleIds: [] }) }),
-        fetch(`${baseUrl}${API_ENDPOINTS.SOURCES_STATUS}`)
+        fetchWithAccountContext(API_ENDPOINTS.SOURCES_STATUS)
       ]);
 
       // Process responses
@@ -121,15 +136,18 @@ export const useProjectEdenData = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentUser]);
+  }, [currentUser, selectedAccount, hasAccess, withAccountContext]);
 
   // Fetch jobs data
   const fetchJobs = useCallback(async () => {
+    if (!hasAccess || !selectedAccount) {
+      return [];
+    }
+
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || '';
       const [jobsResponse, statsResponse] = await Promise.all([
-        fetch(`${baseUrl}${API_ENDPOINTS.JOBS_RECENT}?limit=20`),
-        fetch(`${baseUrl}${API_ENDPOINTS.JOBS_STATS}`)
+        fetchWithAccountContext(`${API_ENDPOINTS.JOBS_RECENT}?limit=20`),
+        fetchWithAccountContext(API_ENDPOINTS.JOBS_STATS)
       ]);
       
       if (jobsResponse.ok && statsResponse.ok) {
@@ -145,24 +163,24 @@ export const useProjectEdenData = () => {
       console.error('Error fetching jobs:', err);
       throw new Error(ERROR_MESSAGES.FETCH_FAILED);
     }
-  }, []);
+  }, [selectedAccount, hasAccess, withAccountContext]);
 
   // Toggle bookmark/favorite
   const toggleFavorite = useCallback(async (articleId) => {
-    if (!currentUser?.uid) {
-      console.warn('User must be logged in to bookmark articles');
+    if (!currentUser?.uid || !hasAccess || !selectedAccount) {
+      console.warn('User must be logged in and have account access to bookmark articles');
       return;
     }
 
-    const baseUrl = import.meta.env.VITE_API_URL || '';
     const newFavorites = new Set(favoriteStories);
     
     try {
       if (favoriteStories.has(articleId)) {
         // Remove bookmark
-        const response = await fetch(`${baseUrl}${API_ENDPOINTS.BOOKMARKS}?userId=${currentUser.uid}&articleId=${articleId}`, {
-          method: 'DELETE'
-        });
+        const response = await fetchWithAccountContext(
+          `${API_ENDPOINTS.BOOKMARKS}?userId=${currentUser.uid}&articleId=${articleId}`,
+          { method: 'DELETE' }
+        );
 
         if (response.ok) {
           newFavorites.delete(articleId);
@@ -172,7 +190,7 @@ export const useProjectEdenData = () => {
         }
       } else {
         // Add bookmark
-        const response = await fetch(`${baseUrl}${API_ENDPOINTS.BOOKMARKS}`, {
+        const response = await fetchWithAccountContext(API_ENDPOINTS.BOOKMARKS, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -195,16 +213,75 @@ export const useProjectEdenData = () => {
       console.error('Error toggling bookmark:', error);
       // Revert on error - favorites state remains unchanged
     }
-  }, [currentUser, favoriteStories]);
+  }, [currentUser, favoriteStories, selectedAccount, hasAccess, withAccountContext]);
 
-  // Set up automatic data refresh
+  // React to account changes - clear data and refetch
   useEffect(() => {
-    fetchData();
+    if (selectedAccount) {
+      console.log(`🔄 Account context changed to: ${selectedAccount.name} (${selectedAccount.account_id})`);
+      
+      // Clear all data when account changes
+      setStats({
+        articlesAggregated: 0,
+        articlesAnalyzed: 0,
+        contentGenerated: 0,
+        pendingReview: 0,
+        approvedContent: 0,
+        totalArticlesProcessed: 0,
+        activeSources: 0
+      });
+      setContentForReview([]);
+      setApprovedContent([]);
+      setRejectedContent([]);
+      setAllArticles([]);
+      setSources([]);
+      setJobStats({
+        summary: { total_jobs: 0, queued: 0, processing: 0, completed: 0, failed: 0 },
+        details: []
+      });
+      setWorkerStatus({ isRunning: false, currentJob: null });
+      setFavoriteStories(new Set());
+      setError(null);
+      
+      // Fetch fresh data for the new account
+      fetchData();
+    } else {
+      // Clear data when no account is selected
+      console.log('🔄 No account selected, clearing all data');
+      setStats({
+        articlesAggregated: 0,
+        articlesAnalyzed: 0,
+        contentGenerated: 0,
+        pendingReview: 0,
+        approvedContent: 0,
+        totalArticlesProcessed: 0,
+        activeSources: 0
+      });
+      setContentForReview([]);
+      setApprovedContent([]);
+      setRejectedContent([]);
+      setAllArticles([]);
+      setSources([]);
+      setJobStats({
+        summary: { total_jobs: 0, queued: 0, processing: 0, completed: 0, failed: 0 },
+        details: []
+      });
+      setWorkerStatus({ isRunning: false, currentJob: null });
+      setFavoriteStories(new Set());
+      setError(null);
+    }
+  }, [selectedAccount?.account_id]);
+
+  // Set up automatic data refresh for current account
+  useEffect(() => {
+    if (selectedAccount) {
+      const interval = setInterval(() => {
+        fetchData();
+      }, REFRESH_INTERVALS.DATA);
     
-    const interval = setInterval(fetchData, REFRESH_INTERVALS.DATA);
-    
-    return () => clearInterval(interval);
-  }, [fetchData]);
+      return () => clearInterval(interval);
+    }
+  }, [selectedAccount?.account_id, fetchData]);
 
   return {
     // Data
@@ -221,6 +298,8 @@ export const useProjectEdenData = () => {
     // State
     loading,
     error,
+    hasAccess,
+    selectedAccount,
     
     // Actions
     fetchData,

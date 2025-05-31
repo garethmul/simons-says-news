@@ -44,7 +44,8 @@ export const TAB_ROUTES = {
   QUEUED: 'queued',
   JOBS: 'jobs',
   SOURCES: 'sources',
-  PROMPTS: 'prompts'
+  PROMPTS: 'prompts',
+  USERS: 'users'
 };
 
 export const API_ENDPOINTS = {
