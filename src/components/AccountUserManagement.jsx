@@ -239,7 +239,7 @@ const AccountUserManagement = () => {
     );
   }
 
-  if (!permissions.manageUsers && !permissions.viewAllAccounts) {
+  if (!permissions.permissions?.manageUsers && !permissions.permissions?.viewAllAccounts) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
         <h2 className="text-xl font-semibold text-gray-800 mb-4">User Management</h2>
@@ -262,7 +262,7 @@ const AccountUserManagement = () => {
             </p>
           </div>
           
-          {permissions.manageUsers && (
+          {permissions.permissions?.manageUsers && (
             <div className="text-sm text-gray-500">
               Your role: <span className={getRoleBadgeClass(permissions.accountRole)}>
                 {permissions.accountRole}
@@ -286,7 +286,7 @@ const AccountUserManagement = () => {
             Users ({users.length})
           </button>
           
-          {permissions.manageUsers && (
+          {(permissions.permissions?.manageUsers || permissions.permissions?.inviteUsers) && (
             <>
               <button
                 onClick={() => setActiveTab('invite')}
@@ -353,7 +353,7 @@ const AccountUserManagement = () => {
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Last Access
                           </th>
-                          {permissions.manageUsers && (
+                          {permissions.permissions?.manageUsers && (
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Actions
                             </th>
@@ -391,7 +391,7 @@ const AccountUserManagement = () => {
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               {user.last_access ? formatDateTime(user.last_access) : 'Never'}
                             </td>
-                            {permissions.manageUsers && (
+                            {permissions.permissions?.manageUsers && (
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                 {user.user_id !== currentUser?.uid && (
                                   <button
@@ -413,7 +413,7 @@ const AccountUserManagement = () => {
             )}
 
             {/* Invite User Tab */}
-            {activeTab === 'invite' && permissions.manageUsers && (
+            {activeTab === 'invite' && permissions.permissions?.inviteUsers && (
               <div>
                 <h3 className="text-lg font-medium text-gray-800 mb-4">Invite New User</h3>
                 
@@ -470,7 +470,7 @@ const AccountUserManagement = () => {
             )}
 
             {/* Pending Invitations Tab */}
-            {activeTab === 'invitations' && permissions.manageUsers && (
+            {activeTab === 'invitations' && (permissions.permissions?.manageUsers || permissions.permissions?.inviteUsers) && (
               <div>
                 <h3 className="text-lg font-medium text-gray-800 mb-4">Pending Invitations</h3>
                 

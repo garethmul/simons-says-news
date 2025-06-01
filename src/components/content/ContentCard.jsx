@@ -18,7 +18,8 @@ import {
   Clock,
   RotateCcw,
   ArrowLeft,
-  Heart
+  Heart,
+  Archive
 } from 'lucide-react';
 import { formatDate, getDaysAgo, parseKeywords, truncateText } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
@@ -57,17 +58,28 @@ const ContentCard = ({
   onReview,
   onPublish,
   onReturnToReview,
+  onReturnToApproved,
+  onArchive,
   onRegenerate,
   showApprovalActions = true,
   showPublishActions = false,
   showRejectedActions = false,
+  showArchivedActions = false,
   loading = false,
+  isActionLoading,
   className = ""
 }) => {
   const { getContentTypeName, getContentTypeIcon } = useContentTypes();
   
+  // Check specific loading states
+  const isArchiving = isActionLoading && isActionLoading(`update-article-${content.gen_article_id}`);
+  const isApproving = isActionLoading && isActionLoading(`approve-${content.content_type}-${content.gen_article_id}`);
+  const isRejecting = isActionLoading && isActionLoading(`reject-${content.content_type}-${content.gen_article_id}`);
+  const isUpdating = isArchiving || isApproving || isRejecting;
+  
   const getBorderColor = () => {
     if (showRejectedActions) return 'border-l-red-500';
+    if (showArchivedActions) return 'border-l-gray-500';
     if (content.status === 'approved') return 'border-l-green-500';
     return 'border-l-blue-500';
   };
@@ -76,7 +88,11 @@ const ContentCard = ({
   const contentTypeIcon = getContentTypeIcon(content.content_type);
 
   return (
-    <Card className={`${getBorderColor()} border-l-4 ${className}`}>
+    <Card className={`${getBorderColor()} border-l-4 transition-all duration-300 ease-in-out ${
+      isUpdating ? 'opacity-60 pointer-events-none transform scale-98' : 'hover:shadow-md'
+    } ${
+      isArchiving ? 'animate-pulse' : ''
+    } ${className}`}>
       <CardHeader>
         <div className="flex items-start justify-between">
           <div className="flex-1">
@@ -101,13 +117,21 @@ const ContentCard = ({
               {showRejectedActions && (
                 <Badge variant="destructive" className="text-xs">Rejected</Badge>
               )}
+              {showArchivedActions && (
+                <Badge variant="secondary" className="text-xs">Archived</Badge>
+              )}
+              {isArchiving && (
+                <Badge variant="outline" className="text-xs animate-pulse">
+                  Archiving...
+                </Badge>
+              )}
             </div>
             <CardDescription className="mt-2">
-              <div className="flex items-center gap-1">
+              <span className="flex items-center gap-1">
                 <DynamicIcon iconName={contentTypeIcon} className="w-3 h-3" />
                 {contentTypeName} • {content.word_count} words • 
                 Created {formatDate(content.created_at)}
-              </div>
+              </span>
             </CardDescription>
             
             {/* Date/Time Information */}
@@ -128,7 +152,7 @@ const ContentCard = ({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <StatusBadge status={showRejectedActions ? 'rejected' : content.status} />
+            <StatusBadge status={showRejectedActions ? 'rejected' : showArchivedActions ? 'archived' : content.status} />
           </div>
         </div>
       </CardHeader>
@@ -159,11 +183,16 @@ const ContentCard = ({
           onReview={onReview}
           onPublish={onPublish}
           onReturnToReview={onReturnToReview}
+          onReturnToApproved={onReturnToApproved}
+          onArchive={onArchive}
           onRegenerate={onRegenerate}
           showApprovalActions={showApprovalActions}
           showPublishActions={showPublishActions}
           showRejectedActions={showRejectedActions}
+          showArchivedActions={showArchivedActions}
           loading={loading}
+          isUpdating={isUpdating}
+          isArchiving={isArchiving}
         />
       </CardContent>
     </Card>
@@ -348,17 +377,23 @@ const ActionButtons = ({
   onReview,
   onPublish,
   onReturnToReview,
+  onReturnToApproved,
+  onArchive,
   onRegenerate,
   showApprovalActions,
   showPublishActions,
   showRejectedActions,
-  loading
+  showArchivedActions,
+  loading,
+  isUpdating,
+  isArchiving
 }) => (
   <div className="flex gap-2">
     <Button 
       size="sm" 
       variant="outline"
       onClick={() => onReview(content)}
+      disabled={isUpdating}
     >
       <Eye className="w-4 h-4 mr-2" />
       {showPublishActions ? 'View Details' : showRejectedActions ? 'Review Content' : 'Review'}
@@ -370,7 +405,7 @@ const ActionButtons = ({
           size="sm" 
           variant="outline"
           onClick={() => onApprove(content.gen_article_id, content.content_type)}
-          disabled={loading}
+          disabled={loading || isUpdating}
         >
           <Check className="w-4 h-4 mr-2" />
           Approve
@@ -379,7 +414,8 @@ const ActionButtons = ({
           size="sm" 
           variant="destructive"
           onClick={() => onReject(content.gen_article_id, content.content_type)}
-          disabled={loading}
+          disabled={loading || isUpdating}
+          className="text-white hover:text-white"
         >
           <X className="w-4 h-4 mr-2" />
           Reject
@@ -393,6 +429,7 @@ const ActionButtons = ({
           size="sm" 
           variant="default"
           onClick={() => onPublish('article', content.gen_article_id, 'published')}
+          disabled={isUpdating}
         >
           <ExternalLink className="w-4 h-4 mr-2" />
           Publish
@@ -401,9 +438,23 @@ const ActionButtons = ({
           size="sm" 
           variant="outline"
           onClick={() => onReturnToReview('article', content.gen_article_id, 'review_pending')}
+          disabled={isUpdating}
         >
           <Edit className="w-4 h-4 mr-2" />
           Return to Review
+        </Button>
+        <Button 
+          size="sm" 
+          variant="secondary"
+          onClick={() => onArchive('article', content.gen_article_id, 'archived')}
+          disabled={isUpdating}
+        >
+          {isArchiving ? (
+            <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : (
+            <Archive className="w-4 h-4 mr-2" />
+          )}
+          {isArchiving ? 'Archiving...' : 'Archive'}
         </Button>
       </>
     )}
@@ -414,7 +465,7 @@ const ActionButtons = ({
           size="sm" 
           variant="outline"
           onClick={() => onReturnToReview(content.gen_article_id, content.content_type)}
-          disabled={loading}
+          disabled={loading || isUpdating}
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
           Return to Review
@@ -423,7 +474,30 @@ const ActionButtons = ({
           size="sm" 
           variant="default"
           onClick={() => onRegenerate(content.sourceArticle?.article_id || content.gen_article_id)}
-          disabled={loading}
+          disabled={loading || isUpdating}
+        >
+          <RotateCcw className="w-4 h-4 mr-2" />
+          Regenerate
+        </Button>
+      </>
+    )}
+
+    {showArchivedActions && (
+      <>
+        <Button 
+          size="sm" 
+          variant="outline"
+          onClick={() => onReturnToApproved('article', content.gen_article_id, 'approved')}
+          disabled={loading || isUpdating}
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Return to Approved
+        </Button>
+        <Button 
+          size="sm" 
+          variant="default"
+          onClick={() => onRegenerate(content.sourceArticle?.article_id || content.gen_article_id)}
+          disabled={loading || isUpdating}
         >
           <RotateCcw className="w-4 h-4 mr-2" />
           Regenerate

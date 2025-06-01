@@ -428,6 +428,51 @@ class JobManager {
       throw error;
     }
   }
+
+  // Get stale jobs (jobs that have been processing for too long)
+  async getStaleJobs(olderThanMinutes = 5) {
+    try {
+      const [rows] = await db.pool.execute(`
+        SELECT 
+          job_id, 
+          job_type, 
+          status, 
+          started_at, 
+          worker_id,
+          account_id,
+          TIMESTAMPDIFF(MINUTE, started_at, NOW()) as minutes_processing
+        FROM ssnews_jobs 
+        WHERE status = 'processing' 
+          AND started_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)
+        ORDER BY started_at ASC
+      `, [olderThanMinutes]);
+      
+      return rows;
+    } catch (error) {
+      console.error('❌ Error getting stale jobs:', error.message);
+      return [];
+    }
+  }
+
+  // Mark a job as failed due to being stale
+  async markJobAsStale(jobId, errorMessage) {
+    try {
+      await db.pool.execute(`
+        UPDATE ssnews_jobs 
+        SET 
+          status = 'failed',
+          completed_at = NOW(),
+          error_message = ?,
+          updated_at = NOW()
+        WHERE job_id = ?
+      `, [errorMessage, jobId]);
+      
+      return true;
+    } catch (error) {
+      console.error(`❌ Error marking job ${jobId} as stale:`, error.message);
+      return false;
+    }
+  }
 }
 
 // Create singleton instance

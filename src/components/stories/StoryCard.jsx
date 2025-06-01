@@ -7,9 +7,44 @@ import {
   FileText,
   Star,
   Loader2,
-  X
+  X,
+  Clock,
+  CheckCircle,
+  Zap
 } from 'lucide-react';
 import { formatDate, parseKeywords, getRelevanceBadgeVariant, getRelevanceDisplay } from '../../utils/helpers';
+
+/**
+ * Get status badge variant based on article status
+ */
+const getStatusBadgeVariant = (status) => {
+  switch (status) {
+    case 'analyzed':
+      return 'default'; // Green
+    case 'scraped':
+      return 'secondary'; // Gray
+    case 'processed':
+      return 'outline'; // Blue outline
+    default:
+      return 'secondary';
+  }
+};
+
+/**
+ * Get status display text and icon
+ */
+const getStatusDisplay = (status) => {
+  switch (status) {
+    case 'analyzed':
+      return { text: 'Analyzed', icon: CheckCircle };
+    case 'scraped':
+      return { text: 'Needs Analysis', icon: Clock };
+    case 'processed':
+      return { text: 'Used for Content', icon: Zap };
+    default:
+      return { text: status, icon: Clock };
+  }
+};
 
 /**
  * Story Card Component
@@ -28,6 +63,8 @@ const StoryCard = ({
   isRejected = false
 }) => {
   const displayIndex = ((currentPage - 1) * itemsPerPage) + index + 1;
+  const statusDisplay = getStatusDisplay(story.status);
+  const StatusIcon = statusDisplay.icon;
 
   return (
     <Card className={`border-l-4 ${isRejected ? 'border-l-red-500 opacity-60' : 'border-l-green-500'}`}>
@@ -55,9 +92,15 @@ const StoryCard = ({
               Rejected
             </Badge>
           )}
-          <Badge variant={getRelevanceBadgeVariant(story.relevance_score)} className="text-xs">
-            {getRelevanceDisplay(story.relevance_score)} relevance
+          <Badge variant={getStatusBadgeVariant(story.status)} className="text-xs">
+            <StatusIcon className="w-3 h-3 mr-1" />
+            {statusDisplay.text}
           </Badge>
+          {story.relevance_score && (
+            <Badge variant={getRelevanceBadgeVariant(story.relevance_score)} className="text-xs">
+              {getRelevanceDisplay(story.relevance_score)} relevance
+            </Badge>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -111,7 +154,6 @@ const StoryCard = ({
               size="sm" 
               variant="destructive"
               onClick={() => onRejectStory(story.article_id)}
-              className="text-red-600 border-red-300 hover:bg-red-50"
             >
               <X className="w-4 h-4 mr-2" />
               Reject Story

@@ -39,11 +39,11 @@ class NewsAggregator {
     };
   }
 
-  async aggregateAllSources() {
-    console.log('🔄 Starting news aggregation...');
+  async aggregateAllSources(accountId = null) {
+    console.log(`🔄 Starting news aggregation... (accountId: ${accountId})`);
     
     try {
-      const sources = await db.getActiveNewsSources();
+      const sources = await db.getActiveNewsSources(accountId);
       console.log(`📰 Found ${sources.length} active news sources`);
 
       let totalArticles = 0;
@@ -51,11 +51,11 @@ class NewsAggregator {
       for (const source of sources) {
         try {
           console.log(`📡 Processing: ${source.name}`);
-          const articles = await this.processSource(source);
+          const articles = await this.processSource(source, accountId);
           totalArticles += articles.length;
           
-          // Update last scraped timestamp
-          await db.updateSourceLastScraped(source.source_id);
+          // Update last scraped timestamp with account context
+          await db.updateSourceLastScraped(source.source_id, accountId);
           
           console.log(`✅ ${source.name}: ${articles.length} articles processed`);
         } catch (error) {
@@ -71,7 +71,7 @@ class NewsAggregator {
     }
   }
 
-  async processSource(source) {
+  async processSource(source, accountId = null) {
     const articles = [];
 
     try {
@@ -88,7 +88,7 @@ class NewsAggregator {
       // Store articles in database
       for (const article of articles) {
         try {
-          await this.storeArticle(article, source.source_id);
+          await this.storeArticle(article, source.source_id, accountId);
         } catch (error) {
           if (!error.message.includes('Duplicate entry')) {
             console.error(`❌ Error storing article: ${error.message}`);
@@ -332,7 +332,7 @@ class NewsAggregator {
     }
   }
 
-  async storeArticle(article, sourceId) {
+  async storeArticle(article, sourceId, accountId = null) {
     try {
       // Check if article already exists
       const existing = await db.findOne('ssnews_scraped_articles', 'url = ?', [article.url]);
@@ -349,7 +349,7 @@ class NewsAggregator {
         status: 'scraped'
       };
 
-      const articleId = await db.insertScrapedArticle(articleData);
+      const articleId = await db.insertScrapedArticle(articleData, accountId);
       console.log(`💾 Stored article: ${article.title.substring(0, 50)}...`);
       
       return articleId;
@@ -361,11 +361,11 @@ class NewsAggregator {
     }
   }
 
-  async analyzeScrapedArticles(accountId = null) {
-    console.log(`🧠 Starting AI analysis of scraped articles (accountId: ${accountId})...`);
+  async analyzeScrapedArticles(limit = 20, accountId = null) {
+    console.log(`🧠 Starting AI analysis of scraped articles (limit: ${limit}, accountId: ${accountId})...`);
     
     try {
-      const articles = await db.getUnanalyzedArticles(20, accountId); // Process 20 at a time with account filtering
+      const articles = await db.getUnanalyzedArticles(limit, accountId); // Process with specified limit and account filtering
       console.log(`📊 Analyzing ${articles.length} articles for account ${accountId || 'all accounts'}`);
 
       let analyzed = 0;

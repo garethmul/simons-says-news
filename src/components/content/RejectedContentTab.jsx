@@ -10,6 +10,7 @@ import { X, RotateCcw } from 'lucide-react';
 import { PAGINATION_CONFIG, FILTER_OPTIONS } from '../../utils/constants';
 import { filterBySearch } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
+import HelpSection from '../common/HelpSection';
 
 /**
  * Rejected Content Tab Component
@@ -21,7 +22,8 @@ const RejectedContentTab = ({
   loading,
   onReturnToReview,
   onRegenerate,
-  onReview
+  onReview,
+  isActionLoading
 }) => {
   // Dynamic content types
   const { getContentTypeOptions, loading: contentTypesLoading } = useContentTypes();
@@ -140,8 +142,26 @@ const RejectedContentTab = ({
             </Badge>
           </div>
           
-          {/* Explanatory section */}
-          <ExplanatorySection />
+          {/* Help section */}
+          <HelpSection 
+            title="❌ Rejected Content Help"
+            bgColor="bg-red-50"
+            borderColor="border-red-200"
+            textColor="text-red-800"
+            headingColor="text-red-900"
+          >
+            <h3 className="font-semibold text-red-900 mb-2">❌ What you're viewing:</h3>
+            <p className="text-sm text-red-800 mb-3">
+              Content that has been rejected during the review process. These pieces may need revision, regeneration, or return to review with changes.
+            </p>
+            <h4 className="font-semibold text-red-900 mb-1">🔄 Available actions:</h4>
+            <ul className="text-sm text-red-800 list-disc list-inside space-y-1">
+              <li>Return to review if the rejection was incorrect</li>
+              <li>Regenerate content with improved AI prompts</li>
+              <li>Review detailed content to understand rejection reasons</li>
+              <li>Use as reference for future content improvements</li>
+            </ul>
+          </HelpSection>
         </CardHeader>
         <CardContent>
           {(loading && rejectedContent.length === 0) || contentTypesLoading ? (
@@ -167,6 +187,7 @@ const RejectedContentTab = ({
                 onReturnToReview={onReturnToReview}
                 onRegenerate={onRegenerate}
                 onReview={onReview}
+                isActionLoading={isActionLoading}
               />
 
               {/* Pagination */}
@@ -185,25 +206,6 @@ const RejectedContentTab = ({
     </ErrorBoundary>
   );
 };
-
-/**
- * Explanatory Section Component
- */
-const ExplanatorySection = () => (
-  <div className="mt-4 p-4 bg-red-50 rounded-lg border border-red-200">
-    <h3 className="font-semibold text-red-900 mb-2">❌ What you're viewing:</h3>
-    <p className="text-sm text-red-800 mb-3">
-      Content that has been rejected during the review process. These pieces may need revision, regeneration, or return to review with changes.
-    </p>
-    <h4 className="font-semibold text-red-900 mb-1">🔄 Available actions:</h4>
-    <ul className="text-sm text-red-800 list-disc list-inside space-y-1">
-      <li>Return to review if the rejection was incorrect</li>
-      <li>Regenerate content with improved AI prompts</li>
-      <li>Review detailed content to understand rejection reasons</li>
-      <li>Use as reference for future content improvements</li>
-    </ul>
-  </div>
-);
 
 /**
  * Empty State Component
@@ -226,7 +228,8 @@ const ContentList = ({
   stats,
   onReturnToReview,
   onRegenerate,
-  onReview
+  onReview,
+  isActionLoading
 }) => (
   <div className="space-y-4">
     <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
@@ -247,6 +250,7 @@ const ContentList = ({
         showPublishActions={false}
         showRejectedActions={true}
         loading={false}
+        isActionLoading={isActionLoading}
       />
     ))}
   </div>

@@ -6,22 +6,21 @@ import ErrorBoundary from '../ui/error-boundary';
 import FilterControls from '../ui/filter-controls';
 import Pagination from '../ui/pagination';
 import ContentCard from './ContentCard';
-import { FileText } from 'lucide-react';
+import { Archive } from 'lucide-react';
 import { PAGINATION_CONFIG, FILTER_OPTIONS } from '../../utils/constants';
 import { filterBySearch } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
 import HelpSection from '../common/HelpSection';
 
 /**
- * Content Review Tab Component
- * Displays content awaiting human review with approval/rejection actions
+ * Archived Content Tab Component
+ * Displays archived content that has been used and completed
  */
-const ContentReviewTab = ({
-  contentForReview,
+const ArchivedContentTab = ({
+  archivedContent,
   stats,
   loading,
-  onApprove,
-  onReject,
+  onReturnToApproved,
   onReview,
   isActionLoading
 }) => {
@@ -33,24 +32,24 @@ const ContentReviewTab = ({
   const [searchText, setSearchText] = useState('');
   const [contentTypeFilter, setContentTypeFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('created_date');
+  const [sortBy, setSortBy] = useState('archived_date');
 
   // Get unique sources for filter options
   const sourceOptions = useMemo(() => {
-    const sources = [...new Set(contentForReview.map(content => content.sourceArticle?.source_name))].filter(Boolean).sort();
+    const sources = [...new Set(archivedContent.map(content => content.sourceArticle?.source_name))].filter(Boolean).sort();
     return [
       { value: 'all', label: 'All Sources' },
       ...sources.map(source => ({ value: source, label: source }))
     ];
-  }, [contentForReview]);
+  }, [archivedContent]);
 
   // Filter and sort content
   const { content, totalContent, totalPages } = useMemo(() => {
-    let filtered = contentForReview;
+    let filtered = archivedContent;
 
     // Apply search filter
     if (searchText) {
-      filtered = filterBySearch(filtered, searchText, ['title', 'sourceArticle.source_name', 'content_type']);
+      filtered = filterBySearch(filtered, searchText, ['title', 'source_name', 'content_type']);
     }
 
     // Apply content type filter
@@ -60,12 +59,14 @@ const ContentReviewTab = ({
 
     // Apply source filter
     if (sourceFilter !== 'all') {
-      filtered = filtered.filter(content => content.sourceArticle?.source_name === sourceFilter);
+      filtered = filtered.filter(content => content.source_name === sourceFilter);
     }
 
     // Apply sorting
     filtered.sort((a, b) => {
       switch (sortBy) {
+        case 'archived_date':
+          return new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
         case 'created_date':
           return new Date(b.created_at) - new Date(a.created_at);
         case 'title':
@@ -73,9 +74,9 @@ const ContentReviewTab = ({
         case 'content_type':
           return (a.content_type || '').localeCompare(b.content_type || '');
         case 'source':
-          return (a.sourceArticle?.source_name || '').localeCompare(b.sourceArticle?.source_name || '');
+          return (a.source_name || '').localeCompare(b.source_name || '');
         default:
-          return new Date(b.created_at) - new Date(a.created_at);
+          return new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
       }
     });
 
@@ -88,7 +89,7 @@ const ContentReviewTab = ({
       totalContent: filtered.length,
       totalPages: Math.ceil(filtered.length / itemsPerPage)
     };
-  }, [contentForReview, searchText, contentTypeFilter, sourceFilter, sortBy, currentPage]);
+  }, [archivedContent, searchText, contentTypeFilter, sourceFilter, sortBy, currentPage]);
 
   // Reset page when filters change
   const handleFilterChange = (filterFn) => {
@@ -116,6 +117,7 @@ const ContentReviewTab = ({
     value: sortBy,
     onChange: setSortBy,
     options: [
+      { value: 'archived_date', label: 'Sort by Date Archived' },
       { value: 'created_date', label: 'Sort by Date Created' },
       { value: 'title', label: 'Sort by Title' },
       { value: 'content_type', label: 'Sort by Content Type' },
@@ -129,41 +131,41 @@ const ContentReviewTab = ({
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Content Awaiting Review</CardTitle>
+              <CardTitle>Archived Content</CardTitle>
               <CardDescription>
-                Review and approve AI-generated content before publishing
+                Content that has been used and archived for reference
               </CardDescription>
             </div>
             <Badge variant="outline" className="text-sm">
-              {contentForReview.length} items pending
+              {archivedContent.length} items archived
             </Badge>
           </div>
           
           {/* Help section */}
           <HelpSection 
-            title="📋 Content Review Help"
-            bgColor="bg-blue-50"
-            borderColor="border-blue-200"
-            textColor="text-blue-800"
-            headingColor="text-blue-900"
+            title="📦 Archived Content Help"
+            bgColor="bg-gray-50"
+            borderColor="border-gray-200"
+            textColor="text-gray-800"
+            headingColor="text-gray-900"
           >
-            <h3 className="font-semibold text-blue-900 mb-2">📋 What you're viewing:</h3>
-            <p className="text-sm text-blue-800 mb-3">
-              AI-generated content based on top Christian news stories. Each piece includes content from all active prompt templates including blog posts, social media content, video scripts, and prayer points.
+            <h3 className="font-semibold text-gray-900 mb-2">📦 What you're viewing:</h3>
+            <p className="text-sm text-gray-800 mb-3">
+              Content that has been successfully used and archived. These pieces have completed their lifecycle and are stored for reference and historical tracking.
             </p>
-            <h4 className="font-semibold text-blue-900 mb-1">🎯 Next steps:</h4>
-            <ul className="text-sm text-blue-800 list-disc list-inside space-y-1">
-              <li>Review each content piece for accuracy and tone</li>
-              <li>Check source article information for context</li>
-              <li>Approve quality content or reject for revision</li>
-              <li>Approved content moves to the "Approved Content" tab</li>
+            <h4 className="font-semibold text-gray-900 mb-1">🔍 Available actions:</h4>
+            <ul className="text-sm text-gray-800 list-disc list-inside space-y-1">
+              <li>View archived content details and performance</li>
+              <li>Return to approved status if content needs to be reused</li>
+              <li>Search and filter historical content</li>
+              <li>Track content creation and usage patterns</li>
             </ul>
           </HelpSection>
         </CardHeader>
         <CardContent>
-          {(loading && contentForReview.length === 0) || contentTypesLoading ? (
-            <LoadingState message="Loading content for review..." count={3} />
-          ) : contentForReview.length === 0 ? (
+          {(loading && archivedContent.length === 0) || contentTypesLoading ? (
+            <LoadingState message="Loading archived content..." count={3} />
+          ) : archivedContent.length === 0 ? (
             <EmptyState />
           ) : (
             <div className="space-y-4">
@@ -171,7 +173,7 @@ const ContentReviewTab = ({
               <FilterControls
                 searchValue={searchText}
                 onSearchChange={(value) => handleFilterChange(() => setSearchText(value))}
-                searchPlaceholder="Search content by title, source, or type..."
+                searchPlaceholder="Search archived content by title, source, or type..."
                 filters={filters}
                 sortOptions={sortOptions}
               />
@@ -181,10 +183,8 @@ const ContentReviewTab = ({
                 totalContent={totalContent}
                 currentPage={currentPage}
                 stats={stats}
-                onApprove={onApprove}
-                onReject={onReject}
+                onReturnToApproved={onReturnToApproved}
                 onReview={onReview}
-                loading={loading}
                 isActionLoading={isActionLoading}
               />
 
@@ -210,9 +210,9 @@ const ContentReviewTab = ({
  */
 const EmptyState = () => (
   <div className="text-center py-8 text-gray-500">
-    <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-    <p>No content pending review</p>
-    <p className="text-sm">Run the full cycle to generate new content</p>
+    <Archive className="w-12 h-12 mx-auto mb-4 opacity-50" />
+    <p>No archived content</p>
+    <p className="text-sm">Archive approved content after use to see it here</p>
   </div>
 );
 
@@ -224,34 +224,32 @@ const ContentList = ({
   totalContent,
   currentPage,
   stats,
-  onApprove,
-  onReject,
+  onReturnToApproved,
   onReview,
-  loading,
   isActionLoading
 }) => (
   <div className="space-y-4">
     <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
       <span>
-        Showing {((currentPage - 1) * PAGINATION_CONFIG.ARTICLES_PER_PAGE) + 1}-{Math.min(currentPage * PAGINATION_CONFIG.ARTICLES_PER_PAGE, totalContent)} of {totalContent} content piece{totalContent !== 1 ? 's' : ''}
+        Showing {((currentPage - 1) * PAGINATION_CONFIG.ARTICLES_PER_PAGE) + 1}-{Math.min(currentPage * PAGINATION_CONFIG.ARTICLES_PER_PAGE, totalContent)} of {totalContent} archived piece{totalContent !== 1 ? 's' : ''}
       </span>
-      <span>Total pending review: {stats.pendingReview}</span>
+      <span>Total archived: {stats.archivedContent || totalContent}</span>
     </div>
     {content.map((contentItem, index) => (
       <ContentCard
-        key={`review-content-${contentItem.gen_article_id}`}
+        key={`archived-content-${contentItem.gen_article_id}`}
         content={contentItem}
         index={index}
-        onApprove={onApprove}
-        onReject={onReject}
         onReview={onReview}
-        showApprovalActions={true}
+        onReturnToApproved={onReturnToApproved}
+        showApprovalActions={false}
         showPublishActions={false}
-        loading={loading}
+        showArchivedActions={true}
+        loading={false}
         isActionLoading={isActionLoading}
       />
     ))}
   </div>
 );
 
-export default ContentReviewTab; 
+export default ArchivedContentTab; 

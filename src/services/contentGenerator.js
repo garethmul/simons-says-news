@@ -7,12 +7,12 @@ class ContentGenerator {
     this.maxConcurrentJobs = parseInt(process.env.MAX_CONCURRENT_JOBS) || 3;
   }
 
-  async generateContentFromTopStories(limit = 5) {
-    console.log('🎨 Starting content generation from top stories...');
+  async generateContentFromTopStories(limit = 5, accountId = null) {
+    console.log(`🎨 Starting content generation from top stories... (accountId: ${accountId})`);
     
     try {
-      // Get top stories
-      const topStories = await db.getTopArticlesByRelevance(limit, 0.6);
+      // Get top stories with account filtering
+      const topStories = await db.getTopArticlesByRelevance(limit, 0.6, accountId);
       
       if (topStories.length === 0) {
         console.log('📰 No high-relevance stories found for content generation');
@@ -27,7 +27,7 @@ class ContentGenerator {
       for (let i = 0; i < topStories.length; i += this.maxConcurrentJobs) {
         const batch = topStories.slice(i, i + this.maxConcurrentJobs);
         
-        const batchPromises = batch.map(story => this.generateContentForStory(story));
+        const batchPromises = batch.map(story => this.generateContentForStory(story, accountId));
         const batchResults = await Promise.allSettled(batchPromises);
         
         batchResults.forEach((result, index) => {
@@ -52,7 +52,7 @@ class ContentGenerator {
     }
   }
 
-  async generateContentForStory(story) {
+  async generateContentForStory(story, accountId = null) {
     console.log(`🎨 Generating content for: ${story.title.substring(0, 50)}...`);
     
     try {
@@ -82,7 +82,7 @@ class ContentGenerator {
         word_count: 0,
         suggested_eden_product_links: JSON.stringify([]),
         status: 'review_pending'
-      });
+      }, accountId);
 
       // Now generate the blog post with the proper ID for logging
       const blogPostContent = await aiService.generateBlogPost(articleForAI, blogId);
@@ -100,27 +100,37 @@ class ContentGenerator {
         };
       }
 
-      // Update the article with the actual content
-      await db.update('ssnews_generated_articles', {
+      // Update the article with the actual content - with account filtering
+      const updateData = {
         title: blogPost.title,
         body_draft: typeof blogPost.body === 'string' ? blogPost.body : JSON.stringify(blogPost),
         word_count: this.countWords(blogPost.body || blogPostContent),
         suggested_eden_product_links: JSON.stringify(blogPost.suggestedLinks || [])
-      }, 'gen_article_id = ?', [blogId]);
+      };
+
+      if (accountId) {
+        await db.update('ssnews_generated_articles', updateData, 'gen_article_id = ? AND account_id = ?', [blogId, accountId]);
+      } else {
+        await db.update('ssnews_generated_articles', updateData, 'gen_article_id = ?', [blogId]);
+      }
 
       console.log(`📝 Blog post created (ID: ${blogId})`);
 
-      // Generate social media posts
-      const socialPosts = await this.generateSocialPosts(articleForAI, blogId);
+      // Generate social media posts with account context
+      const socialPosts = await this.generateSocialPostsWithAccount(articleForAI, blogId, accountId);
       
-      // Generate video scripts
-      const videoScripts = await this.generateVideoScripts(articleForAI, blogId);
+      // Generate video scripts with account context
+      const videoScripts = await this.generateVideoScriptsWithAccount(articleForAI, blogId, accountId);
 
-      // Generate and associate images
-      const images = await this.generateImages(blogPost, blogId);
+      // Generate and associate images with account context
+      const images = await this.generateImagesWithAccount(blogPost, blogId, accountId);
 
-      // Mark original article as processed
-      await db.update('ssnews_scraped_articles', { status: 'processed' }, 'article_id = ?', [story.article_id]);
+      // Mark original article as processed - with account filtering
+      if (accountId) {
+        await db.update('ssnews_scraped_articles', { status: 'processed' }, 'article_id = ? AND account_id = ?', [story.article_id, accountId]);
+      } else {
+        await db.update('ssnews_scraped_articles', { status: 'processed' }, 'article_id = ?', [story.article_id]);
+      }
 
       return {
         blogId,
@@ -666,16 +676,16 @@ class ContentGenerator {
     try {
       console.log(`📊 Getting generation stats (accountId: ${accountId})`);
       
-      // Add account filtering to queries if accountId is provided
-      let accountFilter = '';
+      // Build WHERE clause properly to avoid SQL syntax errors
+      let whereClause = 'created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)';
       let accountParams = [];
       
       if (accountId) {
-        accountFilter = ' AND account_id = ?';
+        whereClause += ' AND account_id = ?';
         accountParams = [accountId];
       }
 
-      // Get detailed stats
+      // Get detailed stats with properly constructed query
       const detailedStats = await db.query(`
         SELECT 
           content_type,
@@ -683,17 +693,25 @@ class ContentGenerator {
           COUNT(*) as count,
           DATE(created_at) as date
         FROM ssnews_generated_articles 
-        WHERE created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)${accountFilter}
+        WHERE ${whereClause}
         GROUP BY content_type, status, DATE(created_at)
         ORDER BY date DESC
       `, accountParams);
 
-      // Get total count
+      // Get total count with proper WHERE clause
+      let totalWhereClause = '1=1';
+      let totalParams = [];
+      
+      if (accountId) {
+        totalWhereClause = 'account_id = ?';
+        totalParams = [accountId];
+      }
+
       const totalResult = await db.query(`
         SELECT COUNT(*) as total
         FROM ssnews_generated_articles
-        WHERE 1=1${accountFilter}
-      `, accountParams);
+        WHERE ${totalWhereClause}
+      `, totalParams);
 
       const totalGenerated = totalResult[0]?.total || 0;
 

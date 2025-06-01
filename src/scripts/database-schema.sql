@@ -9,16 +9,23 @@ CREATE TABLE IF NOT EXISTS ssnews_system_logs (
     message TEXT NOT NULL,
     source VARCHAR(100) DEFAULT 'server',
     metadata JSON NULL,
+    job_id INT NULL,
+    account_id VARCHAR(64) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_timestamp (timestamp),
     INDEX idx_level (level),
-    INDEX idx_source (source)
+    INDEX idx_source (source),
+    INDEX idx_job_id (job_id),
+    INDEX idx_account_id (account_id),
+    FOREIGN KEY (job_id) REFERENCES ssnews_jobs(job_id) ON DELETE CASCADE
 );
 
 -- Jobs Queue Table
 CREATE TABLE IF NOT EXISTS ssnews_jobs (
     job_id INT AUTO_INCREMENT PRIMARY KEY,
-    job_type ENUM('content_generation', 'full_cycle', 'news_aggregation', 'ai_analysis') NOT NULL,
+    organization_id VARCHAR(64) NULL,
+    account_id VARCHAR(64) NULL,
+    job_type ENUM('content_generation', 'full_cycle', 'news_aggregation', 'ai_analysis', 'url_analysis') NOT NULL,
     status ENUM('queued', 'processing', 'completed', 'failed', 'cancelled') DEFAULT 'queued',
     priority INT DEFAULT 0,
     payload JSON NULL,
@@ -38,29 +45,36 @@ CREATE TABLE IF NOT EXISTS ssnews_jobs (
     INDEX idx_job_type (job_type),
     INDEX idx_priority_created (priority DESC, created_at ASC),
     INDEX idx_created_at (created_at),
-    INDEX idx_worker (worker_id)
+    INDEX idx_worker (worker_id),
+    INDEX idx_account_id (account_id)
 );
 
 -- News Sources Table
 CREATE TABLE IF NOT EXISTS ssnews_news_sources (
     source_id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE,
-    url VARCHAR(255) NOT NULL UNIQUE,
+    account_id VARCHAR(64) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    url VARCHAR(255) NOT NULL,
     rss_feed_url VARCHAR(255) NULL,
+    description TEXT NULL,
     last_scraped_at TIMESTAMP NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_name (name),
-    INDEX idx_active (is_active)
+    INDEX idx_active (is_active),
+    INDEX idx_account_id (account_id),
+    UNIQUE KEY unique_name_per_account (account_id, name),
+    UNIQUE KEY unique_url_per_account (account_id, url)
 );
 
 -- Scraped Articles Table
 CREATE TABLE IF NOT EXISTS ssnews_scraped_articles (
     article_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64) NOT NULL,
     source_id INT NOT NULL,
     title TEXT NOT NULL,
-    url VARCHAR(512) UNIQUE NOT NULL,
+    url VARCHAR(512) NOT NULL,
     publication_date DATETIME NULL,
     scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     full_text LONGTEXT NULL,
@@ -74,7 +88,9 @@ CREATE TABLE IF NOT EXISTS ssnews_scraped_articles (
     FOREIGN KEY (source_id) REFERENCES ssnews_news_sources(source_id) ON DELETE CASCADE,
     INDEX idx_status (status),
     INDEX idx_publication_date (publication_date),
-    INDEX idx_relevance_score (relevance_score)
+    INDEX idx_relevance_score (relevance_score),
+    INDEX idx_account_id (account_id),
+    UNIQUE KEY unique_url_per_account (account_id, url)
 );
 
 -- Eden Content Index Table
@@ -123,6 +139,7 @@ CREATE TABLE IF NOT EXISTS ssnews_evergreen_calendar (
 -- Generated Articles Table
 CREATE TABLE IF NOT EXISTS ssnews_generated_articles (
     gen_article_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64) NOT NULL,
     based_on_scraped_article_id INT NULL,
     based_on_evergreen_id INT NULL,
     title TEXT NOT NULL,
@@ -140,12 +157,14 @@ CREATE TABLE IF NOT EXISTS ssnews_generated_articles (
     FOREIGN KEY (based_on_evergreen_id) REFERENCES ssnews_evergreen_content_ideas(evergreen_id) ON DELETE SET NULL,
     INDEX idx_status (status),
     INDEX idx_content_type (content_type),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_account_id (account_id)
 );
 
 -- Generated Social Posts Table
 CREATE TABLE IF NOT EXISTS ssnews_generated_social_posts (
     gen_social_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64) NOT NULL,
     based_on_gen_article_id INT NULL,
     platform ENUM('instagram', 'facebook', 'linkedin') NOT NULL,
     text_draft TEXT NOT NULL,
@@ -156,12 +175,14 @@ CREATE TABLE IF NOT EXISTS ssnews_generated_social_posts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (based_on_gen_article_id) REFERENCES ssnews_generated_articles(gen_article_id) ON DELETE CASCADE,
     INDEX idx_platform (platform),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_account_id (account_id)
 );
 
 -- Generated Video Scripts Table
 CREATE TABLE IF NOT EXISTS ssnews_generated_video_scripts (
     gen_video_script_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64) NOT NULL,
     based_on_gen_article_id INT NOT NULL,
     title VARCHAR(255) NOT NULL,
     duration_target_seconds INT NOT NULL,
@@ -173,23 +194,40 @@ CREATE TABLE IF NOT EXISTS ssnews_generated_video_scripts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (based_on_gen_article_id) REFERENCES ssnews_generated_articles(gen_article_id) ON DELETE CASCADE,
     INDEX idx_status (status),
-    INDEX idx_duration (duration_target_seconds)
+    INDEX idx_duration (duration_target_seconds),
+    INDEX idx_account_id (account_id)
 );
 
 -- Image Assets Table
 CREATE TABLE IF NOT EXISTS ssnews_image_assets (
     image_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64) NOT NULL,
     associated_content_type ENUM('gen_article', 'gen_social_post') NOT NULL,
     associated_content_id INT NOT NULL,
     source_api ENUM('pexels', 'sirv_upload', 'eden_library') NOT NULL,
     source_image_id_external VARCHAR(255) NULL,
-    sirv_cdn_url VARCHAR(512) UNIQUE NOT NULL,
+    sirv_cdn_url VARCHAR(512) NOT NULL,
     alt_text_suggestion_ai VARCHAR(255) NULL,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_approved_human BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_associated_content (associated_content_type, associated_content_id),
-    INDEX idx_approved (is_approved_human)
+    INDEX idx_approved (is_approved_human),
+    INDEX idx_account_id (account_id),
+    UNIQUE KEY unique_sirv_url_per_account (account_id, sirv_cdn_url)
+);
+
+-- User Bookmarks Table
+CREATE TABLE IF NOT EXISTS ssnews_user_bookmarks (
+    bookmark_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(128) NOT NULL,
+    user_email VARCHAR(255) NULL,
+    article_id INT NOT NULL,
+    bookmarked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (article_id) REFERENCES ssnews_scraped_articles(article_id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_article_id (article_id),
+    UNIQUE KEY unique_user_article (user_id, article_id)
 );
 
 -- Insert initial news sources

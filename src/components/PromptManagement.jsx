@@ -33,6 +33,7 @@ import {
   Users,
   Share2
 } from 'lucide-react';
+import HelpSection from './common/HelpSection';
 
 /**
  * Sample Template Card Component
@@ -1093,36 +1094,34 @@ Keep language conversational and engaging for video format.`}
                     </Card>
 
                     {/* Best Practices */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <TrendingUp className="w-5 h-5" />
-                          Best Practices for Prompt Templates
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid md:grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <h4 className="font-medium text-gray-900 mb-2">📝 Writing Effective Prompts</h4>
-                            <ul className="space-y-1 text-gray-600">
-                              <li>• Be specific about the desired output format</li>
-                              <li>• Include clear examples when possible</li>
-                              <li>• Define the tone and style you want</li>
-                              <li>• Use variables like {`{{article_content}}`} for dynamic content</li>
-                            </ul>
-                          </div>
-                          <div>
-                            <h4 className="font-medium text-gray-900 mb-2">🔧 Template Management</h4>
-                            <ul className="space-y-1 text-gray-600">
-                              <li>• Test prompts before setting them as current</li>
-                              <li>• Keep track of changes with version notes</li>
-                              <li>• Monitor usage statistics to optimise performance</li>
-                              <li>• Use categories to organise your templates</li>
-                            </ul>
-                          </div>
+                    <HelpSection 
+                      title="💡 Best Practices for Prompt Templates"
+                      bgColor="bg-amber-50"
+                      borderColor="border-amber-200"
+                      textColor="text-amber-800"
+                      headingColor="text-amber-900"
+                    >
+                      <div className="grid md:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <h4 className="font-medium text-amber-900 mb-2">📝 Writing Effective Prompts</h4>
+                          <ul className="space-y-1 text-amber-800">
+                            <li>• Be specific about the desired output format</li>
+                            <li>• Include clear examples when possible</li>
+                            <li>• Define the tone and style you want</li>
+                            <li>• Use variables like {`{{article_content}}`} for dynamic content</li>
+                          </ul>
                         </div>
-                      </CardContent>
-                    </Card>
+                        <div>
+                          <h4 className="font-medium text-amber-900 mb-2">🔧 Template Management</h4>
+                          <ul className="space-y-1 text-amber-800">
+                            <li>• Test prompts before setting them as current</li>
+                            <li>• Keep track of changes with version notes</li>
+                            <li>• Monitor usage statistics to optimise performance</li>
+                            <li>• Use categories to organise your templates</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </HelpSection>
                   </div>
                 ) : (
                   /* Getting Started for Accounts with Templates */

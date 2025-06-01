@@ -10,6 +10,7 @@ import { Check } from 'lucide-react';
 import { PAGINATION_CONFIG, FILTER_OPTIONS } from '../../utils/constants';
 import { filterBySearch } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
+import HelpSection from '../common/HelpSection';
 
 /**
  * Approved Content Tab Component
@@ -21,7 +22,9 @@ const ApprovedContentTab = ({
   loading,
   onPublish,
   onReturnToReview,
-  onReview
+  onArchive,
+  onReview,
+  isActionLoading
 }) => {
   // Dynamic content types
   const { getContentTypeOptions, loading: contentTypesLoading } = useContentTypes();
@@ -140,8 +143,26 @@ const ApprovedContentTab = ({
             </Badge>
           </div>
           
-          {/* Explanatory section */}
-          <ExplanatorySection />
+          {/* Help section */}
+          <HelpSection 
+            title="✅ Approved Content Help"
+            bgColor="bg-green-50"
+            borderColor="border-green-200"
+            textColor="text-green-800"
+            headingColor="text-green-900"
+          >
+            <h3 className="font-semibold text-green-900 mb-2">✅ What you're viewing:</h3>
+            <p className="text-sm text-green-800 mb-3">
+              Human-approved content that has passed quality review. These pieces are ready for publication and include all associated social media posts and video scripts.
+            </p>
+            <h4 className="font-semibold text-green-900 mb-1">🚀 Next steps:</h4>
+            <ul className="text-sm text-green-800 list-disc list-inside space-y-1">
+              <li>Publish content directly to Eden.co.uk</li>
+              <li>Schedule social media posts across platforms</li>
+              <li>Use video scripts for content creation</li>
+              <li>Return to review if changes are needed</li>
+            </ul>
+          </HelpSection>
         </CardHeader>
         <CardContent>
           {(loading && approvedContent.length === 0) || contentTypesLoading ? (
@@ -166,7 +187,9 @@ const ApprovedContentTab = ({
                 stats={stats}
                 onPublish={onPublish}
                 onReturnToReview={onReturnToReview}
+                onArchive={onArchive}
                 onReview={onReview}
+                isActionLoading={isActionLoading}
               />
 
               {/* Pagination */}
@@ -185,25 +208,6 @@ const ApprovedContentTab = ({
     </ErrorBoundary>
   );
 };
-
-/**
- * Explanatory Section Component
- */
-const ExplanatorySection = () => (
-  <div className="mt-4 p-4 bg-green-50 rounded-lg border border-green-200">
-    <h3 className="font-semibold text-green-900 mb-2">✅ What you're viewing:</h3>
-    <p className="text-sm text-green-800 mb-3">
-      Human-approved content that has passed quality review. These pieces are ready for publication and include all associated social media posts and video scripts.
-    </p>
-    <h4 className="font-semibold text-green-900 mb-1">🚀 Next steps:</h4>
-    <ul className="text-sm text-green-800 list-disc list-inside space-y-1">
-      <li>Publish content directly to Eden.co.uk</li>
-      <li>Schedule social media posts across platforms</li>
-      <li>Use video scripts for content creation</li>
-      <li>Return to review if changes are needed</li>
-    </ul>
-  </div>
-);
 
 /**
  * Empty State Component
@@ -226,7 +230,9 @@ const ContentList = ({
   stats,
   onPublish,
   onReturnToReview,
-  onReview
+  onArchive,
+  onReview,
+  isActionLoading
 }) => (
   <div className="space-y-4">
     <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
@@ -243,9 +249,11 @@ const ContentList = ({
         onReview={onReview}
         onPublish={onPublish}
         onReturnToReview={onReturnToReview}
+        onArchive={onArchive}
         showApprovalActions={false}
         showPublishActions={true}
         loading={false}
+        isActionLoading={isActionLoading}
       />
     ))}
   </div>

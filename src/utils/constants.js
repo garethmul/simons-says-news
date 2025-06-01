@@ -5,7 +5,8 @@ export const STATUS_VARIANTS = {
   review_pending: 'warning', 
   approved: 'success',
   published: 'default',
-  rejected: 'destructive'
+  rejected: 'destructive',
+  archived: 'outline'
 };
 
 export const JOB_STATUS_VARIANTS = {
@@ -23,7 +24,7 @@ export const RELEVANCE_SCORE_THRESHOLDS = {
 };
 
 export const PAGINATION_CONFIG = {
-  STORIES_PER_PAGE: 10,
+  STORIES_PER_PAGE: 1000,
   ARTICLES_PER_PAGE: 10,
   JOBS_PER_PAGE: 20
 };
@@ -39,6 +40,7 @@ export const TAB_ROUTES = {
   DASHBOARD: 'dashboard',
   REVIEW: 'review',
   APPROVED: 'approved',
+  ARCHIVED: 'archived',
   REJECTED: 'rejected',
   STORIES: 'stories',
   QUEUED: 'queued',
@@ -57,18 +59,24 @@ export const API_ENDPOINTS = {
   
   // Stories
   TOP_STORIES: '/api/eden/news/top-stories',
+  ALL_ARTICLES: '/api/eden/news/all-articles',
   ANALYZE_ARTICLES: '/api/eden/news/analyze',
+  ANALYZE_TRIGGER: '/api/eden/news/analyze/trigger',
   
   // Jobs
   JOBS_RECENT: '/api/eden/jobs/recent',
   JOBS_STATS: '/api/eden/jobs/queue/stats',
   JOB_CANCEL: '/api/eden/jobs/{id}/cancel',
   JOB_RETRY: '/api/eden/jobs/{id}/retry',
+  JOB_LOGS: '/api/eden/jobs/{id}/logs',
+  JOBS_CLEANUP_STALE: '/api/eden/jobs/cleanup-stale',
   WORKER_START: '/api/eden/jobs/worker/start',
   
   // Sources
   SOURCES_STATUS: '/api/eden/news/sources/status',
   SOURCE_TOGGLE: '/api/eden/news/sources/{id}/status',
+  ADD_SOURCE: '/api/eden/news/sources',
+  SOURCE_REFRESH: '/api/eden/news/sources/{id}/refresh',
   
   // Automation
   FULL_CYCLE: '/api/eden/automate/full-cycle',
@@ -116,14 +124,33 @@ export const SUCCESS_MESSAGES = {
 export const FILTER_OPTIONS = {
   SORT: {
     RELEVANCE: 'relevance',
+    RELEVANCE_ASC: 'relevance_asc',
     DATE: 'date',
+    DATE_ASC: 'date_asc',
     SOURCE: 'source',
-    TITLE: 'title'
+    SOURCE_DESC: 'source_desc',
+    TITLE: 'title',
+    TITLE_DESC: 'title_desc'
   },
   STATUS: {
     ALL: 'all',
     ENABLED: 'enabled',
     DISABLED: 'disabled'
+  },
+  ARTICLE_STATUS: {
+    ALL: 'all',
+    ANALYZED: 'analyzed',
+    SCRAPED: 'scraped',
+    PROCESSED: 'processed'
+  },
+  GENERATED_CONTENT_STATUS: {
+    ALL: 'all',
+    DRAFT: 'draft',
+    REVIEW_PENDING: 'review_pending',
+    APPROVED: 'approved',
+    PUBLISHED: 'published',
+    REJECTED: 'rejected',
+    ARCHIVED: 'archived'
   }
 };
 

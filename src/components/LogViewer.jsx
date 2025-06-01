@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { useAccount } from '../contexts/AccountContext';
 import { 
   Terminal, 
   Play, 
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 
 const LogViewer = ({ isOpen, onClose }) => {
+  const { withAccountContext } = useAccount();
   const [logs, setLogs] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -34,7 +36,6 @@ const LogViewer = ({ isOpen, onClose }) => {
   const [showStats, setShowStats] = useState(false);
   
   const logsEndRef = useRef(null);
-  const eventSourceRef = useRef(null);
   const logContainerRef = useRef(null);
 
   // Scroll to bottom when new logs arrive
@@ -50,9 +51,10 @@ const LogViewer = ({ isOpen, onClose }) => {
 
     fetchLogHistory();
     fetchLogStats();
-    connectToLogStream();
+    const cleanup = connectToLogStream();
 
     return () => {
+      if (cleanup) cleanup();
       disconnectFromLogStream();
     };
   }, [isOpen]);
@@ -72,11 +74,14 @@ const LogViewer = ({ isOpen, onClose }) => {
         params.append('source', sourceFilter);
       }
 
-      const response = await fetch(`/api/eden/logs/history?${params}`);
+      const response = await fetch(`/api/eden/logs/history?${params}`, {
+        ...withAccountContext()
+      });
       const data = await response.json();
       
       if (data.success) {
-        setLogs(data.logs);
+        // Reverse logs to show chronological order (oldest first, newest last)
+        setLogs(data.logs.reverse());
       }
     } catch (error) {
       console.error('Failed to fetch log history:', error);
@@ -86,7 +91,9 @@ const LogViewer = ({ isOpen, onClose }) => {
   // Fetch log statistics
   const fetchLogStats = async () => {
     try {
-      const response = await fetch('/api/eden/logs/stats');
+      const response = await fetch('/api/eden/logs/stats', {
+        ...withAccountContext()
+      });
       const data = await response.json();
       
       if (data.success) {
@@ -107,53 +114,72 @@ const LogViewer = ({ isOpen, onClose }) => {
   const connectToLogStream = () => {
     try {
       setConnectionStatus('connecting');
-      eventSourceRef.current = new EventSource('/api/eden/logs/stream');
       
-      eventSourceRef.current.onopen = () => {
-        setIsConnected(true);
-        setConnectionStatus('connected');
-        console.log('Connected to log stream');
-      };
+      let intervalId;
 
-      eventSourceRef.current.onmessage = (event) => {
-        if (isPaused) return;
-        
+      const fetchLogs = async () => {
         try {
-          const logEntry = JSON.parse(event.data);
-          
-          // Skip heartbeat messages
-          if (logEntry.type === 'heartbeat') return;
-          
-          setLogs(prevLogs => {
-            // Check if this log already exists (avoid duplicates)
-            const exists = prevLogs.some(log => 
-              log.id === logEntry.id || 
-              (log.timestamp === logEntry.timestamp && log.message === logEntry.message)
-            );
-            
-            if (exists) return prevLogs;
-            
-            // Append new logs to the end for chronological order (oldest first, newest last)
-            const newLogs = [...prevLogs, logEntry];
-            // Keep only last 200 logs in memory for performance
-            return newLogs.slice(-200);
+          const baseUrl = import.meta.env.VITE_API_URL || '';
+          const accountOptions = withAccountContext({
+            method: 'GET'
           });
+          
+          const response = await fetch(`${baseUrl}/api/eden/logs/history?limit=20`, accountOptions);
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.logs) {
+              setLogs(prevLogs => {
+                const newLogs = data.logs.reverse(); // Reverse to show chronological order
+                // Check for new entries by comparing timestamps
+                const lastLogTime = prevLogs.length > 0 ? prevLogs[prevLogs.length - 1]?.timestamp : null;
+                
+                if (!lastLogTime) {
+                  return newLogs; // First load
+                }
+                
+                // Only add logs newer than the last log we have
+                const newerLogs = newLogs.filter(log => 
+                  log.timestamp && new Date(log.timestamp) > new Date(lastLogTime)
+                );
+                
+                if (newerLogs.length > 0) {
+                  return [...prevLogs, ...newerLogs].slice(-200); // Keep only last 200 logs
+                }
+                
+                return prevLogs; // No new logs
+              });
+              
+              if (!isConnected) {
+                setIsConnected(true);
+                setConnectionStatus('connected');
+                console.log('Connected to log stream');
+              }
+            }
+          } else {
+            console.error('Failed to fetch logs:', response.status, response.statusText);
+            if (isConnected) {
+              setIsConnected(false);
+              setConnectionStatus('error');
+            }
+          }
         } catch (error) {
-          console.error('Error parsing log entry:', error);
+          console.error('Error fetching logs:', error);
+          if (isConnected) {
+            setIsConnected(false);
+            setConnectionStatus('error');
+          }
         }
       };
 
-      eventSourceRef.current.onerror = (error) => {
-        console.error('Log stream error:', error);
-        setIsConnected(false);
-        setConnectionStatus('error');
-        
-        // Attempt to reconnect after 5 seconds
-        setTimeout(() => {
-          if (isOpen) {
-            connectToLogStream();
-          }
-        }, 5000);
+      // Fetch immediately, then every 2 seconds
+      fetchLogs();
+      intervalId = setInterval(fetchLogs, 2000);
+
+      return () => {
+        if (intervalId) {
+          clearInterval(intervalId);
+        }
       };
     } catch (error) {
       console.error('Failed to connect to log stream:', error);
@@ -162,10 +188,6 @@ const LogViewer = ({ isOpen, onClose }) => {
   };
 
   const disconnectFromLogStream = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
     setIsConnected(false);
     setConnectionStatus('disconnected');
   };
@@ -173,7 +195,9 @@ const LogViewer = ({ isOpen, onClose }) => {
   const clearLogs = async () => {
     try {
       const response = await fetch('/api/eden/logs', {
-        method: 'DELETE'
+        ...withAccountContext({
+          method: 'DELETE'
+        })
       });
       
       const data = await response.json();
@@ -189,7 +213,9 @@ const LogViewer = ({ isOpen, onClose }) => {
   const clearOldLogs = async () => {
     try {
       const response = await fetch('/api/eden/logs?olderThanDays=7', {
-        method: 'DELETE'
+        ...withAccountContext({
+          method: 'DELETE'
+        })
       });
       
       const data = await response.json();
@@ -204,7 +230,7 @@ const LogViewer = ({ isOpen, onClose }) => {
 
   const downloadLogs = () => {
     const logText = filteredLogs.map(log => 
-      `[${log.timestamp}] ${log.level.toUpperCase()}: ${log.message}`
+      `[${log.timestamp || 'unknown'}] ${(log.level || 'info').toUpperCase()}: ${log.message || 'No message'}`
     ).join('\n');
     
     const blob = new Blob([logText], { type: 'text/plain' });
@@ -250,9 +276,9 @@ const LogViewer = ({ isOpen, onClose }) => {
 
   const filteredLogs = logs.filter(log => {
     const matchesFilter = filter === '' || 
-      log.message.toLowerCase().includes(filter.toLowerCase());
-    const matchesLevel = levelFilter === 'all' || log.level === levelFilter;
-    const matchesSource = sourceFilter === 'all' || log.source === sourceFilter;
+      (log.message || '').toLowerCase().includes(filter.toLowerCase());
+    const matchesLevel = levelFilter === 'all' || (log.level || 'info') === levelFilter;
+    const matchesSource = sourceFilter === 'all' || (log.source || '') === sourceFilter;
     return matchesFilter && matchesLevel && matchesSource;
   });
 
@@ -423,21 +449,21 @@ const LogViewer = ({ isOpen, onClose }) => {
               <div className="p-4 space-y-1">
                 {filteredLogs.map((log) => (
                   <div
-                    key={log.id || `${log.timestamp}-${log.message.substring(0, 20)}`}
+                    key={log.id || `${log.timestamp}-${(log.message || '').substring(0, 20)}`}
                     className="flex items-start gap-3 p-2 rounded hover:bg-white transition-colors"
                   >
                     <div className="flex-shrink-0 mt-0.5">
-                      {getLogIcon(log.level)}
+                      {getLogIcon(log.level || 'info')}
                     </div>
                     
                     <div className="flex-shrink-0 text-xs text-gray-500 mt-0.5 w-20">
-                      {new Date(log.timestamp).toLocaleTimeString()}
+                      {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '--:--:--'}
                     </div>
                     
                     <Badge 
-                      className={`flex-shrink-0 text-xs ${getLogLevelColor(log.level)}`}
+                      className={`flex-shrink-0 text-xs ${getLogLevelColor(log.level || 'info')}`}
                     >
-                      {log.level.toUpperCase()}
+                      {(log.level || 'info').toUpperCase()}
                     </Badge>
                     
                     {log.source && (
@@ -447,7 +473,7 @@ const LogViewer = ({ isOpen, onClose }) => {
                     )}
                     
                     <div className="flex-1 break-words">
-                      <span className="text-gray-800">{log.message}</span>
+                      <span className="text-gray-800">{log.message || 'No message'}</span>
                       {log.metadata && (
                         <div className="mt-1 text-xs text-gray-600 bg-gray-100 p-2 rounded">
                           <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
@@ -477,7 +503,7 @@ const LogViewer = ({ isOpen, onClose }) => {
           
           <div className="flex items-center gap-2">
             <Clock className="w-3 h-3" />
-            <span>Last update: {logs.length > 0 ? new Date(logs[logs.length - 1]?.timestamp).toLocaleTimeString() : 'Never'}</span>
+            <span>Last update: {logs.length > 0 && logs[logs.length - 1]?.timestamp ? new Date(logs[logs.length - 1].timestamp).toLocaleTimeString() : 'Never'}</span>
           </div>
         </div>
       </Card>

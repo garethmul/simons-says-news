@@ -5,6 +5,7 @@ import ErrorBoundary from './ui/error-boundary';
 import DashboardTab from './dashboard/DashboardTab';
 import ContentReviewTab from './content/ContentReviewTab';
 import ApprovedContentTab from './content/ApprovedContentTab';
+import ArchivedContentTab from './content/ArchivedContentTab';
 import RejectedContentTab from './content/RejectedContentTab';
 import StoriesTab from './stories/StoriesTab';
 import QueuedJobsTab from './jobs/QueuedJobsTab';
@@ -37,12 +38,14 @@ import AccountSwitcher from './AccountSwitcher';
  */
 const ProjectEden = () => {
   const { currentUser, logout } = useAuth();
+  const { permissionsLoading, selectedAccount } = useAccount();
   
   // Custom hooks for data and actions
   const {
     stats,
     contentForReview,
     approvedContent,
+    archivedContent,
     rejectedContent,
     allArticles,
     sources,
@@ -69,7 +72,9 @@ const ProjectEden = () => {
 
   const {
     toggleSourceStatus,
-    toggleLoadingMap: sourceToggleLoadingMap
+    refreshSource,
+    toggleLoadingMap: sourceToggleLoadingMap,
+    refreshLoadingMap: sourceRefreshLoadingMap
   } = useSourceActions(fetchData);
 
   const {
@@ -91,6 +96,10 @@ const ProjectEden = () => {
   const [showLogViewer, setShowLogViewer] = useState(false);
   const [jobs, setJobs] = useState([]);
   const [rejectedStories, setRejectedStories] = useState(new Set());
+  
+  // Loading overlay state with minimum display time
+  const [showLoadingOverlay, setShowLoadingOverlay] = useState(false);
+  const [loadingStartTime, setLoadingStartTime] = useState(null);
 
   // Hash routing functionality
   useEffect(() => {
@@ -206,33 +215,94 @@ const ProjectEden = () => {
         return {
           showApprovalActions: true,
           showPublishActions: false,
-          showRejectedActions: false
+          showRejectedActions: false,
+          showArchivedActions: false
         };
       case TAB_ROUTES.APPROVED:
         return {
           showApprovalActions: false,
           showPublishActions: true,
-          showRejectedActions: false
+          showRejectedActions: false,
+          showArchivedActions: false
+        };
+      case TAB_ROUTES.ARCHIVED:
+        return {
+          showApprovalActions: false,
+          showPublishActions: false,
+          showRejectedActions: false,
+          showArchivedActions: true
         };
       case TAB_ROUTES.REJECTED:
         return {
           showApprovalActions: false,
           showPublishActions: false,
-          showRejectedActions: true
+          showRejectedActions: true,
+          showArchivedActions: false
         };
       default:
         return {
           showApprovalActions: true,
           showPublishActions: false,
-          showRejectedActions: false
+          showRejectedActions: false,
+          showArchivedActions: false
         };
     }
   };
+
+  // Manage loading overlay with minimum display time
+  useEffect(() => {
+    const shouldShowLoading = permissionsLoading || (loading && allArticles.length === 0);
+    
+    if (shouldShowLoading && !showLoadingOverlay) {
+      // Start showing overlay
+      setShowLoadingOverlay(true);
+      setLoadingStartTime(Date.now());
+    } else if (!shouldShowLoading && showLoadingOverlay && loadingStartTime) {
+      // Check if minimum time has passed
+      const elapsed = Date.now() - loadingStartTime;
+      const minDisplayTime = 2000; // 2 seconds
+      
+      if (elapsed >= minDisplayTime) {
+        setShowLoadingOverlay(false);
+        setLoadingStartTime(null);
+      } else {
+        // Wait for remaining time
+        setTimeout(() => {
+          setShowLoadingOverlay(false);
+          setLoadingStartTime(null);
+        }, minDisplayTime - elapsed);
+      }
+    }
+  }, [permissionsLoading, loading, allArticles.length, showLoadingOverlay, loadingStartTime]);
 
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
         <div className="max-w-7xl mx-auto">
+          {/* Loading overlay during initial load to prevent flickering */}
+          {showLoadingOverlay && (
+            <div className="fixed inset-0 bg-gradient-to-br from-blue-50 to-indigo-100 z-50 flex items-center justify-center">
+              <div className="bg-white rounded-lg shadow-lg p-8 max-w-md mx-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-8 h-8 text-blue-600 animate-spin rounded-full border-3 border-current border-t-transparent"></div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Loading Project Eden</h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {permissionsLoading ? 'Loading account permissions...' : 
+                       loading ? 'Fetching latest data...' : 
+                       'Initializing...'}
+                    </p>
+                    {selectedAccount && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Account: {selectedAccount.name}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* Disabled overlay when automation is running */}
           {showProgressModal && (
             <div className="fixed inset-0 bg-white bg-opacity-60 z-40 pointer-events-none" />
@@ -254,10 +324,11 @@ const ProjectEden = () => {
 
           {/* Main Interface */}
           <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-10">
+            <TabsList className="grid w-full grid-cols-11">
               <TabsTrigger value={TAB_ROUTES.DASHBOARD}>Dashboard</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.REVIEW}>Review ({contentForReview.length})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.APPROVED}>Approved ({approvedContent.length})</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.ARCHIVED}>Archived ({archivedContent.length})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.REJECTED}>Rejected ({rejectedContent.length})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.STORIES}>Stories ({allArticles.length})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.QUEUED}>Queued ({jobStats.summary.queued || 0})</TabsTrigger>
@@ -291,6 +362,7 @@ const ProjectEden = () => {
                 onApprove={approveContent}
                 onReject={rejectContent}
                 onReview={openDetailedReview}
+                isActionLoading={isActionLoading}
               />
             </TabsContent>
 
@@ -301,7 +373,20 @@ const ProjectEden = () => {
                 loading={loading}
                 onPublish={updateContentStatus}
                 onReturnToReview={updateContentStatus}
+                onArchive={updateContentStatus}
                 onReview={openDetailedReview}
+                isActionLoading={isActionLoading}
+              />
+            </TabsContent>
+
+            <TabsContent value={TAB_ROUTES.ARCHIVED}>
+              <ArchivedContentTab
+                archivedContent={archivedContent}
+                stats={stats}
+                loading={loading}
+                onReturnToApproved={updateContentStatus}
+                onReview={openDetailedReview}
+                isActionLoading={isActionLoading}
               />
             </TabsContent>
 
@@ -313,6 +398,7 @@ const ProjectEden = () => {
                 onReturnToReview={updateContentStatus}
                 onRegenerate={generateContentFromStory}
                 onReview={openDetailedReview}
+                isActionLoading={isActionLoading}
               />
             </TabsContent>
 
@@ -361,7 +447,9 @@ const ProjectEden = () => {
                 loading={loading}
                 onRefresh={fetchData}
                 onToggleSourceStatus={toggleSourceStatus}
+                onRefreshSource={refreshSource}
                 toggleLoadingMap={sourceToggleLoadingMap}
+                refreshLoadingMap={sourceRefreshLoadingMap}
               />
             </TabsContent>
 
@@ -384,7 +472,10 @@ const ProjectEden = () => {
           onReject={rejectContent}
           onPublish={updateContentStatus}
           onReturnToReview={updateContentStatus}
+          onReturnToApproved={updateContentStatus}
+          onArchive={updateContentStatus}
           onRegenerate={generateContentFromStory}
+          isActionLoading={isActionLoading}
           {...getModalActionProps()}
         />
 
@@ -422,8 +513,8 @@ const Header = ({
         {/* Account Switcher in top-left */}
         <AccountSwitcher />
       <div>
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">Project Eden</h1>
-        <p className="text-lg text-gray-600">AI-Powered Content Automation for Eden.co.uk</p>
+        <h1 className="text-4xl font-bold text-gray-900 mb-2">Eden</h1>
+        <p className="text-lg text-gray-600">AI Content</p>
         </div>
       </div>
       <div className="flex items-center gap-2">

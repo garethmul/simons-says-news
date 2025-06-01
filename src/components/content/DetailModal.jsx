@@ -17,7 +17,8 @@ import {
   Image,
   Clock,
   User,
-  Tag
+  Tag,
+  Archive
 } from 'lucide-react';
 import { formatDate, getDaysAgo, parseKeywords } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
@@ -34,10 +35,14 @@ const DetailModal = ({
   onReject,
   onPublish,
   onReturnToReview,
+  onReturnToApproved,
   onRegenerate,
+  onArchive,
   showApprovalActions = true,
   showPublishActions = false,
-  showRejectedActions = false
+  showRejectedActions = false,
+  showArchivedActions = false,
+  isActionLoading
 }) => {
   const { getContentTypeName, getContentTypeIcon } = useContentTypes();
   const [activeTab, setActiveTab] = useState('content');
@@ -45,6 +50,8 @@ const DetailModal = ({
   if (!showModal || !selectedContent) return null;
 
   const contentTypeName = getContentTypeName(selectedContent.content_type);
+  const isArchiving = isActionLoading && isActionLoading(`update-article-${selectedContent.gen_article_id}`);
+  const isUpdating = isArchiving;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -129,6 +136,7 @@ const DetailModal = ({
                   onClose();
                 }}
                 className="flex items-center gap-2"
+                disabled={isUpdating}
               >
                 <Check className="w-4 h-4" />
                 Approve Content
@@ -140,6 +148,7 @@ const DetailModal = ({
                   onClose();
                 }}
                 className="flex items-center gap-2"
+                disabled={isUpdating}
               >
                 <XCircle className="w-4 h-4" />
                 Reject Content
@@ -155,6 +164,7 @@ const DetailModal = ({
                   onClose();
                 }}
                 className="flex items-center gap-2"
+                disabled={isUpdating}
               >
                 <ExternalLink className="w-4 h-4" />
                 Publish Content
@@ -166,9 +176,26 @@ const DetailModal = ({
                   onClose();
                 }}
                 className="flex items-center gap-2"
+                disabled={isUpdating}
               >
                 <FileText className="w-4 h-4" />
                 Return to Review
+              </Button>
+              <Button 
+                variant="secondary"
+                onClick={() => {
+                  onArchive('article', selectedContent.gen_article_id, 'archived');
+                  onClose();
+                }}
+                className="flex items-center gap-2"
+                disabled={isUpdating}
+              >
+                {isArchiving ? (
+                  <div className="w-4 h-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  <Archive className="w-4 h-4" />
+                )}
+                {isArchiving ? 'Archiving...' : 'Archive'}
               </Button>
             </>
           )}
@@ -181,6 +208,7 @@ const DetailModal = ({
                   onClose();
                 }}
                 className="flex items-center gap-2"
+                disabled={isUpdating}
               >
                 <FileText className="w-4 h-4" />
                 Return to Review
@@ -192,6 +220,7 @@ const DetailModal = ({
                   onClose();
                 }}
                 className="flex items-center gap-2"
+                disabled={isUpdating}
               >
                 <FileText className="w-4 h-4" />
                 Regenerate Content
@@ -199,7 +228,35 @@ const DetailModal = ({
             </>
           )}
 
-          <Button variant="secondary" onClick={onClose}>
+          {showArchivedActions && (
+            <>
+              <Button 
+                onClick={() => {
+                  onReturnToApproved('article', selectedContent.gen_article_id, 'approved');
+                  onClose();
+                }}
+                className="flex items-center gap-2"
+                disabled={isUpdating}
+              >
+                <FileText className="w-4 h-4" />
+                Return to Approved
+              </Button>
+              <Button 
+                variant="outline"
+                onClick={() => {
+                  onRegenerate(selectedContent.sourceArticle?.article_id || selectedContent.gen_article_id);
+                  onClose();
+                }}
+                className="flex items-center gap-2"
+                disabled={isUpdating}
+              >
+                <FileText className="w-4 h-4" />
+                Regenerate Content
+              </Button>
+            </>
+          )}
+
+          <Button variant="secondary" onClick={onClose} disabled={isUpdating}>
             Close
           </Button>
         </div>

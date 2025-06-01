@@ -13,8 +13,10 @@ import {
   BookOpen,
   X
 } from 'lucide-react';
+import { useAccount } from '../contexts/AccountContext';
 
 const ProgressModal = ({ isOpen, onClose, onComplete, onReset }) => {
+  const { withAccountContext } = useAccount();
   const [progress, setProgress] = useState({
     isRunning: false,
     currentStep: '',
@@ -28,33 +30,46 @@ const ProgressModal = ({ isOpen, onClose, onComplete, onReset }) => {
   useEffect(() => {
     if (!isOpen) return;
 
-    // Connect to Server-Sent Events for real-time progress updates
-    const eventSource = new EventSource('/api/eden/automate/progress');
-    
-    eventSource.onmessage = (event) => {
+    let intervalId;
+
+    const fetchProgress = async () => {
       try {
-        const progressData = JSON.parse(event.data);
-        setProgress(progressData);
+        const baseUrl = import.meta.env.VITE_API_URL || '';
+        const accountOptions = withAccountContext({
+          method: 'GET'
+        });
         
-        // If automation is complete and successful, notify parent
-        if (!progressData.isRunning && progressData.progress === 100) {
-          setTimeout(() => {
-            onComplete?.(progressData.results);
-          }, 2000);
+        const response = await fetch(`${baseUrl}/api/eden/automate/progress`, accountOptions);
+        
+        if (response.ok) {
+          const progressData = await response.json();
+          setProgress(progressData);
+          
+          // If automation is complete and successful, notify parent
+          if (!progressData.isRunning && progressData.progress === 100) {
+            clearInterval(intervalId);
+            setTimeout(() => {
+              onComplete?.(progressData.results);
+            }, 2000);
+          }
+        } else {
+          console.error('Failed to fetch progress:', response.status, response.statusText);
         }
       } catch (error) {
-        console.error('Error parsing progress data:', error);
+        console.error('Error fetching progress:', error);
       }
     };
 
-    eventSource.onerror = (error) => {
-      console.error('EventSource failed:', error);
-    };
+    // Fetch immediately, then every 1 second
+    fetchProgress();
+    intervalId = setInterval(fetchProgress, 1000);
 
     return () => {
-      eventSource.close();
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
     };
-  }, [isOpen, onComplete]);
+  }, [isOpen, onComplete, withAccountContext]);
 
   if (!isOpen) return null;
 

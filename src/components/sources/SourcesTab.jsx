@@ -12,10 +12,16 @@ import {
   X, 
   ArrowUp,
   ArrowDown,
-  Loader2
+  Loader2,
+  Globe,
+  Plus,
+  Link
 } from 'lucide-react';
 import { FILTER_OPTIONS } from '../../utils/constants';
 import { formatDateTime, getSourceType, getSuccessRateColor, filterBySearch } from '../../utils/helpers';
+import HelpSection from '../common/HelpSection';
+import AddSourceForm from './AddSourceForm';
+import URLSubmissionForm from './URLSubmissionForm';
 
 /**
  * Sources Tab Component
@@ -26,12 +32,18 @@ const SourcesTab = ({
   loading,
   onRefresh,
   onToggleSourceStatus,
-  toggleLoadingMap
+  onRefreshSource,
+  toggleLoadingMap,
+  refreshLoadingMap
 }) => {
   // Filter and sort state
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('enabled');
   const [sortBy, setSortBy] = useState('name');
+
+  // Add source form state
+  const [isAddFormOpen, setIsAddFormOpen] = useState(false);
+  const [isUrlSubmissionOpen, setIsUrlSubmissionOpen] = useState(false);
 
   // Filter and sort sources
   const filteredAndSortedSources = useMemo(() => {
@@ -120,6 +132,33 @@ const SourcesTab = ({
     }
   ];
 
+  const handleAddSource = () => {
+    setIsAddFormOpen(true);
+  };
+
+  const handleSubmitUrls = () => {
+    setIsUrlSubmissionOpen(true);
+  };
+
+  const handleSourceAdded = async (newSource) => {
+    console.log('✅ Source added:', newSource.name);
+    // Refresh the sources list
+    await onRefresh();
+  };
+
+  const handleUrlsSubmitted = async (result) => {
+    console.log('✅ URLs submitted:', result);
+    // Optionally refresh sources or show success message
+  };
+
+  const handleCloseAddForm = () => {
+    setIsAddFormOpen(false);
+  };
+
+  const handleCloseUrlSubmission = () => {
+    setIsUrlSubmissionOpen(false);
+  };
+
   return (
     <ErrorBoundary>
       <Card>
@@ -132,6 +171,22 @@ const SourcesTab = ({
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                onClick={handleSubmitUrls}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={loading}
+              >
+                <Link className="h-4 w-4 mr-2" />
+                Submit URLs
+              </Button>
+              <Button
+                onClick={handleAddSource}
+                className="bg-green-600 hover:bg-green-700 text-white"
+                disabled={loading}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Source
+              </Button>
               <Button onClick={onRefresh} variant="outline" size="sm" disabled={loading}>
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
@@ -142,10 +197,43 @@ const SourcesTab = ({
             </div>
           </div>
           
-          {/* Explanatory section */}
-          <ExplanatorySection sources={sources} />
+          {/* Help section */}
+          <HelpSection 
+            title="📡 News Source Management Help"
+            bgColor="bg-blue-50"
+            borderColor="border-blue-200"
+            textColor="text-blue-800"
+            headingColor="text-blue-900"
+          >
+            <h3 className="font-semibold text-blue-900 mb-2">📡 News Source Management</h3>
+            <p className="text-sm text-blue-800 mb-3">
+              Monitor and manage {sources.length} configured Christian news sources. Track performance, enable/disable sources, 
+              and view detailed statistics for content aggregation optimisation. You can also submit specific news article URLs for immediate analysis.
+            </p>
+            <h4 className="font-semibold text-blue-900 mb-1">📊 Current Status:</h4>
+            <ul className="text-sm text-blue-800 list-disc list-inside space-y-1 mb-3">
+              <li>{sources.filter(s => s.is_active).length} sources are currently enabled and being monitored</li>
+              <li>{sources.filter(s => s.articles_last_24h > 0).length} sources provided articles in the last 24 hours</li>
+              <li>{sources.reduce((sum, s) => sum + s.articles_last_24h, 0)} total articles discovered in last 24h</li>
+              <li>RSS feeds and web scraping targets are monitored automatically</li>
+            </ul>
+            <h4 className="font-semibold text-blue-900 mb-1">🎯 Quick Actions:</h4>
+            <ul className="text-sm text-blue-800 list-disc list-inside space-y-1">
+              <li><strong>Submit URLs:</strong> Paste specific news article links for immediate analysis</li>
+              <li><strong>Add Source:</strong> Configure new RSS feeds or website sources</li>
+              <li><strong>Enable/Disable:</strong> Control which sources are actively monitored</li>
+              <li><strong>Refresh:</strong> Manually trigger source updates and article discovery</li>
+            </ul>
+          </HelpSection>
         </CardHeader>
         <CardContent>
+          {/* URL Submission Form */}
+          <URLSubmissionForm
+            isOpen={isUrlSubmissionOpen}
+            onClose={handleCloseUrlSubmission}
+            onUrlsSubmitted={handleUrlsSubmitted}
+          />
+
           {loading && sources.length === 0 ? (
             <LoadingState message="Loading news sources..." count={4} />
           ) : (
@@ -165,35 +253,24 @@ const SourcesTab = ({
                 sortBy={sortBy}
                 onSort={handleSort}
                 onToggleSourceStatus={onToggleSourceStatus}
+                onRefreshSource={onRefreshSource}
                 toggleLoadingMap={toggleLoadingMap}
+                refreshLoadingMap={refreshLoadingMap}
               />
             </div>
           )}
+
+          {/* Add Source Form Modal */}
+          <AddSourceForm
+            isOpen={isAddFormOpen}
+            onClose={handleCloseAddForm}
+            onSourceAdded={handleSourceAdded}
+          />
         </CardContent>
       </Card>
     </ErrorBoundary>
   );
 };
-
-/**
- * Explanatory Section Component
- */
-const ExplanatorySection = ({ sources }) => (
-  <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-    <h3 className="font-semibold text-blue-900 mb-2">📡 News Source Management</h3>
-    <p className="text-sm text-blue-800 mb-3">
-      Monitor and manage {sources.length} configured Christian news sources. Track performance, enable/disable sources, 
-      and view detailed statistics for content aggregation optimization.
-    </p>
-    <h4 className="font-semibold text-blue-900 mb-1">📊 Current Status:</h4>
-    <ul className="text-sm text-blue-800 list-disc list-inside space-y-1">
-      <li>{sources.filter(s => s.is_active).length} sources are currently enabled and being monitored</li>
-      <li>{sources.filter(s => s.articles_last_24h > 0).length} sources provided articles in the last 24 hours</li>
-      <li>{sources.reduce((sum, s) => sum + s.articles_last_24h, 0)} total articles discovered in last 24h</li>
-      <li>RSS feeds and web scraping targets are monitored automatically</li>
-    </ul>
-  </div>
-);
 
 /**
  * Sources Table Component
@@ -205,7 +282,9 @@ const SourcesTable = ({
   sortBy,
   onSort,
   onToggleSourceStatus,
-  toggleLoadingMap
+  onRefreshSource,
+  toggleLoadingMap,
+  refreshLoadingMap
 }) => (
   <>
     <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
@@ -286,7 +365,9 @@ const SourcesTable = ({
               key={`source-${source.source_id || index}`}
               source={source}
               onToggleSourceStatus={onToggleSourceStatus}
+              onRefreshSource={onRefreshSource}
               toggleLoadingMap={toggleLoadingMap}
+              refreshLoadingMap={refreshLoadingMap}
             />
           ))}
         </TableBody>
@@ -315,7 +396,7 @@ const SortButton = ({ column, sortBy, onSort, text }) => (
 /**
  * Source Row Component
  */
-const SourceRow = ({ source, onToggleSourceStatus, toggleLoadingMap }) => (
+const SourceRow = ({ source, onToggleSourceStatus, onRefreshSource, toggleLoadingMap, refreshLoadingMap }) => (
   <TableRow>
     <TableCell className="font-medium">
       <div>
@@ -358,27 +439,45 @@ const SourceRow = ({ source, onToggleSourceStatus, toggleLoadingMap }) => (
       </span>
     </TableCell>
     <TableCell>
-      <Button
-        size="sm"
-        variant={source.is_active ? "outline" : "default"}
-        onClick={() => onToggleSourceStatus(source.source_id)}
-        disabled={toggleLoadingMap.has(source.source_id)}
-        className="text-xs"
-      >
-        {toggleLoadingMap.has(source.source_id) ? (
-          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-        ) : source.is_active ? (
-          <X className="w-3 h-3 mr-1" />
-        ) : (
-          <Check className="w-3 h-3 mr-1" />
-        )}
-        {toggleLoadingMap.has(source.source_id) 
-          ? 'Updating...' 
-          : source.is_active 
-            ? 'Disable' 
-            : 'Enable'
-        }
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant={source.is_active ? "outline" : "default"}
+          onClick={() => onToggleSourceStatus(source.source_id)}
+          disabled={toggleLoadingMap.has(source.source_id)}
+          className="text-xs"
+        >
+          {toggleLoadingMap.has(source.source_id) ? (
+            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+          ) : source.is_active ? (
+            <X className="w-3 h-3 mr-1" />
+          ) : (
+            <Check className="w-3 h-3 mr-1" />
+          )}
+          {toggleLoadingMap.has(source.source_id) 
+            ? 'Updating...' 
+            : source.is_active 
+              ? 'Disable' 
+              : 'Enable'
+          }
+        </Button>
+        
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => onRefreshSource(source.source_id, source.name)}
+          disabled={refreshLoadingMap.has(source.source_id)}
+          className="text-xs"
+          title={`Refresh articles from ${source.name}`}
+        >
+          {refreshLoadingMap.has(source.source_id) ? (
+            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+          ) : (
+            <RefreshCw className="w-3 h-3 mr-1" />
+          )}
+          {refreshLoadingMap.has(source.source_id) ? 'Refreshing...' : 'Refresh'}
+        </Button>
+      </div>
     </TableCell>
   </TableRow>
 );

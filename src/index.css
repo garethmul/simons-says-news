@@ -71,6 +71,12 @@
   transition: all 0.2s ease-in-out;
 }
 
+/* Disable animations for dropdown content to prevent flying animations */
+[data-radix-select-content] {
+  transition: none !important;
+  transform: none !important;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
@@ -123,4 +129,52 @@ body {
     color: #213547;
     background-color: #ffffff;
   }
+}
+
+/* Content card animations */
+.content-card-exit {
+  animation: slideUp 300ms ease-in-out forwards;
+}
+
+.content-card-archive {
+  animation: archiveCard 500ms ease-in-out forwards;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 500px;
+    margin-bottom: 1rem;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-20px);
+    max-height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+@keyframes archiveCard {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.95) translateY(-10px);
+    max-height: 0;
+    margin-bottom: 0;
+  }
+}
+
+/* Scale transform utility */
+.transform.scale-98 {
+  transform: scale(0.98);
 } 

@@ -13,6 +13,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { formatDateTime, getEstimatedWaitTime } from '../../utils/helpers';
+import HelpSection from '../common/HelpSection';
 
 /**
  * Queued Jobs Tab Component
@@ -62,8 +63,27 @@ const QueuedJobsTab = ({
             </div>
           </div>
           
-          {/* Explanatory section */}
-          <ExplanatorySection />
+          {/* Help section */}
+          <HelpSection 
+            title="⏳ Queued Jobs Help"
+            bgColor="bg-yellow-50"
+            borderColor="border-yellow-200"
+            textColor="text-yellow-800"
+            headingColor="text-yellow-900"
+          >
+            <h3 className="font-semibold text-yellow-900 mb-2">⏳ What you're viewing:</h3>
+            <p className="text-sm text-yellow-800 mb-3">
+              Content generation jobs that have been created but are waiting to be processed by the job worker. 
+              These are typically created when you click "Generate Content" on stories.
+            </p>
+            <h4 className="font-semibold text-yellow-900 mb-1">🔄 How jobs are processed:</h4>
+            <ul className="text-sm text-yellow-800 list-disc list-inside space-y-1">
+              <li>Jobs are processed in first-in-first-out (FIFO) order</li>
+              <li>Each job generates blog posts, social media content, and video scripts</li>
+              <li>Completed content moves to the Review tab for human approval</li>
+              <li>Job worker must be running to process queued jobs</li>
+            </ul>
+          </HelpSection>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -91,26 +111,6 @@ const QueuedJobsTab = ({
     </ErrorBoundary>
   );
 };
-
-/**
- * Explanatory Section Component
- */
-const ExplanatorySection = () => (
-  <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-    <h3 className="font-semibold text-yellow-900 mb-2">⏳ What you're viewing:</h3>
-    <p className="text-sm text-yellow-800 mb-3">
-      Content generation jobs that have been created but are waiting to be processed by the job worker. 
-      These are typically created when you click "Generate Content" on stories.
-    </p>
-    <h4 className="font-semibold text-yellow-900 mb-1">🔄 How jobs are processed:</h4>
-    <ul className="text-sm text-yellow-800 list-disc list-inside space-y-1">
-      <li>Jobs are processed in first-in-first-out (FIFO) order</li>
-      <li>Each job generates blog posts, social media content, and video scripts</li>
-      <li>Completed content moves to the Review tab for human approval</li>
-      <li>Job worker must be running to process queued jobs</li>
-    </ul>
-  </div>
-);
 
 /**
  * Worker Status Alert Component

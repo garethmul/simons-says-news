@@ -9,6 +9,7 @@ import StoryCard from './StoryCard';
 import { TrendingUp } from 'lucide-react';
 import { PAGINATION_CONFIG, FILTER_OPTIONS } from '../../utils/constants';
 import { filterBySearch } from '../../utils/helpers';
+import HelpSection from '../common/HelpSection';
 
 /**
  * Stories Tab Component
@@ -31,6 +32,7 @@ const StoriesTab = ({
   const [searchText, setSearchText] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [tagFilter, setTagFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [sortBy, setSortBy] = useState(FILTER_OPTIONS.SORT.RELEVANCE);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [showRejectedStories, setShowRejectedStories] = useState(false);
@@ -83,6 +85,11 @@ const StoriesTab = ({
       });
     }
 
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(story => story.status === statusFilter);
+    }
+
     // Apply favorites filter
     if (showFavoritesOnly) {
       filtered = filtered.filter(story => favoriteStories.has(story.article_id));
@@ -92,15 +99,23 @@ const StoriesTab = ({
     filtered.sort((a, b) => {
       switch (sortBy) {
         case FILTER_OPTIONS.SORT.RELEVANCE:
-          return b.relevance_score - a.relevance_score;
+          return (b.relevance_score || 0) - (a.relevance_score || 0);
+        case FILTER_OPTIONS.SORT.RELEVANCE_ASC:
+          return (a.relevance_score || 0) - (b.relevance_score || 0);
         case FILTER_OPTIONS.SORT.DATE:
           return new Date(b.publication_date) - new Date(a.publication_date);
+        case FILTER_OPTIONS.SORT.DATE_ASC:
+          return new Date(a.publication_date) - new Date(b.publication_date);
         case FILTER_OPTIONS.SORT.SOURCE:
           return (a.source_name || '').localeCompare(b.source_name || '');
+        case FILTER_OPTIONS.SORT.SOURCE_DESC:
+          return (b.source_name || '').localeCompare(a.source_name || '');
         case FILTER_OPTIONS.SORT.TITLE:
           return (a.title || '').localeCompare(b.title || '');
+        case FILTER_OPTIONS.SORT.TITLE_DESC:
+          return (b.title || '').localeCompare(a.title || '');
         default:
-          return b.relevance_score - a.relevance_score;
+          return (b.relevance_score || 0) - (a.relevance_score || 0);
       }
     });
 
@@ -113,7 +128,7 @@ const StoriesTab = ({
       totalStories: filtered.length,
       totalPages: Math.ceil(filtered.length / itemsPerPage)
     };
-  }, [allArticles, searchText, sourceFilter, tagFilter, sortBy, showFavoritesOnly, showRejectedStories, favoriteStories, rejectedStories, currentPage]);
+  }, [allArticles, searchText, sourceFilter, tagFilter, statusFilter, sortBy, showFavoritesOnly, showRejectedStories, favoriteStories, rejectedStories, currentPage]);
 
   // Reset page when filters change
   const handleFilterChange = (filterFn) => {
@@ -134,6 +149,17 @@ const StoriesTab = ({
       onChange: (value) => handleFilterChange(() => setTagFilter(value)),
       placeholder: "Filter by Topic",
       options: tagOptions
+    },
+    {
+      value: statusFilter,
+      onChange: (value) => handleFilterChange(() => setStatusFilter(value)),
+      placeholder: "Filter by Status",
+      options: [
+        { value: FILTER_OPTIONS.ARTICLE_STATUS.ALL, label: 'All Statuses' },
+        { value: FILTER_OPTIONS.ARTICLE_STATUS.ANALYZED, label: 'Analyzed Articles' },
+        { value: FILTER_OPTIONS.ARTICLE_STATUS.SCRAPED, label: 'Needs Analysis' },
+        { value: FILTER_OPTIONS.ARTICLE_STATUS.PROCESSED, label: 'Used for Content' }
+      ]
     }
   ];
 
@@ -141,10 +167,14 @@ const StoriesTab = ({
     value: sortBy,
     onChange: setSortBy,
     options: [
-      { value: FILTER_OPTIONS.SORT.RELEVANCE, label: 'Sort by Relevance' },
-      { value: FILTER_OPTIONS.SORT.DATE, label: 'Sort by Date' },
-      { value: FILTER_OPTIONS.SORT.SOURCE, label: 'Sort by Source' },
-      { value: FILTER_OPTIONS.SORT.TITLE, label: 'Sort by Title' }
+      { value: FILTER_OPTIONS.SORT.RELEVANCE, label: 'Relevance (High to Low)' },
+      { value: FILTER_OPTIONS.SORT.RELEVANCE_ASC, label: 'Relevance (Low to High)' },
+      { value: FILTER_OPTIONS.SORT.DATE, label: 'Date (Newest First)' },
+      { value: FILTER_OPTIONS.SORT.DATE_ASC, label: 'Date (Oldest First)' },
+      { value: FILTER_OPTIONS.SORT.SOURCE, label: 'Source (A to Z)' },
+      { value: FILTER_OPTIONS.SORT.SOURCE_DESC, label: 'Source (Z to A)' },
+      { value: FILTER_OPTIONS.SORT.TITLE, label: 'Title (A to Z)' },
+      { value: FILTER_OPTIONS.SORT.TITLE_DESC, label: 'Title (Z to A)' }
     ]
   }];
 
@@ -164,12 +194,34 @@ const StoriesTab = ({
             </Badge>
           </div>
           
-          {/* Explanatory section */}
-          <ExplanatorySection 
-            stats={stats} 
-            allArticles={allArticles} 
-            onTabChange={onTabChange}
-          />
+          {/* Help section */}
+          <HelpSection 
+            title="📊 Story Management Help"
+            bgColor="bg-purple-50"
+            borderColor="border-purple-200"
+            textColor="text-purple-800"
+            headingColor="text-purple-900"
+          >
+            <h3 className="font-semibold text-purple-900 mb-2">🏆 What you're viewing:</h3>
+            <p className="text-sm text-purple-800 mb-3">
+              All {allArticles.length} analyzed Christian news stories from {stats.articlesAggregated} articles discovered across {stats.activeSources} news sources. 
+              Stories are ranked by AI relevance scoring based on Christian themes, values, and Eden's audience interests.
+            </p>
+            <h4 className="font-semibold text-purple-900 mb-1">🎯 Story breakdown:</h4>
+            <ul className="text-sm text-purple-800 list-disc list-inside space-y-1 mb-3">
+              <li>{allArticles.filter(a => a.relevance_score >= 0.6).length} high relevance stories (60%+ score)</li>
+              <li>{allArticles.filter(a => a.relevance_score >= 0.3 && a.relevance_score < 0.6).length} moderate relevance stories (30-60% score)</li>
+              <li>{allArticles.filter(a => a.relevance_score < 0.3).length} lower relevance stories (&lt;30% score)</li>
+              <li>AI filters for Christian themes, values, and audience alignment</li>
+            </ul>
+            <h4 className="font-semibold text-purple-900 mb-1">📈 Next steps:</h4>
+            <ul className="text-sm text-purple-800 list-disc list-inside space-y-1">
+              <li>Generate AI content from high-scoring stories</li>
+              <li>Review source articles for additional context</li>
+              <li>Use "Generate Content" to create blog posts and social media</li>
+              <li>Star your favourite stories for quick access</li>
+            </ul>
+          </HelpSection>
         </CardHeader>
         <CardContent>
           {loading && allArticles.length === 0 ? (
@@ -221,33 +273,6 @@ const StoriesTab = ({
     </ErrorBoundary>
   );
 };
-
-/**
- * Explanatory Section Component
- */
-const ExplanatorySection = ({ stats, allArticles, onTabChange }) => (
-  <div className="mt-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
-    <h3 className="font-semibold text-purple-900 mb-2">🏆 What you're viewing:</h3>
-    <p className="text-sm text-purple-800 mb-3">
-      All {allArticles.length} analyzed Christian news stories from {stats.articlesAggregated} articles discovered across {stats.activeSources} news sources. 
-      Stories are ranked by AI relevance scoring based on Christian themes, values, and Eden's audience interests.
-    </p>
-    <h4 className="font-semibold text-purple-900 mb-1">🎯 Story breakdown:</h4>
-    <ul className="text-sm text-purple-800 list-disc list-inside space-y-1 mb-3">
-      <li>{allArticles.filter(a => a.relevance_score >= 0.6).length} high relevance stories (60%+ score)</li>
-      <li>{allArticles.filter(a => a.relevance_score >= 0.3 && a.relevance_score < 0.6).length} moderate relevance stories (30-60% score)</li>
-      <li>{allArticles.filter(a => a.relevance_score < 0.3).length} lower relevance stories (&lt;30% score)</li>
-      <li>AI filters for Christian themes, values, and audience alignment</li>
-    </ul>
-    <h4 className="font-semibold text-purple-900 mb-1">📈 Next steps:</h4>
-    <ul className="text-sm text-purple-800 list-disc list-inside space-y-1">
-      <li>Generate AI content from high-scoring stories</li>
-      <li>Review source articles for additional context</li>
-      <li>Use "Generate Content" to create blog posts and social media</li>
-      <li>Star your favorite stories for quick access</li>
-    </ul>
-  </div>
-);
 
 /**
  * Empty State Component

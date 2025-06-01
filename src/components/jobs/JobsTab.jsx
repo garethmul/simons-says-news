@@ -1,16 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import LoadingState from '../ui/loading-state';
 import ErrorBoundary from '../ui/error-boundary';
 import StatusBadge from '../ui/status-badge';
+import JobLogViewer from './JobLogViewer';
 import { 
   RefreshCw, 
   Clock, 
   X, 
   RotateCcw,
-  Loader2
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  FileText
 } from 'lucide-react';
 import { formatDateTime } from '../../utils/helpers';
 
@@ -175,48 +179,98 @@ const RecentJobsList = ({ jobs, onCancelJob, onRetryJob }) => {
 /**
  * Job Card Component
  */
-const JobCard = ({ job, onCancelJob, onRetryJob }) => (
-  <Card className="border">
-    <CardContent className="pt-4">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
-            <span className="font-medium">#{job.job_id}</span>
-            <Badge variant="outline" className="text-xs">
-              {job.job_type.replace('_', ' ')}
-            </Badge>
-            <StatusBadge status={job.status} type="job" />
+const JobCard = ({ job, onCancelJob, onRetryJob }) => {
+  const [showLogs, setShowLogs] = useState(false);
+
+  return (
+    <div className="space-y-2">
+      <Card className="border">
+        <CardContent className="pt-4">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="font-medium">#{job.job_id}</span>
+                <Badge variant="outline" className="text-xs">
+                  {job.job_type.replace('_', ' ')}
+                </Badge>
+                <StatusBadge status={job.status} type="job" />
+              </div>
+
+              <JobTimestamps job={job} />
+
+              {/* Job Progress */}
+              {job.status === 'processing' && job.progress_percentage > 0 && (
+                <JobProgress job={job} />
+              )}
+
+              {/* Job Payload */}
+              {job.payload && <JobPayload payload={job.payload} />}
+
+              {/* Job Results */}
+              {job.results && job.status === 'completed' && (
+                <JobResults results={job.results} />
+              )}
+
+              {/* Error Message */}
+              {job.error_message && <JobError errorMessage={job.error_message} />}
+            </div>
+
+            {/* Job Actions */}
+            <div className="flex items-center gap-2 ml-4">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowLogs(!showLogs)}
+                className="h-7 px-2 text-xs"
+              >
+                <FileText className="w-3 h-3 mr-1" />
+                {showLogs ? 'Hide' : 'Show'} Logs
+                {showLogs ? (
+                  <ChevronUp className="w-3 h-3 ml-1" />
+                ) : (
+                  <ChevronDown className="w-3 h-3 ml-1" />
+                )}
+              </Button>
+              
+              {job.status === 'queued' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onCancelJob(job.job_id)}
+                  className="h-7 px-2 text-xs"
+                >
+                  <X className="w-3 h-3 mr-1" />
+                  Cancel
+                </Button>
+              )}
+              {job.status === 'failed' && job.retry_count < job.max_retries && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onRetryJob(job.job_id)}
+                  className="h-7 px-2 text-xs"
+                >
+                  <RotateCcw className="w-3 h-3 mr-1" />
+                  Retry
+                </Button>
+              )}
+            </div>
           </div>
+        </CardContent>
+      </Card>
 
-          <JobTimestamps job={job} />
-
-          {/* Job Progress */}
-          {job.status === 'processing' && job.progress_percentage > 0 && (
-            <JobProgress job={job} />
-          )}
-
-          {/* Job Payload */}
-          {job.payload && <JobPayload payload={job.payload} />}
-
-          {/* Job Results */}
-          {job.results && job.status === 'completed' && (
-            <JobResults results={job.results} />
-          )}
-
-          {/* Error Message */}
-          {job.error_message && <JobError errorMessage={job.error_message} />}
-        </div>
-
-        {/* Job Actions */}
-        <JobActions 
-          job={job} 
-          onCancelJob={onCancelJob} 
-          onRetryJob={onRetryJob} 
+      {/* Job Logs */}
+      {showLogs && (
+        <JobLogViewer
+          job={job}
+          isExpanded={showLogs}
+          onToggleExpanded={setShowLogs}
+          className="ml-4"
         />
-      </div>
-    </CardContent>
-  </Card>
-);
+      )}
+    </div>
+  );
+};
 
 /**
  * Job Timestamps Component
@@ -294,36 +348,6 @@ const JobError = ({ errorMessage }) => (
   <div className="mb-2 p-2 bg-red-50 rounded border border-red-200">
     <span className="text-xs font-medium text-red-800">Error: </span>
     <span className="text-xs text-red-700">{errorMessage}</span>
-  </div>
-);
-
-/**
- * Job Actions Component
- */
-const JobActions = ({ job, onCancelJob, onRetryJob }) => (
-  <div className="flex items-center gap-2 ml-4">
-    {job.status === 'queued' && (
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => onCancelJob(job.job_id)}
-        className="h-7 px-2 text-xs"
-      >
-        <X className="w-3 h-3 mr-1" />
-        Cancel
-      </Button>
-    )}
-    {job.status === 'failed' && job.retry_count < job.max_retries && (
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => onRetryJob(job.job_id)}
-        className="h-7 px-2 text-xs"
-      >
-        <RotateCcw className="w-3 h-3 mr-1" />
-        Retry
-      </Button>
-    )}
   </div>
 );
 

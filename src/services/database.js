@@ -456,7 +456,7 @@ class DatabaseService {
   }
 
   // System Logs methods
-  async insertLog(level, message, source = 'server', metadata = null, accountId = null) {
+  async insertLog(level, message, source = 'server', metadata = null, accountId = null, jobId = null) {
     try {
       const logData = {
         level,
@@ -467,6 +467,10 @@ class DatabaseService {
       
       if (accountId) {
         logData.account_id = accountId;
+      }
+      
+      if (jobId) {
+        logData.job_id = jobId;
       }
       
       return await this.insert('ssnews_system_logs', logData);
@@ -509,11 +513,12 @@ class DatabaseService {
           message,
           source,
           metadata,
+          job_id,
           account_id,
           created_at
         FROM ssnews_system_logs 
         WHERE ${whereClause}
-        ORDER BY timestamp DESC 
+        ORDER BY timestamp ASC 
         LIMIT ${limitValue}
       `, whereParams);
 
@@ -541,6 +546,60 @@ class DatabaseService {
       });
     } catch (error) {
       console.error('❌ Failed to retrieve logs from database:', error.message);
+      return [];
+    }
+  }
+
+  async getJobLogs(jobId, accountId = null) {
+    try {
+      let whereClause = 'job_id = ?';
+      const whereParams = [jobId];
+
+      // CRITICAL: Filter by account ID for security  
+      if (accountId) {
+        whereClause += ' AND (account_id = ? OR account_id IS NULL)';
+        whereParams.push(accountId);
+      }
+
+      const [rows] = await this.pool.execute(`
+        SELECT 
+          log_id as id,
+          timestamp,
+          level,
+          message,
+          source,
+          metadata,
+          job_id,
+          account_id,
+          created_at
+        FROM ssnews_system_logs 
+        WHERE ${whereClause}
+        ORDER BY timestamp ASC
+      `, whereParams);
+
+      // Parse metadata JSON safely
+      return rows.map(row => {
+        let parsedMetadata = null;
+        if (row.metadata) {
+          try {
+            if (typeof row.metadata === 'string') {
+              parsedMetadata = JSON.parse(row.metadata);
+            } else {
+              parsedMetadata = row.metadata;
+            }
+          } catch (error) {
+            console.warn('Failed to parse metadata for log', row.id, ':', error.message);
+            parsedMetadata = null;
+          }
+        }
+        
+        return {
+          ...row,
+          metadata: parsedMetadata
+        };
+      });
+    } catch (error) {
+      console.error('❌ Failed to retrieve job logs from database:', error.message);
       return [];
     }
   }
