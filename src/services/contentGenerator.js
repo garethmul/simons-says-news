@@ -81,7 +81,7 @@ class ContentGenerator {
         content_type: 'blog',
         word_count: 0,
         suggested_eden_product_links: JSON.stringify([]),
-        status: 'review_pending'
+        status: 'draft'
       }, accountId);
 
       // Now generate the blog post with the proper ID for logging
@@ -122,6 +122,9 @@ class ContentGenerator {
       // Generate video scripts with account context
       const videoScripts = await this.generateVideoScriptsWithAccount(articleForAI, blogId, accountId);
 
+      // Generate prayer points with account context
+      const prayerPoints = await this.generatePrayerPointsWithAccount(articleForAI, blogId, accountId);
+
       // Generate and associate images with account context
       const images = await this.generateImagesWithAccount(blogPost, blogId, accountId);
 
@@ -137,6 +140,7 @@ class ContentGenerator {
         blogPost,
         socialPosts,
         videoScripts,
+        prayerPoints,
         images,
         originalStory: story
       };
@@ -594,6 +598,166 @@ class ContentGenerator {
       console.error('❌ Error generating images:', error.message);
       return [];
     }
+  }
+
+  async generatePrayerPointsWithAccount(article, blogId, accountId = null) {
+    console.log('🙏 Generating prayer points with account context...');
+    
+    try {
+      // Check if generic content configuration exists
+      const config = await db.getContentConfiguration('prayer_points', accountId);
+      
+      if (config) {
+        console.log('✨ Using generic content system for prayer points');
+        return await this.generateGenericPrayerPoints(article, blogId, config, accountId);
+      } else {
+        console.log('⚠️ No generic config found, using legacy prayer points system');
+        return await this.generateLegacyPrayerPoints(article, blogId, accountId);
+      }
+    } catch (error) {
+      console.error('❌ Error generating prayer points:', error.message);
+      return [];
+    }
+  }
+
+  async generateGenericPrayerPoints(article, blogId, config, accountId = null) {
+    try {
+      const prayerContent = await aiService.generatePrayerPoints(article, blogId);
+      
+      console.log(`🙏 Raw prayer content: ${prayerContent}`);
+      
+      // Parse the prayer points string into individual prayer objects
+      const prayerPointsData = [];
+      
+      if (typeof prayerContent === 'string' && prayerContent.length > 0) {
+        // Split the prayer points by double line breaks
+        const prayerTexts = prayerContent.split('\\n\\n').filter(text => text.trim().length > 0);
+        
+        for (let i = 0; i < prayerTexts.length && i < 5; i++) {
+          const prayerText = prayerTexts[i].trim();
+          if (prayerText.length > 10) {
+            prayerPointsData.push({
+              order_number: i + 1,
+              prayer_text: prayerText,
+              theme: this.extractThemeFromPrayer(prayerText)
+            });
+          }
+        }
+      }
+
+      // Convert to JSON strings for proper storage
+      const contentDataJson = JSON.stringify(prayerPointsData);
+      const metadataJson = JSON.stringify({
+        generation_model: 'gemini',
+        prayer_count: prayerPointsData.length,
+        generated_at: new Date().toISOString()
+      });
+
+      // Use raw SQL with explicit JSON casting to ensure proper storage
+      const insertSql = `
+        INSERT INTO ssnews_generated_content 
+        (account_id, based_on_gen_article_id, prompt_category, content_data, metadata, status, created_at, updated_at)
+        VALUES (?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), ?, NOW(), NOW())
+      `;
+      
+      const insertParams = [
+        accountId,
+        blogId,
+        'prayer_points',
+        contentDataJson,
+        metadataJson,
+        'draft'
+      ];
+
+      const [result] = await db.pool.execute(insertSql, insertParams);
+      const contentId = result.insertId;
+      
+      console.log(`🙏 Generated ${prayerPointsData.length} prayer points (Generic Content ID: ${contentId})`);
+      
+      return prayerPointsData.map((point, index) => ({
+        id: `${contentId}_${index}`,
+        order: point.order_number,
+        content: point.prayer_text,
+        theme: point.theme
+      }));
+    } catch (error) {
+      console.error('❌ Error generating generic prayer points:', error.message);
+      return [];
+    }
+  }
+
+  async generateLegacyPrayerPoints(article, blogId, accountId = null) {
+    try {
+      const prayerContent = await aiService.generatePrayerPoints(article, blogId);
+      
+      let parsedPrayer;
+      try {
+        let cleanContent = prayerContent.trim();
+        if (cleanContent.startsWith('```json')) {
+          cleanContent = cleanContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (cleanContent.startsWith('```')) {
+          cleanContent = cleanContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+        parsedPrayer = JSON.parse(cleanContent);
+      } catch (parseError) {
+        // If not JSON, parse as simple text lines
+        const prayerLines = prayerContent.split('\n')
+          .filter(line => line.trim() && !line.startsWith('#'))
+          .map(line => line.replace(/^\d+\.?\s*/, '').replace(/^[-*]\s*/, '').trim())
+          .filter(line => line.length > 10);
+        
+        parsedPrayer = {
+          prayers: prayerLines.slice(0, 5) // Take first 5 prayer points
+        };
+      }
+
+      const prayerPoints = [];
+      const prayers = parsedPrayer.prayers || parsedPrayer.points || [parsedPrayer.text];
+
+      for (let i = 0; i < prayers.length && i < 5; i++) {
+        try {
+          const prayerText = prayers[i];
+          if (!prayerText || prayerText.length < 10) continue;
+          
+          const pointData = {
+            based_on_gen_article_id: blogId,
+            order_number: i + 1,
+            prayer_text: prayerText,
+            status: 'draft'
+          };
+
+          const pointId = accountId 
+            ? await db.insertGeneratedPrayerPoint(pointData, accountId)
+            : await db.insertGeneratedPrayerPoint(pointData);
+
+          prayerPoints.push({
+            id: pointId,
+            order: i + 1,
+            content: prayerText
+          });
+
+          console.log(`🙏 Prayer point ${i + 1} created (ID: ${pointId})`);
+        } catch (error) {
+          console.error(`❌ Error creating prayer point ${i + 1}:`, error.message);
+        }
+      }
+
+      return prayerPoints;
+    } catch (error) {
+      console.error('❌ Error generating legacy prayer points:', error.message);
+      return [];
+    }
+  }
+
+  extractThemeFromPrayer(prayerText) {
+    // Simple theme extraction based on keywords
+    const text = prayerText.toLowerCase();
+    if (text.includes('heal') || text.includes('comfort')) return 'healing';
+    if (text.includes('leader') || text.includes('guidance')) return 'leadership';
+    if (text.includes('victim') || text.includes('affected')) return 'support';
+    if (text.includes('justice') || text.includes('truth')) return 'justice';
+    if (text.includes('hope') || text.includes('future')) return 'hope';
+    return 'general';
   }
 
   async getContentForReview(status = 'draft', limit = 10, accountId = null) {

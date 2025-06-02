@@ -2151,15 +2151,43 @@ app.post('/api/eden/sources/submit-urls', accountContext, async (req, res) => {
 
     console.log(`📎 Processing ${urls.length} submitted URLs for account ${accountId}`);
 
-    // Use a default source ID of 1 for now (or get first available source)
-    let sourceId = 1;
+    // Get or create "User Submitted" source
+    let userSource;
     try {
-      const firstSource = await db.findOne('ssnews_news_sources', 'account_id = ?', [accountId]);
-      if (firstSource) {
-        sourceId = firstSource.source_id;
+      userSource = await db.findOne(
+        'ssnews_news_sources',
+        'name = ? AND account_id = ?',
+        ['User Submitted', accountId]
+      );
+
+      if (!userSource) {
+        console.log('📝 Creating User Submitted source...');
+        const sourceResult = await db.insert('ssnews_news_sources', {
+          account_id: accountId,
+          name: 'User Submitted',
+          url: 'https://user-submitted.local',
+          rss_feed_url: null,
+          description: 'URLs manually submitted by users for analysis',
+          is_active: true,
+          created_at: new Date(),
+          updated_at: new Date()
+        });
+        
+        userSource = {
+          source_id: sourceResult,
+          account_id: accountId,
+          name: 'User Submitted'
+        };
+        console.log(`✅ Created User Submitted source with ID: ${sourceResult}`);
+      } else {
+        console.log(`✅ Found existing User Submitted source with ID: ${userSource.source_id}`);
       }
     } catch (sourceError) {
-      console.log('Using default source ID');
+      console.error('❌ Error with User Submitted source setup:', sourceError.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to setup User Submitted source'
+      });
     }
 
     const processedUrls = [];
@@ -2207,7 +2235,7 @@ app.post('/api/eden/sources/submit-urls', accountContext, async (req, res) => {
         try {
           const articleData = {
             account_id: accountId,
-            source_id: sourceId,
+            source_id: userSource.source_id,
             title: 'Processing submitted URL...',
             url: normalizedUrl,
             publication_date: new Date(),
@@ -2224,7 +2252,7 @@ app.post('/api/eden/sources/submit-urls', accountContext, async (req, res) => {
               {
                 articleId: articleResult,
                 url: normalizedUrl,
-                sourceId: sourceId
+                sourceId: userSource.source_id
               },
               2, // high priority for user-submitted URLs
               'user',

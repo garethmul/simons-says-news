@@ -436,6 +436,32 @@ class DatabaseService {
             // Continue without source article info
           }
         }
+
+        // Get prayer points from generic content system
+        try {
+          const prayerPoints = await this.getGenericContent(article.gen_article_id, 'prayer_points', accountId);
+          
+          if (prayerPoints && prayerPoints.length > 0) {
+            // Convert generic content to expected format
+            article.prayerPoints = prayerPoints.map(point => {
+              const data = point.content_data;
+              if (Array.isArray(data)) {
+                return data.map((item, index) => ({
+                  id: `${point.content_id}_${index}`,
+                  order: item.order_number || index + 1,
+                  content: item.prayer_text,
+                  theme: item.theme
+                }));
+              }
+              return [];
+            }).flat();
+          } else {
+            article.prayerPoints = [];
+          }
+        } catch (prayerError) {
+          console.warn(`⚠️ Could not fetch prayer points: ${prayerError.message}`);
+          article.prayerPoints = [];
+        }
       }
 
       console.log(`📋 Found ${uniqueArticles.length} content pieces for review`);
@@ -674,6 +700,16 @@ class DatabaseService {
       'theme_category = ?',
       [category]
     );
+  }
+
+  // Generic Content System methods
+  async getGenericContent(articleId, category, accountId = null) {
+    const whereClause = accountId
+      ? 'based_on_gen_article_id = ? AND prompt_category = ? AND account_id = ?'
+      : 'based_on_gen_article_id = ? AND prompt_category = ?';
+    const whereParams = accountId ? [articleId, category, accountId] : [articleId, category];
+    
+    return this.findMany('ssnews_generated_content', whereClause, whereParams, 'created_at ASC');
   }
 
   // Database lifecycle methods

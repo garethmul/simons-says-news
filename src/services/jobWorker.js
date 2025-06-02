@@ -3,6 +3,8 @@ import contentGenerator from './contentGenerator.js';
 import newsAggregator from './newsAggregator.js';
 import aiService from './aiService.js';
 import db from './database.js';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 class JobWorker {
   constructor() {
@@ -367,9 +369,6 @@ class JobWorker {
       // Scrape the URL to get content
       await jobManager.updateJobProgress(jobId, 40, 'Scraping article content...');
       
-      const axios = (await import('axios')).default;
-      const cheerio = (await import('cheerio')).default;
-      
       try {
         const response = await axios.get(url, {
           timeout: 30000,
@@ -419,12 +418,6 @@ class JobWorker {
           content = $('body').text().trim();
         }
         
-        // Extract author
-        let author = $('meta[name="author"]').attr('content') ||
-                    $('.author').first().text().trim() ||
-                    $('[class*="author"]').first().text().trim() ||
-                    null;
-        
         // Extract publication date
         let pubDate = $('meta[property="article:published_time"]').attr('content') ||
                      $('meta[name="publish-date"]').attr('content') ||
@@ -447,8 +440,7 @@ class JobWorker {
           'ssnews_scraped_articles',
           {
             title: title.substring(0, 255), // Ensure it fits in the column
-            content: content.substring(0, 10000), // Limit content length
-            author: author ? author.substring(0, 100) : null,
+            full_text: content.substring(0, 10000), // Limit content length
             publication_date: publicationDate,
             updated_at: new Date()
           },
@@ -473,7 +465,7 @@ class JobWorker {
         [articleId, accountId]
       );
       
-      if (updatedArticle && updatedArticle.content && updatedArticle.content.length > 100) {
+      if (updatedArticle && updatedArticle.full_text && updatedArticle.full_text.length > 100) {
         try {
           // Run AI analysis using the existing news aggregator method
           const analysisResult = await aiService.analyzeArticle(updatedArticle);
@@ -508,7 +500,7 @@ class JobWorker {
       return {
         url,
         articleId,
-        contentLength: updatedArticle?.content?.length || 0,
+        contentLength: updatedArticle?.full_text?.length || 0,
         title: updatedArticle?.title || 'Unknown',
         analysisComplete: true,
         accountId

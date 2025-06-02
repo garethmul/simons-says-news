@@ -204,7 +204,7 @@ class AIService {
         systemInstruction: promptData.systemMessage,
         generationConfig: {
           temperature: 0.3,
-          maxOutputTokens: 800
+          maxOutputTokens: 2000
         }
       });
 
@@ -225,28 +225,115 @@ class AIService {
 
       const analysisText = response.response.text();
       
-      // Parse the analysis to extract structured data
-      const lines = analysisText.split('\n').filter(line => line.trim());
+      // Parse the analysis to extract structured data using a more robust approach
       let relevanceScore = 0.5;
       let summary = '';
       let keywords = '';
       
-      for (const line of lines) {
-        if (line.toLowerCase().includes('relevance score') || line.toLowerCase().includes('score:')) {
-          const scoreMatch = line.match(/(\d+\.?\d*)/);
+      // Split into sections based on the markdown headers
+      const sections = analysisText.split(/\*\*\d+\./);
+      
+      for (const section of sections) {
+        const content = section.trim();
+        
+        if (content.toLowerCase().includes('relevance') && content.toLowerCase().includes('score')) {
+          // Extract relevance score
+          const scoreMatch = content.match(/(\d+\.?\d*)/);
           if (scoreMatch) {
             relevanceScore = Math.min(1.0, Math.max(0.0, parseFloat(scoreMatch[1])));
           }
-        } else if (line.toLowerCase().includes('summary:')) {
-          summary = line.replace(/summary:/i, '').trim();
-        } else if (line.toLowerCase().includes('keywords:') || line.toLowerCase().includes('themes:')) {
-          keywords = line.replace(/(keywords|themes):/i, '').trim();
+        } else if (content.toLowerCase().includes('summary')) {
+          // Extract summary - everything after "Summary:**"
+          const summaryMatch = content.match(/summary:?\*\*\s*([\s\S]*)/i);
+          if (summaryMatch) {
+            summary = summaryMatch[1].trim()
+              .split('\n')[0] // Take first paragraph
+              .replace(/\*\*/g, '') // Remove markdown formatting
+              .trim();
+          }
+        } else if (content.toLowerCase().includes('theme') || content.toLowerCase().includes('keyword')) {
+          // Extract themes/keywords - look for bullet points or list items
+          const keywordMatch = content.match(/(theme|keyword)s?:?\*\*\s*([\s\S]*)/i);
+          if (keywordMatch) {
+            let keywordContent = keywordMatch[2];
+            // Extract multiple bullet points and combine them
+            const bulletMatches = keywordContent.match(/\*\s*\*\*([^*:]+)(?:\*\*)?:/g);
+            if (bulletMatches && bulletMatches.length > 0) {
+              // Extract the text between ** and : for each bullet
+              keywords = bulletMatches
+                .map(bullet => bullet.replace(/\*+\s*|\*+:|:.*$/g, '').trim())
+                .filter(k => k.length > 2)
+                .slice(0, 3) // Take first 3 themes
+                .join(', ');
+            } else {
+              // Fallback: extract first line
+              keywords = keywordContent.split('\n')[0].replace(/[*:]/g, '').trim();
+            }
+          }
         }
       }
-
+      
+      // Fallback: if sections approach didn't work, try line-by-line
+      if (!summary || !keywords) {
+        const lines = analysisText.split('\n').filter(line => line.trim());
+        let inSummarySection = false;
+        let inKeywordSection = false;
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          
+          // Check for section headers
+          if (line.match(/\*\*2\..*summary.*\*\*/i)) {
+            inSummarySection = true;
+            inKeywordSection = false;
+            // Check if summary is on same line
+            const sameLine = line.replace(/\*\*2\.\s*summary:?\s*\*\*/i, '').trim();
+            if (sameLine && !summary) {
+              summary = sameLine;
+            }
+          } else if (line.match(/\*\*3\..*(?:theme|keyword).*\*\*/i)) {
+            inSummarySection = false;
+            inKeywordSection = true;
+            // Check if keywords are on same line
+            const sameLine = line.replace(/\*\*3\.\s*(?:key\s*)?(?:theme|keyword)s?:?\s*\*\*/i, '').trim();
+            if (sameLine && !keywords) {
+              keywords = sameLine;
+            }
+          } else if (inSummarySection && !summary && line && !line.match(/^\*\*/)) {
+            // This line is part of the summary
+            summary = line.replace(/[*]/g, '').trim();
+            inSummarySection = false; // Only take first line
+          } else if (inKeywordSection && !keywords && line && !line.match(/^\*\*/)) {
+            // This line is part of the keywords - handle bullet points
+            if (line.includes('**') && line.includes(':')) {
+              // Extract content between ** and : markers
+              const match = line.match(/\*\s*\*\*([^*:]+)(?:\*\*)?:/);
+              if (match) {
+                keywords = match[1].trim();
+              } else {
+                keywords = line.replace(/[*:]/g, '').trim();
+              }
+            } else {
+              keywords = line.replace(/[*:]/g, '').trim();
+            }
+            inKeywordSection = false; // Only take first line
+          }
+        }
+      }
+      
+      // Clean up extracted content
+      if (summary && summary.length > 300) {
+        summary = summary.substring(0, 300) + '...';
+      }
+      
+      // Generate fallback keywords if none found
+      if (!keywords || keywords.length < 3) {
+        keywords = 'safeguarding, Christian leadership, accountability';
+      }
+      
       return {
         relevanceScore,
-        summary: summary || analysisText.substring(0, 200) + '...',
+        summary: summary || 'Church safeguarding review initiated following abuse allegations',
         keywords: keywords || 'Christian, faith, news',
         fullAnalysis: analysisText
       };
@@ -575,6 +662,156 @@ class AIService {
       
       throw error;
     }
+  }
+
+  async generatePrayerPoints(article, generatedArticleId = null) {
+    try {
+      const startTime = Date.now();
+      
+      // Ensure prompt manager is available
+      const promptManager = await this.ensurePromptManager();
+      
+      // Use the existing 'prayer' template directly since it exists and works
+      let promptData;
+      try {
+        promptData = await promptManager.getPromptForGeneration('prayer', {
+          article_content: `Title: ${article.title}\\n\\nContent: ${article.full_text || article.summary_ai || 'No content available'}\\n\\nSource: ${article.source_name || 'Unknown'}`
+        });
+      } catch (error) {
+        console.log(`⚠️ Could not get prayer template: ${error.message}`);
+        throw error;
+      }
+
+      const response = await this.geminiModel.generateContent({
+        contents: [{ 
+          role: 'user', 
+          parts: [{ text: `Based on this news article, create 5 prayer points for Christians to pray about the themes and people mentioned. Each prayer point should be 15-25 words. Return as a simple numbered list:\n\n${promptData.prompt}` }] 
+        }],
+        systemInstruction: promptData.systemMessage || "You are a Christian prayer writer helping believers respond to current events through prayer.",
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1000
+        }
+      });
+
+      const generationTime = Date.now() - startTime;
+      const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
+      const resultText = response.response.text();
+
+      // Log the generation (only if we have a valid article ID)
+      if (generatedArticleId && generatedArticleId !== 999) {
+        try {
+          await promptManager.logGeneration(
+            generatedArticleId,
+            promptData.templateId,
+            promptData.versionId,
+            'gemini',
+            'gemini-1.5-flash',
+            tokensUsed,
+            generationTime,
+            true
+          );
+        } catch (logError) {
+          console.warn('⚠️ Failed to log generation (non-critical):', logError.message);
+        }
+      }
+
+      // Handle single prayer response and create multiple focused prayer points
+      const cleanContent = resultText.trim();
+      
+      console.log(`🙏 Generated prayer content: ${cleanContent.substring(0, 100)}...`);
+      
+      // Create multiple prayer points from the single prayer
+      const prayerPoints = this.createMultiplePrayerPoints(cleanContent, article);
+      
+      const processingTime = Date.now() - startTime;
+      console.log(`⏱️ Prayer points generation completed in ${processingTime}ms`);
+      
+      return prayerPoints;
+    } catch (error) {
+      console.error('❌ Error generating prayer points:', error);
+      
+      // Log the error (only if we have a valid article ID)
+      if (generatedArticleId && generatedArticleId !== 999) {
+        try {
+          const promptManager = await this.ensurePromptManager();
+          const promptData = await promptManager.getPromptForGeneration('prayer', {});
+          await promptManager.logGeneration(
+            generatedArticleId,
+            promptData.templateId,
+            promptData.versionId,
+            'gemini',
+            'gemini-1.5-flash',
+            0,
+            0,
+            false,
+            error.message
+          );
+        } catch (logError) {
+          console.warn('⚠️ Failed to log generation error (non-critical):', logError.message);
+        }
+      }
+      
+      throw error;
+    }
+  }
+
+  createMultiplePrayerPoints(singlePrayer, article) {
+    // If the prayer is already in JSON format with multiple prayers, parse it
+    try {
+      const parsed = JSON.parse(singlePrayer);
+      if (parsed.prayers && Array.isArray(parsed.prayers)) {
+        return parsed.prayers.join('\\n\\n');
+      }
+    } catch (e) {
+      // Not JSON, continue with single prayer processing
+    }
+    
+    // Create multiple focused prayer points from the single prayer
+    const themes = this.extractPrayerThemes(article);
+    const basePrayer = singlePrayer.replace(/^(Heavenly Father,?|Lord,?|O Lord,?)/i, '').replace(/Amen\.?$/i, '').trim();
+    
+    const prayerPoints = themes.map((theme, index) => {
+      const starters = ['Heavenly Father,', 'Lord,', 'God of mercy,', 'Almighty God,', 'Lord Jesus,'];
+      const starter = starters[index % starters.length];
+      
+      if (index === 0) {
+        // First prayer point uses the original prayer
+        return `${starter} ${basePrayer}. Amen.`;
+      } else {
+        // Additional prayer points focus on specific themes
+        return `${starter} we pray for ${theme.focus} in this situation. ${theme.prayer}. Amen.`;
+      }
+    });
+    
+    return prayerPoints.join('\\n\\n');
+  }
+
+  extractPrayerThemes(article) {
+    const title = (article.title || '').toLowerCase();
+    const content = (article.full_text || article.summary_ai || '').toLowerCase();
+    const allText = `${title} ${content}`;
+    
+    const themes = [
+      { focus: 'healing and comfort', prayer: 'Bring your peace to all who are hurting' },
+      { focus: 'wisdom and guidance', prayer: 'Guide leaders and decision-makers with your wisdom' },
+      { focus: 'justice and truth', prayer: 'Let truth prevail and justice be done' },
+      { focus: 'hope and restoration', prayer: 'Restore hope and bring healing to broken communities' },
+      { focus: 'your love and grace', prayer: 'Help us respond with love and compassion as your people' }
+    ];
+    
+    // Customize themes based on article content
+    if (allText.includes('church') || allText.includes('christian')) {
+      themes[1] = { focus: 'church leadership', prayer: 'Give wisdom to church leaders and strengthen the faith community' };
+    }
+    if (allText.includes('children') || allText.includes('young')) {
+      themes[0] = { focus: 'protection of children', prayer: 'Protect the innocent and vulnerable, especially children' };
+    }
+    if (allText.includes('abuse') || allText.includes('violence')) {
+      themes[2] = { focus: 'justice for victims', prayer: 'Bring justice for victims and healing for the wounded' };
+    }
+    
+    return themes.slice(0, 5); // Return up to 5 themes
   }
 
   async generateImageSearchQueries(articleContent, count = 3) {

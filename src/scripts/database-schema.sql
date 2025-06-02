@@ -230,6 +230,73 @@ CREATE TABLE IF NOT EXISTS ssnews_user_bookmarks (
     UNIQUE KEY unique_user_article (user_id, article_id)
 );
 
+-- Generic Content System Tables
+
+-- Prompt Configuration Table - Defines content types and their rules
+CREATE TABLE IF NOT EXISTS ssnews_prompt_configuration (
+    config_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64),
+    prompt_category VARCHAR(50) NOT NULL,
+    display_name VARCHAR(100) NOT NULL,
+    storage_schema JSON NOT NULL,
+    ui_config JSON NOT NULL,
+    generation_config JSON,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_account_category (account_id, prompt_category),
+    INDEX idx_category (prompt_category),
+    UNIQUE KEY unique_account_category (account_id, prompt_category)
+);
+
+-- Generic Content Storage Table - Stores all generated content as JSON
+CREATE TABLE IF NOT EXISTS ssnews_generated_content (
+    content_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64),
+    based_on_gen_article_id INT NOT NULL,
+    prompt_category VARCHAR(50) NOT NULL,
+    content_data JSON NOT NULL,
+    metadata JSON,
+    status ENUM('draft', 'approved', 'rejected', 'archived') DEFAULT 'draft',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_article_category (based_on_gen_article_id, prompt_category),
+    INDEX idx_account_status (account_id, status),
+    INDEX idx_category_status (prompt_category, status),
+    FOREIGN KEY (based_on_gen_article_id) REFERENCES ssnews_generated_articles(gen_article_id) ON DELETE CASCADE
+);
+
+-- Insert default prayer points configuration for existing accounts
+INSERT IGNORE INTO ssnews_prompt_configuration 
+(account_id, prompt_category, display_name, storage_schema, ui_config, generation_config) 
+VALUES 
+('56a17e9b-2274-40cc-8c83-4979e8df671a', 'prayer_points', 'Prayer Points', 
+JSON_OBJECT(
+    'type', 'array',
+    'max_items', 5,
+    'items', JSON_OBJECT(
+        'order_number', JSON_OBJECT('type', 'integer', 'required', true),
+        'prayer_text', JSON_OBJECT('type', 'string', 'max_length', 200, 'required', true),
+        'theme', JSON_OBJECT('type', 'string', 'max_length', 50)
+    )
+),
+JSON_OBJECT(
+    'tab_name', 'Prayer Points',
+    'icon', 'Heart',
+    'display_type', 'numbered_list',
+    'empty_message', 'No prayer points generated',
+    'count_in_tab', true,
+    'order', 4
+),
+JSON_OBJECT(
+    'model', 'gemini',
+    'max_tokens', 1000,
+    'temperature', 0.7,
+    'prompt_template', 'prayer',
+    'fallback_template', 'prayer',
+    'custom_instructions', 'Create 5 prayer points, 15-25 words each, covering different aspects: people affected, healing, guidance, hope, and justice.'
+));
+
 -- Insert initial news sources
 INSERT IGNORE INTO ssnews_news_sources (name, url, rss_feed_url, is_active) VALUES
 ('Premier Christian News', 'https://premierchristian.news', 'https://premierchristian.news/rss', TRUE),
