@@ -18,7 +18,10 @@ import {
   Clock,
   User,
   Tag,
-  Archive
+  Archive,
+  Wand2,
+  Plus,
+  Loader2
 } from 'lucide-react';
 import { formatDate, getDaysAgo, parseKeywords } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
@@ -47,6 +50,7 @@ const DetailModal = ({
   // ALL hooks must be called before any conditional logic
   const { getContentTypeName, getContentTypeIcon } = useContentTypes();
   const [activeTab, setActiveTab] = useState('content');
+  const [currentImages, setCurrentImages] = useState([]);
 
   // Handle Escape key to close modal and body scroll management
   useEffect(() => {
@@ -71,6 +75,27 @@ const DetailModal = ({
       document.body.style.overflow = originalOverflow || 'unset';
     };
   }, [showModal, selectedContent, onClose]);
+
+  // Update current images when selectedContent changes
+  useEffect(() => {
+    if (selectedContent?.images) {
+      setCurrentImages(selectedContent.images);
+    }
+  }, [selectedContent]);
+
+  // Handle new image generation
+  const handleImageGenerated = (newImage) => {
+    setCurrentImages(prevImages => [
+      ...prevImages,
+      {
+        ...newImage,
+        // Ensure it has the right structure
+        sirvUrl: newImage.sirvUrl,
+        altText: newImage.altText,
+        source: 'ideogram'
+      }
+    ]);
+  };
 
   // Early return AFTER all hooks have been called
   if (!showModal || !selectedContent) return null;
@@ -161,7 +186,7 @@ const DetailModal = ({
               </TabsContent>
 
               <TabsContent value="images" className="mt-0 h-full">
-                <ImagesTab images={selectedContent.images || []} />
+                <ImagesTab images={currentImages} contentId={selectedContent.gen_article_id} onImageGenerated={handleImageGenerated} />
               </TabsContent>
 
               <TabsContent value="source" className="mt-0 h-full">
@@ -487,14 +512,289 @@ const PrayerPointsTab = ({ prayerPoints }) => (
 );
 
 /**
+ * Ideogram Image Generator Component
+ */
+const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [formData, setFormData] = useState({
+    prompt: '',
+    aspectRatio: '16:9',
+    styleType: 'REALISTIC',
+    magicPrompt: 'ON',
+    useChristianPrompt: false
+  });
+  const [options, setOptions] = useState(null);
+
+  // Load Ideogram options when component mounts
+  useEffect(() => {
+    const loadOptions = async () => {
+      try {
+        const response = await fetch('/api/eden/images/ideogram/options');
+        if (response.ok) {
+          const data = await response.json();
+          setOptions(data.options);
+        }
+      } catch (error) {
+        console.error('Failed to load Ideogram options:', error);
+      }
+    };
+
+    if (showForm && !options) {
+      loadOptions();
+    }
+  }, [showForm, options]);
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    try {
+      const response = await fetch(`/api/eden/images/generate-for-content/${contentId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Ideogram image generated:', result);
+        
+        // Call the callback to refresh the images
+        if (onImageGenerated) {
+          onImageGenerated(result.image);
+        }
+
+        // Reset form and close
+        setFormData({
+          prompt: '',
+          aspectRatio: '16:9',
+          styleType: 'REALISTIC',
+          magicPrompt: 'ON',
+          useChristianPrompt: false
+        });
+        setShowForm(false);
+      } else {
+        const error = await response.json();
+        console.error('❌ Ideogram generation failed:', error);
+        alert(`Image generation failed: ${error.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('❌ Ideogram generation error:', error);
+      alert('Image generation failed. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  if (!showForm) {
+    return (
+      <div className="mb-4 p-4 border-2 border-dashed border-gray-300 rounded-lg text-center">
+        <div className="flex flex-col items-center gap-2">
+          <Wand2 className="w-8 h-8 text-gray-400" />
+          <h3 className="text-sm font-medium text-gray-700">Generate Custom Image</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            Use Ideogram.ai to create custom images tailored to your content
+          </p>
+          <Button 
+            onClick={() => setShowForm(true)}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Create Custom Image
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-4 p-4 border border-blue-200 rounded-lg bg-blue-50">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Wand2 className="w-5 h-5 text-blue-600" />
+          <h3 className="text-sm font-medium text-blue-900">Generate Custom Image</h3>
+        </div>
+        <Button
+          onClick={() => setShowForm(false)}
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+        >
+          <X className="w-4 h-4" />
+        </Button>
+      </div>
+
+      <div className="space-y-4">
+        {/* Christian Auto-Prompt Toggle */}
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="useChristianPrompt"
+            checked={formData.useChristianPrompt}
+            onChange={(e) => handleInputChange('useChristianPrompt', e.target.checked)}
+            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <label htmlFor="useChristianPrompt" className="text-sm text-gray-700">
+            Use AI-generated Christian theme prompt (based on article content)
+          </label>
+        </div>
+
+        {/* Custom Prompt */}
+        {!formData.useChristianPrompt && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Image Prompt *
+            </label>
+            <textarea
+              value={formData.prompt}
+              onChange={(e) => handleInputChange('prompt', e.target.value)}
+              placeholder="Describe the image you want to generate..."
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              rows={3}
+              required={!formData.useChristianPrompt}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Be specific and descriptive. Avoid mentioning Jesus' face or overly religious symbols.
+            </p>
+          </div>
+        )}
+
+        {/* Additional Prompt for Christian Auto-Prompt */}
+        {formData.useChristianPrompt && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Additional Details (Optional)
+            </label>
+            <input
+              type="text"
+              value={formData.prompt}
+              onChange={(e) => handleInputChange('prompt', e.target.value)}
+              placeholder="Add specific elements or style preferences..."
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        )}
+
+        {/* Generation Options */}
+        {options && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Aspect Ratio */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Aspect Ratio
+              </label>
+              <select
+                value={formData.aspectRatio}
+                onChange={(e) => handleInputChange('aspectRatio', e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {options.aspectRatios.map(ratio => (
+                  <option key={ratio.value} value={ratio.value}>
+                    {ratio.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Style Type */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Style
+              </label>
+              <select
+                value={formData.styleType}
+                onChange={(e) => handleInputChange('styleType', e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {options.styles.map(style => (
+                  <option key={style.value} value={style.value}>
+                    {style.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Magic Prompt */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Prompt Enhancement
+              </label>
+              <select
+                value={formData.magicPrompt}
+                onChange={(e) => handleInputChange('magicPrompt', e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {options.magicPromptOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* Generate Button */}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button
+            onClick={() => setShowForm(false)}
+            variant="outline"
+            size="sm"
+            disabled={isGenerating}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleGenerate}
+            disabled={isGenerating || (!formData.useChristianPrompt && !formData.prompt.trim())}
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Wand2 className="w-4 h-4" />
+                Generate Image
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
  * Images Tab
  */
-const ImagesTab = ({ images }) => (
+const ImagesTab = ({ images, contentId, onImageGenerated }) => (
   <div className="space-y-4 pb-4">
+    {/* Ideogram Image Generator */}
+    <IdeogramImageGenerator 
+      contentId={contentId}
+      onImageGenerated={onImageGenerated}
+    />
+
+    {/* Existing Images */}
     {images.length === 0 ? (
       <div className="text-center py-8 text-gray-500">
         <Image className="w-12 h-12 mx-auto mb-4 opacity-50" />
-        <p>No images generated</p>
+        <p>No images generated yet</p>
+        <p className="text-sm mt-2">Use the custom image generator above to create your first image</p>
       </div>
     ) : (
       <Card>
@@ -503,7 +803,7 @@ const ImagesTab = ({ images }) => (
             <Image className="w-5 h-5" />
             Generated Images ({images.length})
             <Badge variant="secondary" className="text-xs ml-2">
-              Sirv CDN + Pexels
+              Sirv CDN + Pexels + Ideogram.ai
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -536,11 +836,16 @@ const ImagesTab = ({ images }) => (
                     </Button>
                   </div>
                 </div>
-                {image.query && (
-                  <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Badge variant="outline" className="text-xs bg-white/90 text-gray-700">
-                      {image.query}
-                    </Badge>
+                {/* Source indicator */}
+                <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Badge variant="outline" className="text-xs bg-white/90 text-gray-700">
+                    {image.source === 'ideogram' ? 'AI Generated' : image.query || 'Stock Photo'}
+                  </Badge>
+                </div>
+                {/* Ideogram indicator */}
+                {image.source === 'ideogram' && (
+                  <div className="absolute top-2 right-2">
+                    <Wand2 className="w-4 h-4 text-purple-600 bg-white rounded-full p-0.5" />
                   </div>
                 )}
               </div>

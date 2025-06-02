@@ -119,6 +119,7 @@ app.get('/api/health', (req, res) => {
       database: isSystemReady,
       ai: !!process.env.OPENAI_API_KEY && !!process.env.GEMINI_API_KEY,
       images: !!process.env.PEXELS_API_KEY && !!process.env.SIRV_CLIENT_ID,
+      ideogram: !!process.env.IDEOGRAM_API_KEY,
       newsAggregation: true
     }
   });
@@ -1016,6 +1017,199 @@ app.get('/api/eden/images/search', accountContext, async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Image search failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Ideogram AI image generation endpoints
+app.post('/api/eden/images/generate', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const {
+      prompt,
+      aspectRatio = '16:9',
+      styleType = 'GENERAL',
+      magicPrompt = 'AUTO',
+      negativePrompt = '',
+      seed = null
+    } = req.body;
+    
+    if (!prompt || prompt.trim().length === 0) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    console.log(`🎨 User ${currentUserId} generating Ideogram image with prompt: "${prompt.substring(0, 100)}..."`);
+
+    const options = {
+      prompt: prompt.trim(),
+      aspectRatio,
+      styleType,
+      magicPrompt,
+      negativePrompt,
+      seed: seed ? parseInt(seed) : null,
+      numImages: 1,
+      renderingSpeed: 'DEFAULT'
+    };
+
+    const generatedImages = await imageService.generateIdeogramImage(options);
+    
+    if (generatedImages.length === 0) {
+      return res.status(500).json({ error: 'No images were generated' });
+    }
+
+    res.json({
+      success: true,
+      images: generatedImages,
+      count: generatedImages.length,
+      accountId,
+      usage: 'Generated via Ideogram.ai'
+    });
+
+  } catch (error) {
+    console.error('❌ Ideogram image generation failed:', error.message);
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Image generation failed. Please check your prompt and try again.'
+    });
+  }
+});
+
+// Generate and save Ideogram image for specific content
+app.post('/api/eden/images/generate-for-content/:contentId', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { contentId } = req.params;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const {
+      prompt,
+      aspectRatio = '16:9',
+      styleType = 'REALISTIC',
+      magicPrompt = 'ON',
+      useChristianPrompt = false
+    } = req.body;
+
+    // Validate content exists and belongs to this account
+    const content = accountId 
+      ? await db.findOneByAccount('ssnews_generated_articles', accountId, 'gen_article_id = ?', [contentId])
+      : await db.findOne('ssnews_generated_articles', 'gen_article_id = ?', [contentId]);
+
+    if (!content) {
+      return res.status(404).json({ error: 'Content not found' });
+    }
+
+    console.log(`🎨 Generating Ideogram image for content ${contentId} (account: ${accountId})`);
+
+    let generatedImages;
+
+    if (useChristianPrompt) {
+      // Use the special Christian content image generation
+      generatedImages = await imageService.generateChristianContentImage(
+        content.title,
+        content.body_draft || '',
+        prompt
+      );
+    } else {
+      // Use custom prompt
+      if (!prompt || prompt.trim().length === 0) {
+        return res.status(400).json({ error: 'Prompt is required when not using Christian auto-prompt' });
+      }
+
+      const options = {
+        prompt: prompt.trim(),
+        aspectRatio,
+        styleType,
+        magicPrompt,
+        negativePrompt: 'Jesus face, crucifix, overly Catholic iconography, mystical symbols, inappropriate religious content',
+        numImages: 1,
+        renderingSpeed: 'DEFAULT'
+      };
+
+      generatedImages = await imageService.generateIdeogramImage(options);
+    }
+
+    if (generatedImages.length === 0) {
+      return res.status(500).json({ error: 'No images were generated' });
+    }
+
+    // Process and save the first generated image
+    const processedImage = await imageService.processIdeogramImageForContent(
+      generatedImages[0],
+      contentId,
+      accountId
+    );
+
+    console.log(`✅ Ideogram image generated and saved for content ${contentId}`);
+
+    res.json({
+      success: true,
+      image: processedImage,
+      contentId,
+      accountId,
+      message: 'Image generated and added to content'
+    });
+
+  } catch (error) {
+    console.error('❌ Content image generation failed:', error.message);
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to generate image for content. Please try again.'
+    });
+  }
+});
+
+// Get available Ideogram generation options
+app.get('/api/eden/images/ideogram/options', accountContext, async (req, res) => {
+  try {
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const styles = imageService.getIdeogramStyles();
+    const aspectRatios = imageService.getAspectRatios();
+
+    res.json({
+      success: true,
+      options: {
+        styles,
+        aspectRatios,
+        magicPromptOptions: [
+          { value: 'AUTO', label: 'Auto', description: 'System decides whether to enhance prompt' },
+          { value: 'ON', label: 'Always On', description: 'Always enhance the prompt for better results' },
+          { value: 'OFF', label: 'Off', description: 'Use original prompt without enhancement' }
+        ],
+        renderingSpeedOptions: [
+          { value: 'TURBO', label: 'Turbo', description: 'Fastest generation' },
+          { value: 'DEFAULT', label: 'Default', description: 'Balanced speed and quality' },
+          { value: 'QUALITY', label: 'Quality', description: 'Highest quality, slower generation' }
+        ]
+      },
+      accountId
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting Ideogram options:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

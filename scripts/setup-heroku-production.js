@@ -32,6 +32,7 @@ const envVars = {
   
   // Image Services
   PEXELS_API_KEY: process.env.PEXELS_API_KEY,
+  IDEOGRAM_API_KEY: process.env.IDEOGRAM_API_KEY,
   SIRV_CLIENT_ID: process.env.SIRV_CLIENT_ID,
   SIRV_CLIENT_SECRET: process.env.SIRV_CLIENT_SECRET,
   SIRV_PUBLIC_URL: process.env.SIRV_PUBLIC_URL,

@@ -1,6 +1,8 @@
 import React from 'react';
+import { Routes, Route } from 'react-router-dom';
 import ProjectEden from './components/ProjectEdenRefactored';
 import Login from './components/Login';
+import InvitationAcceptance from './components/InvitationAcceptance';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AccountProvider } from './contexts/AccountContext';
 import { Loader2 } from 'lucide-react';
@@ -57,11 +59,13 @@ function AuthenticatedApp() {
     );
   }
 
-  // Show the main app if authenticated and authorized
-  // Wrap with AccountProvider for multi-tenant support
+  // Show the main app with routing
   return (
     <AccountProvider>
-      <ProjectEden />
+      <Routes>
+        <Route path="/invite/:token" element={<InvitationAcceptance />} />
+        <Route path="/*" element={<ProjectEden />} />
+      </Routes>
     </AccountProvider>
   );
 }
