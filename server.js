@@ -280,8 +280,8 @@ app.get('/api/eden/news/all-articles', accountContext, async (req, res) => {
       LEFT JOIN ssnews_news_sources s ON a.source_id = s.source_id
       WHERE a.account_id = ?
       ORDER BY a.scraped_at DESC, a.article_id DESC
-      LIMIT ? OFFSET ?
-    `, [accountId, limit, offset]);
+      LIMIT ${limit} OFFSET ${offset}
+    `, [accountId]);
     
     // Get total count for pagination (cached for 30 seconds)
     const totalCountResult = await db.query(`
@@ -1474,12 +1474,12 @@ app.get('/api/eden/content/review', accountContext, async (req, res) => {
           sa.url as source_url,
           ns.name as source_name
         FROM ssnews_generated_articles ga
-        LEFT JOIN ssnews_scraped_articles sa ON ga.source_article_id = sa.article_id
+        LEFT JOIN ssnews_scraped_articles sa ON ga.based_on_scraped_article_id = sa.article_id
         LEFT JOIN ssnews_news_sources ns ON sa.source_id = ns.source_id
         WHERE ga.account_id = ? AND ga.status = ?
         ORDER BY ga.created_at DESC
-        LIMIT ?
-      `, [accountId, status, limit]);
+        LIMIT ${limit}
+      `, [accountId, status]);
       
       content = content.concat(statusContent);
       
