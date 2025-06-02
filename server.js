@@ -1305,6 +1305,212 @@ app.post('/api/eden/jobs/cleanup-stale', accountContext, async (req, res) => {
 
 // ===== END JOB MANAGEMENT API ENDPOINTS =====
 
+// ===== CONTENT GENERATION API ENDPOINTS =====
+
+// Content types endpoint
+app.get('/api/eden/content/types', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    // Return available content types based on prompt templates
+    // These are static and don't require account context
+    const contentTypes = [
+      {
+        id: 'article',
+        name: 'Blog Article',
+        icon: 'FileText',
+        category: 'blog',
+        description: 'Generates engaging blog posts and articles',
+        template: 'Blog Post Generator'
+      },
+      {
+        id: 'social_post',
+        name: 'Social Media Post',
+        icon: 'Share2',
+        category: 'social',
+        description: 'Creates social media content for various platforms',
+        template: 'Social Media Generator'
+      },
+      {
+        id: 'video_script',
+        name: 'Video Script',
+        icon: 'Video',
+        category: 'video',
+        description: 'Generates scripts for video content',
+        template: 'Video Script Generator'
+      },
+      {
+        id: 'prayer_points',
+        name: 'Prayer Points',
+        icon: 'Heart',
+        category: 'prayer',
+        description: 'Creates prayer points from news content',
+        template: 'Prayer Points Generator'
+      },
+      {
+        id: 'sermon_outline',
+        name: 'Sermon Outline',
+        icon: 'BookOpen',
+        category: 'sermon',
+        description: 'Generates sermon outlines and talking points',
+        template: 'Sermon Outline Generator'
+      }
+    ];
+
+    res.json({
+      success: true,
+      contentTypes
+    });
+  } catch (error) {
+    console.error('❌ Error fetching content types:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generation stats endpoint
+app.get('/api/eden/stats/generation', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const accountId = req.accountContext.accountId;
+    const cacheKey = getCacheKey('GENERATION_STATS', accountId);
+    
+    // Check cache first
+    const cached = getFromCache(cacheKey);
+    if (cached) {
+      return res.json({ success: true, stats: cached });
+    }
+
+    // Get content generation stats for this account
+    const stats = await db.query(`
+      SELECT 
+        COUNT(CASE WHEN content_type = 'article' THEN 1 END) as totalBlogs,
+        COUNT(CASE WHEN content_type = 'social' THEN 1 END) as totalSocialPosts,
+        COUNT(CASE WHEN content_type = 'video' THEN 1 END) as totalVideoScripts,
+        COUNT(*) as totalGenerated
+      FROM ssnews_generated_articles 
+      WHERE account_id = ?
+    `, [accountId]);
+
+    const generationStats = stats[0] || {
+      totalBlogs: 0,
+      totalSocialPosts: 0,
+      totalVideoScripts: 0,
+      totalGenerated: 0
+    };
+
+    // Cache the results
+    setCache(cacheKey, generationStats, CACHE_TTL.STATS);
+
+    res.json({
+      success: true,
+      stats: generationStats
+    });
+  } catch (error) {
+    console.error('❌ Error getting generation stats:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Content review endpoint with enhanced count support
+app.get('/api/eden/content/review', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const statusParam = req.query.status || 'draft';
+    const limit = parseInt(req.query.limit) || 20;
+    const accountId = req.accountContext.accountId;
+    
+    // Handle multiple statuses separated by commas
+    const statuses = statusParam.split(',').map(s => s.trim());
+    
+    // If limit is 1, they probably just want the count
+    const justCount = limit === 1;
+    
+    if (justCount) {
+      // Fast count query for tab display
+      const cacheKey = getCacheKey('CONTENT_COUNT', accountId, statusParam);
+      const cached = getFromCache(cacheKey);
+      if (cached) {
+        return res.json({ success: true, content: [], count: cached.count, totalCount: cached.count });
+      }
+
+      let totalCount = 0;
+      for (const status of statuses) {
+        const countResult = await db.query(`
+          SELECT COUNT(*) as count 
+          FROM ssnews_generated_articles 
+          WHERE account_id = ? AND status = ?
+        `, [accountId, status]);
+        totalCount += countResult[0]?.count || 0;
+      }
+
+      // Cache the count
+      setCache(cacheKey, { count: totalCount }, CACHE_TTL.CONTENT_COUNTS);
+
+      return res.json({
+        success: true,
+        content: [],
+        count: totalCount,
+        totalCount: totalCount
+      });
+    }
+
+    // Full content fetch for actual display
+    let content = [];
+    let totalCount = 0;
+    
+    for (const status of statuses) {
+      const statusContent = await db.query(`
+        SELECT 
+          ga.*,
+          sa.title as source_title,
+          sa.url as source_url,
+          ns.name as source_name
+        FROM ssnews_generated_articles ga
+        LEFT JOIN ssnews_scraped_articles sa ON ga.source_article_id = sa.article_id
+        LEFT JOIN ssnews_news_sources ns ON sa.source_id = ns.source_id
+        WHERE ga.account_id = ? AND ga.status = ?
+        ORDER BY ga.created_at DESC
+        LIMIT ?
+      `, [accountId, status, limit]);
+      
+      content = content.concat(statusContent);
+      
+      // Get total count for this status
+      const countResult = await db.query(`
+        SELECT COUNT(*) as count 
+        FROM ssnews_generated_articles 
+        WHERE account_id = ? AND status = ?
+      `, [accountId, status]);
+      totalCount += countResult[0]?.count || 0;
+    }
+    
+    // Remove duplicates and limit results
+    const uniqueContent = content.filter((item, index, self) => 
+      index === self.findIndex(t => t.gen_article_id === item.gen_article_id)
+    ).slice(0, limit);
+    
+    res.json({
+      success: true,
+      content: uniqueContent,
+      count: uniqueContent.length,
+      totalCount: totalCount
+    });
+  } catch (error) {
+    console.error('❌ Error fetching content for review:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== END CONTENT GENERATION API ENDPOINTS =====
+
 // Test URL submission without middleware
 app.post('/api/test/submit-urls', async (req, res) => {
   try {
