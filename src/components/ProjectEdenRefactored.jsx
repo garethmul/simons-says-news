@@ -407,11 +407,11 @@ const ProjectEden = () => {
           <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
             <TabsList className="grid w-full grid-cols-11">
               <TabsTrigger value={TAB_ROUTES.DASHBOARD}>Dashboard</TabsTrigger>
-              <TabsTrigger value={TAB_ROUTES.REVIEW}>Review ({contentForReview.length})</TabsTrigger>
-              <TabsTrigger value={TAB_ROUTES.APPROVED}>Approved ({approvedContent.length})</TabsTrigger>
-              <TabsTrigger value={TAB_ROUTES.ARCHIVED}>Archived ({archivedContent.length})</TabsTrigger>
-              <TabsTrigger value={TAB_ROUTES.REJECTED}>Rejected ({rejectedContent.length})</TabsTrigger>
-              <TabsTrigger value={TAB_ROUTES.STORIES}>Stories ({allArticles.length})</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.REVIEW}>Review ({stats.pendingReview || 0})</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.APPROVED}>Approved ({stats.approvedContent || 0})</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.ARCHIVED}>Archived ({stats.archivedContent || 0})</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.REJECTED}>Rejected ({stats.rejectedContent || 0})</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.STORIES}>Stories ({stats.articlesAnalyzed || 0})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.QUEUED}>Queued ({jobStats.summary.queued || 0})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.JOBS}>Jobs</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.SOURCES}>Sources ({sources.length})</TabsTrigger>

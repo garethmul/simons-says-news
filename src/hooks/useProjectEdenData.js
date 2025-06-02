@@ -18,6 +18,7 @@ export const useProjectEdenData = () => {
     pendingReview: 0,
     approvedContent: 0,
     archivedContent: 0,
+    rejectedContent: 0,
     totalArticlesProcessed: 0,
     activeSources: 0
   });
@@ -64,11 +65,19 @@ export const useProjectEdenData = () => {
     try {
       console.log('🚀 Loading essential dashboard data...');
       
-      // Only fetch critical data: stats + sources + jobs (3 requests instead of 9)
-      const [statsResponse, sourcesResponse, jobStatsResponse] = await Promise.all([
+      // Fetch critical data: stats + sources + jobs + content counts (4 requests for fast loading)
+      const [statsResponse, sourcesResponse, jobStatsResponse, contentCountsResponse] = await Promise.all([
         fetchWithAccountContext(API_ENDPOINTS.GENERATION_STATS),
         fetchWithAccountContext(API_ENDPOINTS.SOURCES_STATUS),
-        fetchWithAccountContext(API_ENDPOINTS.JOBS_STATS)
+        fetchWithAccountContext(API_ENDPOINTS.JOBS_STATS),
+        // Get content counts without full data for tab display
+        Promise.all([
+          fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?limit=1`), // Get count for pending review
+          fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=approved&limit=1`), // Get count for approved
+          fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=archived&limit=1`), // Get count for archived
+          fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=rejected&limit=1`), // Get count for rejected
+          fetchWithAccountContext(`${API_ENDPOINTS.ALL_ARTICLES}?limit=1`) // Get count for articles
+        ])
       ]);
 
       // Process responses
@@ -89,11 +98,47 @@ export const useProjectEdenData = () => {
         apiStats = data.stats || {};
       }
 
-      // Calculate computed stats from sources only
+      // Process content counts from the parallel requests
+      const [reviewCountRes, approvedCountRes, archivedCountRes, rejectedCountRes, articlesCountRes] = contentCountsResponse;
+      
+      let contentCounts = {
+        pendingReview: 0,
+        approvedContent: 0,
+        archivedContent: 0,
+        rejectedContent: 0,
+        articlesAnalyzed: 0
+      };
+
+      if (reviewCountRes.ok) {
+        const data = await reviewCountRes.json();
+        contentCounts.pendingReview = data.totalCount || data.count || 0;
+      }
+      
+      if (approvedCountRes.ok) {
+        const data = await approvedCountRes.json();
+        contentCounts.approvedContent = data.totalCount || data.count || 0;
+      }
+      
+      if (archivedCountRes.ok) {
+        const data = await archivedCountRes.json();
+        contentCounts.archivedContent = data.totalCount || data.count || 0;
+      }
+      
+      if (rejectedCountRes.ok) {
+        const data = await rejectedCountRes.json();
+        contentCounts.rejectedContent = data.totalCount || data.count || 0;
+      }
+      
+      if (articlesCountRes.ok) {
+        const data = await articlesCountRes.json();
+        contentCounts.articlesAnalyzed = data.totalCount || data.count || 0;
+      }
+
+      // Calculate computed stats from sources
       const totalArticles = sourcesData.sources?.reduce((sum, source) => sum + (source.articles_last_24h || 0), 0) || 0;
       const activeSources = sourcesData.sources?.filter(source => source.is_active).length || 0;
       
-      // Set stats with what we have
+      // Set stats with actual counts
       setStats(prev => ({ 
         ...prev,
         contentGenerated: apiStats.totalGenerated || 0,
@@ -102,15 +147,16 @@ export const useProjectEdenData = () => {
         totalVideoScripts: apiStats.totalVideoScripts || 0,
         articlesAggregated: totalArticles,
         activeSources: activeSources,
-        // These will be loaded lazily when user visits those tabs
-        articlesAnalyzed: 0,
-        pendingReview: 0,
-        approvedContent: 0,
-        archivedContent: 0,
-        totalArticlesProcessed: 0
+        // Use actual counts from API
+        articlesAnalyzed: contentCounts.articlesAnalyzed,
+        pendingReview: contentCounts.pendingReview,
+        approvedContent: contentCounts.approvedContent,
+        archivedContent: contentCounts.archivedContent,
+        rejectedContent: contentCounts.rejectedContent,
+        totalArticlesProcessed: contentCounts.articlesAnalyzed
       }));
 
-      console.log('✅ Essential data loaded successfully');
+      console.log('✅ Essential data loaded successfully with counts:', contentCounts);
       
     } catch (err) {
       console.error('❌ Error fetching essential data:', err);
@@ -138,7 +184,7 @@ export const useProjectEdenData = () => {
             if (reviewResponse.ok) {
               const reviewData = await reviewResponse.json();
               setContentForReview(reviewData.content || []);
-              setStats(prev => ({ ...prev, pendingReview: reviewData.content?.length || 0 }));
+              setStats(prev => ({ ...prev, pendingReview: reviewData.totalCount || reviewData.content?.length || 0 }));
             }
             setLoadedTabs(prev => new Set([...prev, 'review']));
           }
@@ -150,7 +196,7 @@ export const useProjectEdenData = () => {
             if (approvedResponse.ok) {
               const approvedData = await approvedResponse.json();
               setApprovedContent(approvedData.content || []);
-              setStats(prev => ({ ...prev, approvedContent: approvedData.content?.length || 0 }));
+              setStats(prev => ({ ...prev, approvedContent: approvedData.totalCount || approvedData.content?.length || 0 }));
             }
             setLoadedTabs(prev => new Set([...prev, 'approved']));
           }
@@ -162,6 +208,7 @@ export const useProjectEdenData = () => {
             if (archivedResponse.ok) {
               const archivedData = await archivedResponse.json();
               setArchivedContent(archivedData.content || []);
+              setStats(prev => ({ ...prev, archivedContent: archivedData.totalCount || archivedData.content?.length || 0 }));
             }
             setLoadedTabs(prev => new Set([...prev, 'archived']));
           }
@@ -173,6 +220,7 @@ export const useProjectEdenData = () => {
             if (rejectedResponse.ok) {
               const rejectedData = await rejectedResponse.json();
               setRejectedContent(rejectedData.content || []);
+              setStats(prev => ({ ...prev, rejectedContent: rejectedData.totalCount || rejectedData.content?.length || 0 }));
             }
             setLoadedTabs(prev => new Set([...prev, 'rejected']));
           }
@@ -186,8 +234,8 @@ export const useProjectEdenData = () => {
               setAllArticles(articlesData.articles || []);
               setStats(prev => ({ 
                 ...prev, 
-                articlesAnalyzed: articlesData.articles?.length || 0,
-                totalArticlesProcessed: articlesData.articles?.length || 0
+                articlesAnalyzed: articlesData.totalCount || articlesData.articles?.length || 0,
+                totalArticlesProcessed: articlesData.totalCount || articlesData.articles?.length || 0
               }));
             }
             setLoadedTabs(prev => new Set([...prev, 'articles']));
@@ -344,6 +392,7 @@ export const useProjectEdenData = () => {
         pendingReview: 0,
         approvedContent: 0,
         archivedContent: 0,
+        rejectedContent: 0,
         totalArticlesProcessed: 0,
         activeSources: 0
       });
@@ -374,6 +423,7 @@ export const useProjectEdenData = () => {
         pendingReview: 0,
         approvedContent: 0,
         archivedContent: 0,
+        rejectedContent: 0,
         totalArticlesProcessed: 0,
         activeSources: 0
       });
