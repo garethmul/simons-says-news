@@ -125,6 +125,40 @@ const ProjectEden = () => {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  // Load data for initial tab when system is ready
+  useEffect(() => {
+    if (!permissionsLoading && hasAccess && selectedAccount && !initialLoading) {
+      console.log(`🚀 Loading data for initial tab: ${activeTab}`);
+      
+      // Load data for the current tab
+      switch (activeTab) {
+        case TAB_ROUTES.REVIEW:
+          fetchTabData('review');
+          break;
+        case TAB_ROUTES.APPROVED:
+          fetchTabData('approved');
+          break;
+        case TAB_ROUTES.ARCHIVED:
+          fetchTabData('archived');
+          break;
+        case TAB_ROUTES.REJECTED:
+          fetchTabData('rejected');
+          break;
+        case TAB_ROUTES.STORIES:
+          fetchTabData('articles');
+          fetchTabData('bookmarks');
+          break;
+        case TAB_ROUTES.JOBS:
+        case TAB_ROUTES.QUEUED:
+          fetchJobs().then(setJobs).catch(console.error);
+          break;
+        default:
+          // Dashboard and other tabs don't need additional data
+          break;
+      }
+    }
+  }, [activeTab, permissionsLoading, hasAccess, selectedAccount, initialLoading, fetchTabData, fetchJobs]);
+
   // Handle tab changes and update URL
   const handleTabChange = (tabValue) => {
     setActiveTab(tabValue);
