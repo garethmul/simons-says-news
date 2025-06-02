@@ -38,7 +38,7 @@ import AccountSwitcher from './AccountSwitcher';
  */
 const ProjectEden = () => {
   const { currentUser, logout } = useAuth();
-  const { permissionsLoading, selectedAccount } = useAccount();
+  const { permissionsLoading, selectedAccount, hasAccess } = useAccount();
   
   // Custom hooks for data and actions
   const {
