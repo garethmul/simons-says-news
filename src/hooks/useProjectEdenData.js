@@ -4,7 +4,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { API_ENDPOINTS, REFRESH_INTERVALS, ERROR_MESSAGES } from '../utils/constants';
 
 /**
- * Custom hook for managing Project Eden data
+ * Custom hook for managing Project Eden data with optimized loading
  */
 export const useProjectEdenData = () => {
   const { currentUser } = useAuth();
@@ -36,8 +36,12 @@ export const useProjectEdenData = () => {
   const [favoriteStories, setFavoriteStories] = useState(new Set());
   
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  
+  // Track what data has been loaded to avoid unnecessary requests
+  const [loadedTabs, setLoadedTabs] = useState(new Set());
   
   // Helper function to make API requests with account context
   const fetchWithAccountContext = async (endpoint, options = {}) => {
@@ -48,148 +52,212 @@ export const useProjectEdenData = () => {
     return response;
   };
   
-  // Fetch all data
-  const fetchData = useCallback(async (isBackgroundRefresh = false) => {
-    // Skip fetching if no account is selected
-    if (!selectedAccount) {
-      console.log('No account selected, skipping data fetch');
+  // Fetch minimal essential data only (for dashboard overview)
+  const fetchEssentialData = useCallback(async () => {
+    if (!selectedAccount || permissionsLoading || !hasAccess) {
       return;
     }
 
-    // Wait for permissions to finish loading
-    if (permissionsLoading) {
-      console.log('Permissions still loading, waiting...');
-      return;
-    }
-
-    // Check access after permissions are loaded
-    if (!hasAccess) {
-      console.log('No access to selected account, skipping data fetch');
-      return;
-    }
-
-    // Set appropriate loading state based on refresh type
-    if (isBackgroundRefresh) {
-      setBackgroundRefreshing(true);
-      console.log('🔄 Background refresh started (no UI disruption)');
-    } else {
-      setLoading(true);
-      console.log('🔄 Full data fetch started');
-    }
-    
+    setInitialLoading(true);
     setError(null);
     
     try {
-      // Fetch all data in parallel with account context
-      const [
-        reviewResponse,
-        approvedResponse,
-        archivedResponse,
-        rejectedResponse,
-        articlesResponse,
-        statsResponse,
-        jobStatsResponse,
-        bookmarksResponse,
-        sourcesResponse
-      ] = await Promise.all([
-        fetchWithAccountContext(API_ENDPOINTS.CONTENT_REVIEW),
-        fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=approved`),
-        fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=archived`),
-        fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=rejected`),
-        fetchWithAccountContext(`${API_ENDPOINTS.ALL_ARTICLES}?limit=1000`),
+      console.log('🚀 Loading essential dashboard data...');
+      
+      // Only fetch critical data: stats + sources + jobs (3 requests instead of 9)
+      const [statsResponse, sourcesResponse, jobStatsResponse] = await Promise.all([
         fetchWithAccountContext(API_ENDPOINTS.GENERATION_STATS),
-        fetchWithAccountContext(API_ENDPOINTS.JOBS_STATS),
-        currentUser?.uid ? fetchWithAccountContext(`${API_ENDPOINTS.BOOKMARKS}/ids?userId=${currentUser.uid}`) : 
-          Promise.resolve({ json: () => ({ articleIds: [] }) }),
-        fetchWithAccountContext(API_ENDPOINTS.SOURCES_STATUS)
+        fetchWithAccountContext(API_ENDPOINTS.SOURCES_STATUS),
+        fetchWithAccountContext(API_ENDPOINTS.JOBS_STATS)
       ]);
 
       // Process responses
-      const reviewData = reviewResponse.ok ? await reviewResponse.json() : { content: [] };
-      const approvedData = approvedResponse.ok ? await approvedResponse.json() : { content: [] };
-      const archivedData = archivedResponse.ok ? await archivedResponse.json() : { content: [] };
-      const rejectedData = rejectedResponse.ok ? await rejectedResponse.json() : { content: [] };
-      const articlesData = articlesResponse.ok ? await articlesResponse.json() : { articles: [] };
       const sourcesData = sourcesResponse.ok ? await sourcesResponse.json() : { sources: [] };
-
-      setContentForReview(reviewData.content || []);
-      setApprovedContent(approvedData.content || []);
-      setArchivedContent(archivedData.content || []);
-      setRejectedContent(rejectedData.content || []);
-      setAllArticles(articlesData.articles || []);
       setSources(sourcesData.sources || []);
 
-      // Process API stats response
-      let apiStats = {};
-      if (statsResponse.ok) {
-        const data = await statsResponse.json();
-        apiStats = data.stats || {};
-      }
-
+      // Process job stats
       if (jobStatsResponse.ok) {
         const data = await jobStatsResponse.json();
         setJobStats(data.stats || { summary: {}, details: [] });
         setWorkerStatus(data.worker || { isRunning: false });
       }
 
-      if (bookmarksResponse.ok && currentUser?.uid) {
-        const data = await bookmarksResponse.json();
-        setFavoriteStories(new Set(data.articleIds || []));
+      // Process API stats
+      let apiStats = {};
+      if (statsResponse.ok) {
+        const data = await statsResponse.json();
+        apiStats = data.stats || {};
       }
 
-      // Calculate computed stats
-      const totalArticles = sourcesData.sources.reduce((sum, source) => sum + source.articles_last_24h, 0);
-      const activeSources = sourcesData.sources.filter(source => source.is_active).length;
+      // Calculate computed stats from sources only
+      const totalArticles = sourcesData.sources?.reduce((sum, source) => sum + (source.articles_last_24h || 0), 0) || 0;
+      const activeSources = sourcesData.sources?.filter(source => source.is_active).length || 0;
       
-      // Combine API stats with computed stats, giving priority to computed values where appropriate
+      // Set stats with what we have
       setStats(prev => ({ 
         ...prev,
-        // Use API values for content generation stats (map correct field names)
         contentGenerated: apiStats.totalGenerated || 0,
         totalBlogs: apiStats.totalBlogs || 0,
         totalSocialPosts: apiStats.totalSocialPosts || 0,
         totalVideoScripts: apiStats.totalVideoScripts || 0,
-        
-        // Use computed values for aggregation/analysis stats
         articlesAggregated: totalArticles,
         activeSources: activeSources,
-        articlesAnalyzed: articlesData.articles?.length || 0,
-        pendingReview: reviewData.content?.length || 0,
-        approvedContent: approvedData.content?.length || 0,
-        archivedContent: archivedData.content?.length || 0,
-        totalArticlesProcessed: articlesData.articles?.length || 0
+        // These will be loaded lazily when user visits those tabs
+        articlesAnalyzed: 0,
+        pendingReview: 0,
+        approvedContent: 0,
+        archivedContent: 0,
+        totalArticlesProcessed: 0
       }));
 
-      if (isBackgroundRefresh) {
-        console.log('✅ Background refresh completed');
-      } else {
-        console.log('✅ Full data fetch completed');
+      console.log('✅ Essential data loaded successfully');
+      
+    } catch (err) {
+      console.error('❌ Error fetching essential data:', err);
+      setError('Failed to load dashboard data');
+    } finally {
+      setInitialLoading(false);
+    }
+  }, [selectedAccount, hasAccess, withAccountContext, permissionsLoading]);
+
+  // Fetch data for specific tab (lazy loading)
+  const fetchTabData = useCallback(async (tabName) => {
+    if (!selectedAccount || permissionsLoading || !hasAccess || loadedTabs.has(tabName)) {
+      return;
+    }
+
+    setLoading(true);
+    
+    try {
+      console.log(`📋 Loading data for tab: ${tabName}`);
+      
+      switch (tabName) {
+        case 'review':
+          if (!loadedTabs.has('review')) {
+            const reviewResponse = await fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?limit=20`);
+            if (reviewResponse.ok) {
+              const reviewData = await reviewResponse.json();
+              setContentForReview(reviewData.content || []);
+              setStats(prev => ({ ...prev, pendingReview: reviewData.content?.length || 0 }));
+            }
+            setLoadedTabs(prev => new Set([...prev, 'review']));
+          }
+          break;
+          
+        case 'approved':
+          if (!loadedTabs.has('approved')) {
+            const approvedResponse = await fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=approved&limit=20`);
+            if (approvedResponse.ok) {
+              const approvedData = await approvedResponse.json();
+              setApprovedContent(approvedData.content || []);
+              setStats(prev => ({ ...prev, approvedContent: approvedData.content?.length || 0 }));
+            }
+            setLoadedTabs(prev => new Set([...prev, 'approved']));
+          }
+          break;
+          
+        case 'archived':
+          if (!loadedTabs.has('archived')) {
+            const archivedResponse = await fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=archived&limit=20`);
+            if (archivedResponse.ok) {
+              const archivedData = await archivedResponse.json();
+              setArchivedContent(archivedData.content || []);
+            }
+            setLoadedTabs(prev => new Set([...prev, 'archived']));
+          }
+          break;
+          
+        case 'rejected':
+          if (!loadedTabs.has('rejected')) {
+            const rejectedResponse = await fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=rejected&limit=20`);
+            if (rejectedResponse.ok) {
+              const rejectedData = await rejectedResponse.json();
+              setRejectedContent(rejectedData.content || []);
+            }
+            setLoadedTabs(prev => new Set([...prev, 'rejected']));
+          }
+          break;
+          
+        case 'articles':
+          if (!loadedTabs.has('articles')) {
+            const articlesResponse = await fetchWithAccountContext(`${API_ENDPOINTS.ALL_ARTICLES}?limit=100`); // Reduced from 1000
+            if (articlesResponse.ok) {
+              const articlesData = await articlesResponse.json();
+              setAllArticles(articlesData.articles || []);
+              setStats(prev => ({ 
+                ...prev, 
+                articlesAnalyzed: articlesData.articles?.length || 0,
+                totalArticlesProcessed: articlesData.articles?.length || 0
+              }));
+            }
+            setLoadedTabs(prev => new Set([...prev, 'articles']));
+          }
+          break;
+          
+        case 'bookmarks':
+          if (!loadedTabs.has('bookmarks') && currentUser?.uid) {
+            const bookmarksResponse = await fetchWithAccountContext(`${API_ENDPOINTS.BOOKMARKS}/ids?userId=${currentUser.uid}`);
+            if (bookmarksResponse.ok) {
+              const data = await bookmarksResponse.json();
+              setFavoriteStories(new Set(data.articleIds || []));
+            }
+            setLoadedTabs(prev => new Set([...prev, 'bookmarks']));
+          }
+          break;
+      }
+      
+      console.log(`✅ Tab data loaded: ${tabName}`);
+      
+    } catch (err) {
+      console.error(`❌ Error loading ${tabName} data:`, err);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedAccount, hasAccess, withAccountContext, permissionsLoading, currentUser, loadedTabs]);
+
+  // Background refresh (lighter version)
+  const backgroundRefresh = useCallback(async () => {
+    if (!selectedAccount || permissionsLoading || !hasAccess) {
+      return;
+    }
+
+    setBackgroundRefreshing(true);
+    
+    try {
+      // Only refresh essential data in background
+      const [statsResponse, jobStatsResponse] = await Promise.all([
+        fetchWithAccountContext(API_ENDPOINTS.GENERATION_STATS),
+        fetchWithAccountContext(API_ENDPOINTS.JOBS_STATS)
+      ]);
+
+      if (statsResponse.ok) {
+        const data = await statsResponse.json();
+        const apiStats = data.stats || {};
+        setStats(prev => ({ 
+          ...prev,
+          contentGenerated: apiStats.totalGenerated || prev.contentGenerated,
+          totalBlogs: apiStats.totalBlogs || prev.totalBlogs,
+          totalSocialPosts: apiStats.totalSocialPosts || prev.totalSocialPosts,
+          totalVideoScripts: apiStats.totalVideoScripts || prev.totalVideoScripts
+        }));
       }
 
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      setError(ERROR_MESSAGES.FETCH_FAILED);
-    } finally {
-      if (isBackgroundRefresh) {
-        setBackgroundRefreshing(false);
-      } else {
-        setLoading(false);
+      if (jobStatsResponse.ok) {
+        const data = await jobStatsResponse.json();
+        setJobStats(data.stats || jobStats);
+        setWorkerStatus(data.worker || workerStatus);
       }
+      
+    } catch (err) {
+      console.error('Background refresh failed:', err);
+    } finally {
+      setBackgroundRefreshing(false);
     }
-  }, [currentUser, selectedAccount, hasAccess, withAccountContext, permissionsLoading]);
+  }, [selectedAccount, hasAccess, withAccountContext, permissionsLoading, jobStats, workerStatus]);
 
   // Fetch jobs data
   const fetchJobs = useCallback(async () => {
-    if (!selectedAccount) {
-      return [];
-    }
-
-    // Wait for permissions to finish loading
-    if (permissionsLoading) {
-      return [];
-    }
-
-    if (!hasAccess) {
+    if (!selectedAccount || permissionsLoading || !hasAccess) {
       return [];
     }
 
@@ -260,11 +328,10 @@ export const useProjectEdenData = () => {
       setFavoriteStories(newFavorites);
     } catch (error) {
       console.error('Error toggling bookmark:', error);
-      // Revert on error - favorites state remains unchanged
     }
   }, [currentUser, favoriteStories, selectedAccount, hasAccess, withAccountContext, permissionsLoading]);
 
-  // React to account changes - clear data and refetch
+  // React to account changes - clear data and fetch essentials
   useEffect(() => {
     if (selectedAccount) {
       console.log(`🔄 Account context changed to: ${selectedAccount.name} (${selectedAccount.account_id})`);
@@ -292,10 +359,11 @@ export const useProjectEdenData = () => {
       });
       setWorkerStatus({ isRunning: false, currentJob: null });
       setFavoriteStories(new Set());
+      setLoadedTabs(new Set());
       setError(null);
       
-      // Fetch fresh data for the new account (will wait for permissions to load)
-      fetchData(false); // Initial load with loading state
+      // Fetch essential data only
+      fetchEssentialData();
     } else {
       // Clear data when no account is selected
       console.log('🔄 No account selected, clearing all data');
@@ -321,29 +389,30 @@ export const useProjectEdenData = () => {
       });
       setWorkerStatus({ isRunning: false, currentJob: null });
       setFavoriteStories(new Set());
+      setLoadedTabs(new Set());
       setError(null);
+      setInitialLoading(false);
     }
   }, [selectedAccount?.account_id]);
 
-  // Trigger data fetch when permissions finish loading
+  // Trigger essential data fetch when permissions finish loading
   useEffect(() => {
     if (selectedAccount && !permissionsLoading && hasAccess) {
-      console.log('✅ Permissions loaded with access, fetching data...');
-      fetchData(false); // Initial load with loading state
+      console.log('✅ Permissions loaded with access, fetching essential data...');
+      fetchEssentialData();
     }
-  }, [selectedAccount?.account_id, permissionsLoading, hasAccess, fetchData]);
+  }, [selectedAccount?.account_id, permissionsLoading, hasAccess, fetchEssentialData]);
 
-  // Set up automatic background refresh for current account (increased interval, no UI disruption)
+  // Set up automatic background refresh (much lighter)
   useEffect(() => {
-    if (selectedAccount && !permissionsLoading && hasAccess) {
-      // Use longer interval (2 minutes instead of 30 seconds) and background refresh
+    if (selectedAccount && !permissionsLoading && hasAccess && !initialLoading) {
       const interval = setInterval(() => {
-        fetchData(true); // Background refresh without loading state
-      }, REFRESH_INTERVALS.DATA * 4); // 2 minutes (30s * 4 = 120s)
+        backgroundRefresh();
+      }, REFRESH_INTERVALS.DATA * 4); // 4 minutes
     
       return () => clearInterval(interval);
     }
-  }, [selectedAccount?.account_id, permissionsLoading, hasAccess, fetchData]);
+  }, [selectedAccount?.account_id, permissionsLoading, hasAccess, initialLoading, backgroundRefresh]);
 
   return {
     // Data
@@ -360,13 +429,14 @@ export const useProjectEdenData = () => {
     
     // State
     loading,
+    initialLoading,
     backgroundRefreshing,
     error,
     hasAccess,
     selectedAccount,
     
     // Actions
-    fetchData: (isBackground = false) => fetchData(isBackground),
+    fetchTabData, // New: Load data for specific tabs
     fetchJobs,
     toggleFavorite,
     

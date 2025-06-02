@@ -249,50 +249,71 @@ app.get('/api/eden/news/top-stories', accountContext, async (req, res) => {
   }
 });
 
-// Get all articles endpoint (includes unanalyzed articles)
+// Get all articles endpoint (includes unanalyzed articles) - OPTIMIZED
 app.get('/api/eden/news/all-articles', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    const limit = parseInt(req.query.limit) || 1000;
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500); // Cap at 500 to prevent overload
+    const offset = parseInt(req.query.offset) || 0;
     const accountId = req.accountContext.accountId;
     
-    // Get ALL articles for this account, regardless of analysis status
-    const allArticles = await db.findManyByAccount(
-      'ssnews_scraped_articles',
-      accountId,
-      '1=1', // No status filtering
-      [],
-      'scraped_at DESC, article_id DESC', // Show newest scraped articles first
-      limit
-    );
+    console.log(`📰 Fetching articles for account ${accountId} (limit: ${limit}, offset: ${offset})`);
     
-    // Add source information to each article
-    for (const article of allArticles) {
-      if (article.source_id) {
-        const source = await db.findOne('ssnews_news_sources', 'source_id = ?', [article.source_id]);
-        if (source) {
-          article.source_name = source.name;
-          article.source_website = source.url;
-        }
-      }
-    }
+    // Get articles with optimized query and pagination
+    const allArticles = await db.query(`
+      SELECT 
+        a.article_id,
+        a.title,
+        a.url,
+        a.publication_date,
+        a.relevance_score,
+        a.summary_ai,
+        a.keywords_ai,
+        a.status,
+        a.scraped_at,
+        s.name as source_name,
+        s.url as source_website
+      FROM ssnews_scraped_articles a
+      LEFT JOIN ssnews_news_sources s ON a.source_id = s.source_id
+      WHERE a.account_id = ?
+      ORDER BY a.scraped_at DESC, a.article_id DESC
+      LIMIT ? OFFSET ?
+    `, [accountId, limit, offset]);
     
-    // Separate articles by status for summary
+    // Get total count for pagination (cached for 30 seconds)
+    const totalCountResult = await db.query(`
+      SELECT COUNT(*) as total 
+      FROM ssnews_scraped_articles 
+      WHERE account_id = ?
+    `, [accountId]);
+    
+    const totalCount = totalCountResult[0]?.total || 0;
+    
+    // Quick status summary without additional queries
     const statusSummary = {
       scraped: allArticles.filter(a => a.status === 'scraped').length,
       analyzed: allArticles.filter(a => a.status === 'analyzed').length,
       processed: allArticles.filter(a => a.status === 'processed').length,
-      total: allArticles.length
+      total: totalCount,
+      showing: allArticles.length,
+      hasMore: offset + limit < totalCount
     };
     
     res.json({
       success: true,
       articles: allArticles,
       count: allArticles.length,
+      totalCount,
       statusSummary,
+      pagination: {
+        limit,
+        offset,
+        hasMore: statusSummary.hasMore,
+        nextOffset: statusSummary.hasMore ? offset + limit : null
+      },
       accountId
     });
   } catch (error) {
@@ -308,1060 +329,32 @@ app.get('/api/eden/news/sources/status', accountContext, async (req, res) => {
     }
 
     const accountId = req.accountContext.accountId;
+    const cacheKey = getCacheKey('sources', accountId);
+    
+    // Try to get from cache first
+    let cachedSources = getFromCache(cacheKey);
+    if (cachedSources) {
+      console.log(`📋 Returning cached sources for account ${accountId}`);
+      return res.json({
+        success: true,
+        sources: cachedSources,
+        cached: true
+      });
+    }
+    
+    console.log(`📋 Fetching fresh sources status for account ${accountId}`);
     const status = await newsAggregator.getSourceStatus(accountId);
+    
+    // Cache the result
+    setCache(cacheKey, status, CACHE_TTL.SOURCES);
     
     res.json({
       success: true,
-      sources: status
+      sources: status,
+      cached: false
     });
   } catch (error) {
     console.error('❌ Error getting source status:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update news source RSS feed URL
-app.put('/api/eden/news/sources/:sourceName/rss', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { sourceName } = req.params;
-    const { rss_feed_url } = req.body;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    if (!rss_feed_url) {
-      return res.status(400).json({ error: 'RSS feed URL is required' });
-    }
-
-    // Update the RSS feed URL in the database - FILTERED BY ACCOUNT
-    const result = await db.update(
-      'ssnews_news_sources',
-      { rss_feed_url },
-      'name = ? AND account_id = ?',
-      [sourceName, accountId]
-    );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Source not found in this account' });
-    }
-
-    res.json({
-      success: true,
-      message: `RSS feed URL updated for ${sourceName} in account ${accountId}`,
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Error updating RSS feed URL:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update news source status (enable/disable)
-app.put('/api/eden/news/sources/:sourceId/status', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { sourceId } = req.params;
-    const { is_active } = req.body;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    if (typeof is_active !== 'boolean') {
-      return res.status(400).json({ error: 'is_active must be a boolean value' });
-    }
-
-    // Update the source status in the database - FILTERED BY ACCOUNT
-    const result = await db.update(
-      'ssnews_news_sources',
-      { is_active },
-      'source_id = ? AND account_id = ?',
-      [sourceId, accountId]
-    );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Source not found in this account' });
-    }
-
-    console.log(`✅ Source ${sourceId} status updated to ${is_active ? 'active' : 'inactive'} for account ${accountId}`);
-
-    res.json({
-      success: true,
-      message: `Source status updated to ${is_active ? 'active' : 'inactive'} for account ${accountId}`,
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Error updating source status:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Add new news source
-app.post('/api/eden/news/sources', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { name, url, rss_feed_url, description } = req.body;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    // Validate required fields
-    if (!name || !name.trim()) {
-      return res.status(400).json({ error: 'Source name is required' });
-    }
-
-    if (!url || !url.trim()) {
-      return res.status(400).json({ error: 'Source URL is required' });
-    }
-
-    // Validate URL format
-    try {
-      new URL(url);
-    } catch (urlError) {
-      return res.status(400).json({ error: 'Invalid URL format' });
-    }
-
-    // Validate RSS URL format if provided
-    if (rss_feed_url && rss_feed_url.trim()) {
-      try {
-        new URL(rss_feed_url);
-      } catch (rssUrlError) {
-        return res.status(400).json({ error: 'Invalid RSS feed URL format' });
-      }
-    }
-
-    // Check for existing source with same name or URL in this account
-    const existingByName = await db.findOne(
-      'ssnews_news_sources', 
-      'name = ? AND account_id = ?', 
-      [name.trim(), accountId]
-    );
-
-    if (existingByName) {
-      return res.status(409).json({ error: 'A source with this name already exists in your account' });
-    }
-
-    const existingByUrl = await db.findOne(
-      'ssnews_news_sources', 
-      'url = ? AND account_id = ?', 
-      [url.trim(), accountId]
-    );
-
-    if (existingByUrl) {
-      return res.status(409).json({ error: 'A source with this URL already exists in your account' });
-    }
-
-    // Create new source
-    const sourceData = {
-      account_id: accountId,
-      name: name.trim(),
-      url: url.trim(),
-      rss_feed_url: rss_feed_url && rss_feed_url.trim() ? rss_feed_url.trim() : null,
-      description: description && description.trim() ? description.trim() : null,
-      is_active: true,
-      created_at: new Date(),
-      updated_at: new Date()
-    };
-
-    const result = await db.insert('ssnews_news_sources', sourceData);
-
-    console.log(`✅ New source created: ${name} (ID: ${result.insertId}) for account ${accountId}`);
-
-    // Return the created source with ID
-    const createdSource = {
-      source_id: result.insertId,
-      account_id: accountId,
-      name: sourceData.name,
-      url: sourceData.url,
-      rss_feed_url: sourceData.rss_feed_url,
-      description: sourceData.description,
-      is_active: sourceData.is_active,
-      created_at: sourceData.created_at,
-      updated_at: sourceData.updated_at,
-      articles_last_24h: 0,
-      total_articles: 0,
-      source_type: rss_feed_url ? 'RSS' : 'Web Scraping',
-      last_checked: null
-    };
-
-    res.status(201).json({
-      success: true,
-      message: `Source "${name}" added successfully`,
-      source: createdSource,
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Error adding new source:', error.message);
-    
-    // Handle duplicate entry errors specifically
-    if (error.message.includes('Duplicate entry')) {
-      if (error.message.includes('unique_name_per_account')) {
-        return res.status(409).json({ error: 'A source with this name already exists in your account' });
-      } else if (error.message.includes('unique_url_per_account')) {
-        return res.status(409).json({ error: 'A source with this URL already exists in your account' });
-      }
-    }
-    
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Refresh articles from a single source
-app.post('/api/eden/news/sources/:sourceId/refresh', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { sourceId } = req.params;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    // Verify source exists and belongs to this account
-    const source = await db.findOne(
-      'ssnews_news_sources', 
-      'source_id = ? AND account_id = ?', 
-      [sourceId, accountId]
-    );
-
-    if (!source) {
-      return res.status(404).json({ error: 'Source not found in this account' });
-    }
-
-    console.log(`🔄 Creating source refresh job for "${source.name}" (ID: ${sourceId}) for account ${accountId}`);
-    
-    // Create dedicated source refresh job using existing news_aggregation type
-    const jobId = await jobManager.createJob(
-      'news_aggregation',
-      { 
-        sourceId: parseInt(sourceId), 
-        sourceName: source.name,
-        singleSource: true // Flag to indicate this is a single source refresh
-      },
-      4, // high priority for individual source refresh
-      'user',
-      accountId
-    );
-    
-    res.json({
-      success: true,
-      message: `Refresh job created for source "${source.name}" (ID: ${jobId})`,
-      jobId,
-      status: 'queued',
-      sourceId: parseInt(sourceId),
-      sourceName: source.name,
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Source refresh job creation failed:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-
-// Debug endpoint to test individual source scraping
-app.post('/api/eden/news/sources/:sourceName/test', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { sourceName } = req.params;
-    const { verbose = false } = req.body;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    console.log(`🧪 Testing source: ${sourceName} for account ${accountId}`);
-    
-    // Get source details - FILTERED BY ACCOUNT
-    const source = await db.findOne('ssnews_news_sources', 'name = ? AND account_id = ?', [sourceName, accountId]);
-    if (!source) {
-      return res.status(404).json({ error: `Source not found: ${sourceName} in account ${accountId}` });
-    }
-
-    // Test the source and capture detailed results
-    const startTime = Date.now();
-    let testResults = {
-      source: {
-        name: source.name,
-        url: source.url,
-        rss_feed_url: source.rss_feed_url,
-        type: source.rss_feed_url ? 'RSS' : 'Web Scraping',
-        is_active: source.is_active
-      },
-      test_started_at: new Date().toISOString(),
-      articles_found: 0,
-      articles: [],
-      errors: [],
-      debug_info: {},
-      duration_ms: 0
-    };
-
-    try {
-      if (source.rss_feed_url) {
-        // Test RSS feed
-        testResults.debug_info.rss_url = source.rss_feed_url;
-        
-        try {
-          const feed = await newsAggregator.rssParser.parseURL(source.rss_feed_url);
-          testResults.debug_info.rss_title = feed.title;
-          testResults.debug_info.rss_description = feed.description;
-          testResults.debug_info.total_rss_items = feed.items.length;
-          
-          const articles = [];
-          for (const item of feed.items.slice(0, 5)) { // Test first 5 items
-            const article = {
-              title: item.title,
-              url: item.link,
-              publication_date: item.pubDate,
-              content_length: (item.contentSnippet || item.content || item.summary || '').length,
-              has_required_content: !!(item.title && item.link && (item.contentSnippet || item.content || item.summary || '').length > 100)
-            };
-            articles.push(article);
-            if (article.has_required_content) testResults.articles_found++;
-          }
-          testResults.articles = articles;
-          
-        } catch (rssError) {
-          testResults.errors.push({
-            type: 'RSS_PARSING_ERROR',
-            message: rssError.message,
-            stack: verbose ? rssError.stack : undefined
-          });
-        }
-        
-      } else {
-        // Test web scraping
-        testResults.debug_info.scraping_url = source.url;
-        
-        try {
-          const axios = (await import('axios')).default;
-          const cheerio = (await import('cheerio')).default;
-          
-          const response = await axios.get(source.url, {
-            timeout: 30000,
-            headers: {
-              'User-Agent': 'Eden Content Bot 1.0 (https://eden.co.uk)'
-            }
-          });
-          
-          testResults.debug_info.http_status = response.status;
-          testResults.debug_info.content_type = response.headers['content-type'];
-          testResults.debug_info.content_length = response.data.length;
-          
-          const $ = cheerio.load(response.data);
-          
-          // Test each selector
-          const articleSelectors = [
-            'article',
-            '.post', 
-            '.news-item',
-            '.article',
-            '.entry',
-            '[class*="article"]',
-            '[class*="post"]'
-          ];
-          
-          testResults.debug_info.selector_results = {};
-          
-          for (const selector of articleSelectors) {
-            const elements = $(selector);
-            testResults.debug_info.selector_results[selector] = elements.length;
-            
-            if (elements.length > 0) {
-              testResults.debug_info.successful_selector = selector;
-              
-              // Test first few elements
-              const sampleArticles = [];
-              elements.slice(0, 3).each((i, element) => {
-                const $el = $(element);
-                
-                const titleEl = $el.find('h1, h2, h3, .title, [class*="title"]').first();
-                const linkEl = $el.find('a').first();
-                const contentEl = $el.find('p, .content, .excerpt, [class*="content"]').first();
-                
-                const title = titleEl.text().trim();
-                const relativeUrl = linkEl.attr('href');
-                const content = contentEl.text().trim();
-                
-                sampleArticles.push({
-                  index: i,
-                  title: title.substring(0, 100),
-                  url: relativeUrl,
-                  content_preview: content.substring(0, 100),
-                  content_length: content.length,
-                  has_required_fields: !!(title && relativeUrl && content.length > 50)
-                });
-                
-                if (title && relativeUrl && content.length > 50) {
-                  testResults.articles_found++;
-                }
-              });
-              
-              testResults.articles = sampleArticles;
-              break; // Use first successful selector
-            }
-          }
-          
-          // Additional debug info
-          testResults.debug_info.page_title = $('title').text();
-          testResults.debug_info.meta_description = $('meta[name="description"]').attr('content');
-          
-        } catch (scrapingError) {
-          testResults.errors.push({
-            type: 'WEB_SCRAPING_ERROR',
-            message: scrapingError.message,
-            stack: verbose ? scrapingError.stack : undefined
-          });
-        }
-      }
-      
-    } catch (generalError) {
-      testResults.errors.push({
-        type: 'GENERAL_ERROR',
-        message: generalError.message,
-        stack: verbose ? generalError.stack : undefined
-      });
-    }
-    
-    testResults.duration_ms = Date.now() - startTime;
-    testResults.success = testResults.errors.length === 0;
-    
-    console.log(`✅ Test complete for ${sourceName}: ${testResults.articles_found} articles found`);
-
-    res.json({
-      success: true,
-      test_results: testResults
-    });
-    
-  } catch (error) {
-    console.error(`❌ Source test failed for ${req.params.sourceName}:`, error.message);
-    res.status(500).json({ 
-      error: error.message,
-      test_results: {
-        success: false,
-        errors: [{
-          type: 'ENDPOINT_ERROR',
-          message: error.message
-        }]
-      }
-    });
-  }
-});
-
-// Content generation endpoints
-app.get('/api/eden/content/types', async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    // Return available content types based on prompt templates
-    // These are static and don't require account context
-    const contentTypes = [
-      {
-        id: 'article',
-        name: 'Blog Article',
-        icon: 'FileText',
-        category: 'blog',
-        description: 'Generates engaging blog posts and articles',
-        template: 'Blog Post Generator'
-      },
-      {
-        id: 'social_post',
-        name: 'Social Media Post',
-        icon: 'Share2',
-        category: 'social',
-        description: 'Creates social media content for various platforms',
-        template: 'Social Media Generator'
-      },
-      {
-        id: 'video_script',
-        name: 'Video Script',
-        icon: 'Video',
-        category: 'video',
-        description: 'Generates scripts for video content',
-        template: 'Video Script Generator'
-      },
-      {
-        id: 'prayer_points',
-        name: 'Prayer Points',
-        icon: 'Heart',
-        category: 'prayer',
-        description: 'Creates prayer points from news content',
-        template: 'Prayer Points Generator'
-      },
-      {
-        id: 'sermon_outline',
-        name: 'Sermon Outline',
-        icon: 'BookOpen',
-        category: 'sermon',
-        description: 'Generates sermon outlines and talking points',
-        template: 'Sermon Outline Generator'
-      }
-    ];
-
-    res.json({
-      success: true,
-      contentTypes
-    });
-  } catch (error) {
-    console.error('❌ Error fetching content types:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/eden/content/generate', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const limit = parseInt(req.body.limit) || 5;
-    const specificStoryId = req.body.specificStoryId;
-    const accountId = req.accountContext.accountId;
-    
-    console.log(`🎨 Creating content generation job (limit: ${limit}${specificStoryId ? `, specific story: ${specificStoryId}` : ''}) for account ${accountId}`);
-    
-    // Create job instead of processing synchronously
-    const jobPayload = { limit };
-    if (specificStoryId) {
-      jobPayload.specificStoryId = specificStoryId;
-    }
-    
-    const jobId = await jobManager.createJob(
-      'content_generation',
-      jobPayload,
-      1, // priority
-      'user',
-      accountId // pass account ID
-    );
-    
-    res.json({
-      success: true,
-      message: `Content generation job created (ID: ${jobId})`,
-      jobId,
-      status: 'queued'
-    });
-  } catch (error) {
-    console.error('❌ Content generation failed:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/eden/content/generate-evergreen', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { category, count = 1 } = req.body;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    
-    if (!category) {
-      return res.status(400).json({ error: 'Category is required' });
-    }
-
-    console.log(`🌲 Evergreen content generation triggered (category: ${category}) for account ${accountId}`);
-    const generatedContent = await contentGenerator.generateEvergreenContent(category, count, accountId);
-    
-    res.json({
-      success: true,
-      message: `Generated ${generatedContent.length} evergreen content pieces for account ${accountId}`,
-      content: generatedContent,
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Evergreen content generation failed:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/eden/content/review', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const statusParam = req.query.status || 'draft';
-    const limit = parseInt(req.query.limit) || 20;
-    const accountId = req.accountContext.accountId;
-    
-    // Handle multiple statuses separated by commas
-    const statuses = statusParam.split(',').map(s => s.trim());
-    
-    let content = [];
-    for (const status of statuses) {
-      // Pass account ID to filter content by account
-      const statusContent = await contentGenerator.getContentForReview(status, limit, accountId);
-      content = content.concat(statusContent);
-    }
-    
-    // Remove duplicates and limit results
-    const uniqueContent = content.filter((item, index, self) => 
-      index === self.findIndex(t => t.gen_article_id === item.gen_article_id)
-    ).slice(0, limit);
-    
-    res.json({
-      success: true,
-      content: uniqueContent,
-      count: uniqueContent.length
-    });
-  } catch (error) {
-    console.error('❌ Error fetching content for review:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.put('/api/eden/content/:contentType/:contentId/status', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { contentType, contentId } = req.params;
-    const { status, finalContent } = req.body;
-    const accountId = req.accountContext.accountId;
-    
-    // Map frontend content types to backend content types
-    const contentTypeMapping = {
-      'blog': 'article',
-      'article': 'article',
-      'social': 'social',
-      'video': 'video'
-    };
-    
-    const mappedContentType = contentTypeMapping[contentType];
-    
-    if (!mappedContentType) {
-      return res.status(400).json({ 
-        error: `Invalid content type: ${contentType}. Valid types are: blog, article, social, video` 
-      });
-    }
-
-    await contentGenerator.updateContentStatus(
-      parseInt(contentId), 
-      mappedContentType, 
-      status, 
-      finalContent,
-      accountId
-    );
-    
-    res.json({
-      success: true,
-      message: `${contentType} ${contentId} status updated to ${status}`
-    });
-  } catch (error) {
-    console.error('❌ Error updating content status:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Image service endpoints
-app.get('/api/eden/images/search', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { query, count = 5 } = req.query;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    
-    if (!query) {
-      return res.status(400).json({ error: 'Query is required' });
-    }
-
-    const images = await imageService.searchAndValidateImages(query, parseInt(count));
-    
-    res.json({
-      success: true,
-      images,
-      count: images.length,
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Image search failed:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Ideogram AI image generation endpoints
-app.post('/api/eden/images/generate', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    const {
-      prompt,
-      aspectRatio = '16:9',
-      styleType = 'GENERAL',
-      magicPrompt = 'AUTO',
-      negativePrompt = '',
-      seed = null
-    } = req.body;
-    
-    if (!prompt || prompt.trim().length === 0) {
-      return res.status(400).json({ error: 'Prompt is required' });
-    }
-
-    console.log(`🎨 User ${currentUserId} generating Ideogram image with prompt: "${prompt.substring(0, 100)}..."`);
-
-    const options = {
-      prompt: prompt.trim(),
-      aspectRatio,
-      styleType,
-      magicPrompt,
-      negativePrompt,
-      seed: seed ? parseInt(seed) : null,
-      numImages: 1,
-      renderingSpeed: 'DEFAULT'
-    };
-
-    const generatedImages = await imageService.generateIdeogramImage(options);
-    
-    if (generatedImages.length === 0) {
-      return res.status(500).json({ error: 'No images were generated' });
-    }
-
-    res.json({
-      success: true,
-      images: generatedImages,
-      count: generatedImages.length,
-      accountId,
-      usage: 'Generated via Ideogram.ai'
-    });
-
-  } catch (error) {
-    console.error('❌ Ideogram image generation failed:', error.message);
-    res.status(500).json({ 
-      error: error.message,
-      details: 'Image generation failed. Please check your prompt and try again.'
-    });
-  }
-});
-
-// Generate and save Ideogram image for specific content
-app.post('/api/eden/images/generate-for-content/:contentId', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { contentId } = req.params;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    const {
-      prompt,
-      aspectRatio = '16:9',
-      styleType = 'REALISTIC',
-      magicPrompt = 'ON',
-      useChristianPrompt = false
-    } = req.body;
-
-    // Validate content exists and belongs to this account
-    const content = accountId 
-      ? await db.findOneByAccount('ssnews_generated_articles', accountId, 'gen_article_id = ?', [contentId])
-      : await db.findOne('ssnews_generated_articles', 'gen_article_id = ?', [contentId]);
-
-    if (!content) {
-      return res.status(404).json({ error: 'Content not found' });
-    }
-
-    console.log(`🎨 Generating Ideogram image for content ${contentId} (account: ${accountId})`);
-
-    let generatedImages;
-
-    if (useChristianPrompt) {
-      // Use the special Christian content image generation
-      generatedImages = await imageService.generateChristianContentImage(
-        content.title,
-        content.body_draft || '',
-        prompt
-      );
-    } else {
-      // Use custom prompt
-      if (!prompt || prompt.trim().length === 0) {
-        return res.status(400).json({ error: 'Prompt is required when not using Christian auto-prompt' });
-      }
-
-      const options = {
-        prompt: prompt.trim(),
-        aspectRatio,
-        styleType,
-        magicPrompt,
-        negativePrompt: 'Jesus face, crucifix, overly Catholic iconography, mystical symbols, inappropriate religious content',
-        numImages: 1,
-        renderingSpeed: 'DEFAULT'
-      };
-
-      generatedImages = await imageService.generateIdeogramImage(options);
-    }
-
-    if (generatedImages.length === 0) {
-      return res.status(500).json({ error: 'No images were generated' });
-    }
-
-    // Process and save the first generated image
-    const processedImage = await imageService.processIdeogramImageForContent(
-      generatedImages[0],
-      contentId,
-      accountId
-    );
-
-    console.log(`✅ Ideogram image generated and saved for content ${contentId}`);
-
-    res.json({
-      success: true,
-      image: processedImage,
-      contentId,
-      accountId,
-      message: 'Image generated and added to content'
-    });
-
-  } catch (error) {
-    console.error('❌ Content image generation failed:', error.message);
-    res.status(500).json({ 
-      error: error.message,
-      details: 'Failed to generate image for content. Please try again.'
-    });
-  }
-});
-
-// Get available Ideogram generation options
-app.get('/api/eden/images/ideogram/options', accountContext, async (req, res) => {
-  try {
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    const styles = imageService.getIdeogramStyles();
-    const aspectRatios = imageService.getAspectRatios();
-
-    res.json({
-      success: true,
-      options: {
-        styles,
-        aspectRatios,
-        magicPromptOptions: [
-          { value: 'AUTO', label: 'Auto', description: 'System decides whether to enhance prompt' },
-          { value: 'ON', label: 'Always On', description: 'Always enhance the prompt for better results' },
-          { value: 'OFF', label: 'Off', description: 'Use original prompt without enhancement' }
-        ],
-        renderingSpeedOptions: [
-          { value: 'TURBO', label: 'Turbo', description: 'Fastest generation' },
-          { value: 'DEFAULT', label: 'Default', description: 'Balanced speed and quality' },
-          { value: 'QUALITY', label: 'Quality', description: 'Highest quality, slower generation' }
-        ]
-      },
-      accountId
-    });
-
-  } catch (error) {
-    console.error('❌ Error getting Ideogram options:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// System status and stats endpoints
-app.get('/api/eden/stats/generation', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const accountId = req.accountContext.accountId;
-    const stats = await contentGenerator.getGenerationStats(accountId);
-    
-    res.json({
-      success: true,
-      stats
-    });
-  } catch (error) {
-    console.error('❌ Error getting generation stats:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/eden/stats/images', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    const stats = await imageService.getImageStats(accountId);
-    
-    res.json({
-      success: true,
-      stats,
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Error getting image stats:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ===== USER BOOKMARKS API ENDPOINTS =====
-
-// Get user's bookmarked articles
-app.get('/api/eden/bookmarks', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const userId = req.query.userId;
-    const accountId = req.accountContext.accountId;
-    
-    if (!userId) {
-      return res.status(400).json({ error: 'User ID is required' });
-    }
-
-    // Get all bookmarked article IDs for the user within this account
-    const bookmarks = await db.query(`
-      SELECT 
-        b.bookmark_id,
-        b.article_id,
-        b.bookmarked_at,
-        a.title,
-        a.url,
-        a.publication_date,
-        a.summary_ai,
-        a.keywords_ai,
-        a.relevance_score,
-        s.name as source_name
-      FROM ssnews_user_bookmarks b
-      JOIN ssnews_scraped_articles a ON b.article_id = a.article_id
-      JOIN ssnews_news_sources s ON a.source_id = s.source_id
-      WHERE b.user_id = ? AND a.account_id = ?
-      ORDER BY b.bookmarked_at DESC
-    `, [userId, accountId]);
-
-    res.json({
-      success: true,
-      bookmarks
-    });
-  } catch (error) {
-    console.error('❌ Error fetching bookmarks:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Add a bookmark
-app.post('/api/eden/bookmarks', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { userId, userEmail, articleId } = req.body;
-    const accountId = req.accountContext.accountId;
-    
-    if (!userId || !articleId) {
-      return res.status(400).json({ error: 'User ID and Article ID are required' });
-    }
-
-    // Verify article belongs to current account
-    const article = await db.findOne(
-      'ssnews_scraped_articles',
-      'article_id = ? AND account_id = ?',
-      [articleId, accountId]
-    );
-
-    if (!article) {
-      return res.status(404).json({ error: 'Article not found in current account' });
-    }
-
-    // Check if bookmark already exists
-    const existing = await db.findOne(
-      'ssnews_user_bookmarks',
-      'user_id = ? AND article_id = ?',
-      [userId, articleId]
-    );
-
-    if (existing) {
-      return res.json({
-        success: true,
-        message: 'Bookmark already exists',
-        bookmarkId: existing.bookmark_id
-      });
-    }
-
-    // Insert new bookmark
-    const bookmarkId = await db.insert('ssnews_user_bookmarks', {
-      user_id: userId,
-      user_email: userEmail || null,
-      article_id: articleId
-    });
-
-    console.log(`⭐ User ${userId} bookmarked article ${articleId} in account ${accountId}`);
-
-    res.json({
-      success: true,
-      message: 'Bookmark added successfully',
-      bookmarkId
-    });
-  } catch (error) {
-    console.error('❌ Error adding bookmark:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2595,3 +1588,194 @@ process.on('SIGINT', async () => {
   await db.close();
   process.exit(0);
 });
+
+// Database optimization endpoint - Create indexes for better performance
+app.post('/api/debug/optimize-database', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    console.log('🔧 Optimizing database indexes for performance...');
+    
+    const results = [];
+    
+    // Helper function to check if index exists
+    const indexExists = async (table, indexName) => {
+      try {
+        const result = await db.query(
+          'SELECT COUNT(*) as count FROM information_schema.statistics WHERE table_name = ? AND index_name = ? AND table_schema = DATABASE()',
+          [table, indexName]
+        );
+        return result[0].count > 0;
+      } catch (error) {
+        return false;
+      }
+    };
+
+    const optimizations = [
+      // Scraped articles optimizations
+      {
+        name: 'idx_scraped_articles_account_scraped',
+        table: 'ssnews_scraped_articles',
+        sql: 'CREATE INDEX idx_scraped_articles_account_scraped ON ssnews_scraped_articles(account_id, scraped_at DESC, article_id DESC)',
+        description: 'Optimize article listing by account and date'
+      },
+      {
+        name: 'idx_scraped_articles_account_status',
+        table: 'ssnews_scraped_articles', 
+        sql: 'CREATE INDEX idx_scraped_articles_account_status ON ssnews_scraped_articles(account_id, status)',
+        description: 'Optimize article filtering by status'
+      },
+      {
+        name: 'idx_scraped_articles_url_account',
+        table: 'ssnews_scraped_articles',
+        sql: 'CREATE INDEX idx_scraped_articles_url_account ON ssnews_scraped_articles(url, account_id)',
+        description: 'Optimize duplicate URL checking'
+      },
+      
+      // Generated articles optimizations
+      {
+        name: 'idx_generated_articles_account_status',
+        table: 'ssnews_generated_articles',
+        sql: 'CREATE INDEX idx_generated_articles_account_status ON ssnews_generated_articles(account_id, status, created_at DESC)',
+        description: 'Optimize content review queries'
+      },
+      {
+        name: 'idx_generated_articles_account_created',
+        table: 'ssnews_generated_articles',
+        sql: 'CREATE INDEX idx_generated_articles_account_created ON ssnews_generated_articles(account_id, created_at DESC)',
+        description: 'Optimize recent content queries'
+      },
+      
+      // News sources optimizations
+      {
+        name: 'idx_news_sources_account_active',
+        table: 'ssnews_news_sources',
+        sql: 'CREATE INDEX idx_news_sources_account_active ON ssnews_news_sources(account_id, is_active)',
+        description: 'Optimize active sources listing'
+      },
+      
+      // Jobs optimizations
+      {
+        name: 'idx_jobs_account_status',
+        table: 'ssnews_jobs',
+        sql: 'CREATE INDEX idx_jobs_account_status ON ssnews_jobs(account_id, status, created_at DESC)',
+        description: 'Optimize job queue queries'
+      },
+      {
+        name: 'idx_jobs_account_created',
+        table: 'ssnews_jobs',
+        sql: 'CREATE INDEX idx_jobs_account_created ON ssnews_jobs(account_id, created_at DESC)',
+        description: 'Optimize recent jobs queries'
+      },
+      
+      // Bookmarks optimizations
+      {
+        name: 'idx_bookmarks_user_article',
+        table: 'ssnews_user_bookmarks',
+        sql: 'CREATE INDEX idx_bookmarks_user_article ON ssnews_user_bookmarks(user_id, article_id)',
+        description: 'Optimize bookmark lookups'
+      },
+      
+      // System logs optimizations (already added in previous migration)
+      {
+        name: 'idx_system_logs_account_timestamp',
+        table: 'ssnews_system_logs',
+        sql: 'CREATE INDEX idx_system_logs_account_timestamp ON ssnews_system_logs(account_id, timestamp DESC)',
+        description: 'Optimize log queries by account'
+      }
+    ];
+
+    for (const optimization of optimizations) {
+      try {
+        const exists = await indexExists(optimization.table, optimization.name);
+        
+        if (!exists) {
+          await db.query(optimization.sql);
+          results.push({ 
+            index: optimization.name, 
+            status: 'created', 
+            description: optimization.description 
+          });
+          console.log(`✅ Created index: ${optimization.name}`);
+        } else {
+          results.push({ 
+            index: optimization.name, 
+            status: 'exists', 
+            description: optimization.description 
+          });
+        }
+      } catch (error) {
+        results.push({ 
+          index: optimization.name, 
+          status: 'error', 
+          error: error.message,
+          description: optimization.description 
+        });
+        console.log(`❌ Failed to create index ${optimization.name}:`, error.message);
+      }
+    }
+
+    const created = results.filter(r => r.status === 'created').length;
+    const existing = results.filter(r => r.status === 'exists').length;
+    const errors = results.filter(r => r.status === 'error').length;
+
+    console.log(`🔧 Database optimization complete: ${created} created, ${existing} existing, ${errors} errors`);
+
+    res.json({
+      success: true,
+      message: `Database optimization complete: ${created} indexes created, ${existing} existing, ${errors} errors`,
+      results,
+      summary: {
+        created,
+        existing,
+        errors,
+        total: optimizations.length
+      }
+    });
+  } catch (error) {
+    console.error('❌ Database optimization failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Simple in-memory cache for frequently accessed data
+const dataCache = new Map();
+const CACHE_TTL = {
+  STATS: 30 * 1000,        // 30 seconds
+  SOURCES: 60 * 1000,      // 1 minute  
+  JOB_STATS: 10 * 1000,    // 10 seconds
+  CONTENT_COUNTS: 60 * 1000 // 1 minute
+};
+
+function getCacheKey(type, accountId, extra = '') {
+  return `${type}:${accountId}:${extra}`;
+}
+
+function getFromCache(key) {
+  const cached = dataCache.get(key);
+  if (cached && Date.now() - cached.timestamp < cached.ttl) {
+    return cached.data;
+  }
+  dataCache.delete(key);
+  return null;
+}
+
+function setCache(key, data, ttl) {
+  dataCache.set(key, {
+    data,
+    timestamp: Date.now(),
+    ttl
+  });
+}
+
+// Clean cache periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, cached] of dataCache.entries()) {
+    if (now - cached.timestamp > cached.ttl) {
+      dataCache.delete(key);
+    }
+  }
+}, 60000); // Clean every minute

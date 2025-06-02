@@ -53,8 +53,10 @@ const ProjectEden = () => {
     workerStatus,
     favoriteStories,
     loading,
+    initialLoading,
+    backgroundRefreshing,
     error,
-    fetchData,
+    fetchTabData,
     fetchJobs,
     toggleFavorite
   } = useProjectEdenData();
@@ -68,14 +70,24 @@ const ProjectEden = () => {
     runFullCycle,
     isActionLoading,
     isContentGenerationLoading
-  } = useContentActions(fetchData);
+  } = useContentActions(() => {
+    // Refresh specific tab data instead of all data
+    if (activeTab === TAB_ROUTES.REVIEW) fetchTabData('review');
+    else if (activeTab === TAB_ROUTES.APPROVED) fetchTabData('approved');
+    else if (activeTab === TAB_ROUTES.ARCHIVED) fetchTabData('archived');
+    else if (activeTab === TAB_ROUTES.REJECTED) fetchTabData('rejected');
+    else if (activeTab === TAB_ROUTES.STORIES) fetchTabData('articles');
+  });
 
   const {
     toggleSourceStatus,
     refreshSource,
     toggleLoadingMap: sourceToggleLoadingMap,
     refreshLoadingMap: sourceRefreshLoadingMap
-  } = useSourceActions(fetchData);
+  } = useSourceActions(() => {
+    // Only refresh sources data, not everything
+    fetchTabData('sources');
+  });
 
   const {
     cancelJob,
@@ -83,8 +95,7 @@ const ProjectEden = () => {
     startJobWorker,
     isActionLoading: isJobActionLoading
   } = useJobActions(() => {
-    // Refresh both main data and jobs data
-    fetchData();
+    // Refresh jobs data specifically
     fetchJobs().then(setJobs).catch(console.error);
   });
 
@@ -118,9 +129,39 @@ const ProjectEden = () => {
   const handleTabChange = (tabValue) => {
     setActiveTab(tabValue);
     window.history.pushState(null, null, `#${tabValue}`);
+    
+    // Lazy load data for the new tab
+    switch (tabValue) {
+      case TAB_ROUTES.REVIEW:
+        fetchTabData('review');
+        break;
+      case TAB_ROUTES.APPROVED:
+        fetchTabData('approved');
+        break;
+      case TAB_ROUTES.ARCHIVED:
+        fetchTabData('archived');
+        break;
+      case TAB_ROUTES.REJECTED:
+        fetchTabData('rejected');
+        break;
+      case TAB_ROUTES.STORIES:
+        fetchTabData('articles');
+        fetchTabData('bookmarks'); // Also load bookmarks for favorites
+        break;
+      case TAB_ROUTES.JOBS:
+      case TAB_ROUTES.QUEUED:
+        fetchJobs().then(setJobs).catch(console.error);
+        break;
+      case TAB_ROUTES.SOURCES:
+        // Sources are already loaded in essential data
+        break;
+      default:
+        // Dashboard and other tabs don't need additional data
+        break;
+    }
   };
 
-  // Fetch jobs when certain tabs are accessed
+  // Fetch jobs when certain tabs are accessed (but keep the existing logic for backwards compatibility)
   useEffect(() => {
     if (activeTab === TAB_ROUTES.JOBS || activeTab === TAB_ROUTES.QUEUED) {
       fetchJobs().then(setJobs).catch(console.error);
@@ -249,9 +290,9 @@ const ProjectEden = () => {
     }
   };
 
-  // Manage loading overlay with minimum display time
+  // Manage loading overlay with minimum display time (updated for new loading states)
   useEffect(() => {
-    const shouldShowLoading = permissionsLoading || (loading && allArticles.length === 0);
+    const shouldShowLoading = permissionsLoading || initialLoading;
     
     if (shouldShowLoading && !showLoadingOverlay) {
       // Start showing overlay
@@ -260,7 +301,7 @@ const ProjectEden = () => {
     } else if (!shouldShowLoading && showLoadingOverlay && loadingStartTime) {
       // Check if minimum time has passed
       const elapsed = Date.now() - loadingStartTime;
-      const minDisplayTime = 2000; // 2 seconds
+      const minDisplayTime = 1500; // Reduced to 1.5 seconds for faster experience
       
       if (elapsed >= minDisplayTime) {
         setShowLoadingOverlay(false);
@@ -273,7 +314,7 @@ const ProjectEden = () => {
         }, minDisplayTime - elapsed);
       }
     }
-  }, [permissionsLoading, loading, allArticles.length, showLoadingOverlay, loadingStartTime]);
+  }, [permissionsLoading, initialLoading, showLoadingOverlay, loadingStartTime]);
 
   return (
     <ErrorBoundary>
@@ -289,12 +330,17 @@ const ProjectEden = () => {
                     <h3 className="font-semibold text-gray-900">Loading Project Eden</h3>
                     <p className="text-sm text-gray-600 mt-1">
                       {permissionsLoading ? 'Loading account permissions...' : 
-                       loading ? 'Fetching latest data...' : 
+                       initialLoading ? 'Loading essential data...' : 
                        'Initializing...'}
                     </p>
                     {selectedAccount && (
                       <p className="text-xs text-gray-500 mt-1">
                         Account: {selectedAccount.name}
+                      </p>
+                    )}
+                    {initialLoading && (
+                      <p className="text-xs text-blue-600 mt-2">
+                        ⚡ Quick loading - only essentials first
                       </p>
                     )}
                   </div>
@@ -312,8 +358,9 @@ const ProjectEden = () => {
           <Header 
             currentUser={currentUser}
             loading={loading}
+            backgroundRefreshing={backgroundRefreshing}
             showProgressModal={showProgressModal}
-            onRefresh={fetchData}
+            onRefresh={fetchTabData}
             onRunFullCycle={handleRunFullCycle}
             onShowLogs={() => setShowLogViewer(true)}
             onLogout={logout}
@@ -445,7 +492,7 @@ const ProjectEden = () => {
               <SourcesTab
                 sources={sources}
                 loading={loading}
-                onRefresh={fetchData}
+                onRefresh={fetchTabData}
                 onToggleSourceStatus={toggleSourceStatus}
                 onRefreshSource={refreshSource}
                 toggleLoadingMap={sourceToggleLoadingMap}
@@ -501,44 +548,58 @@ const ProjectEden = () => {
 const Header = ({ 
   currentUser, 
   loading, 
+  backgroundRefreshing, 
   showProgressModal, 
   onRefresh, 
   onRunFullCycle, 
   onShowLogs, 
   onLogout 
 }) => (
-  <div className="mb-8">
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-6">
-        {/* Account Switcher in top-left */}
-        <AccountSwitcher />
-      <div>
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">Eden</h1>
-        <p className="text-lg text-gray-600">AI Content</p>
+  <div className="flex items-center justify-between mb-8">
+    <div className="flex items-center gap-4">
+      <h1 className="text-3xl font-bold text-gray-900">Project Eden</h1>
+      {backgroundRefreshing && (
+        <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+          <div className="w-3 h-3 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+          <span>Updating data...</span>
         </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <Button onClick={onRefresh} variant="outline" disabled={loading || showProgressModal}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
-        <Button onClick={onRunFullCycle} disabled={loading || showProgressModal}>
-          <Zap className="w-4 h-4 mr-2" />
-          Run Full Cycle
-        </Button>
-        <Button onClick={onShowLogs} variant="outline" disabled={showProgressModal}>
-          <Terminal className="w-4 h-4 mr-2" />
-          Live Logs
-        </Button>
-        <Button 
-          variant="ghost" 
-          onClick={onLogout}
-          className="text-sm text-gray-600 hover:text-gray-900"
-        >
-          <LogOut className="w-4 h-4 mr-2" />
-          Logout ({currentUser?.email})
-        </Button>
-      </div>
+      )}
+      <AccountSwitcher />
+    </div>
+    <div className="flex items-center gap-3">
+      <Button
+        variant="outline"
+        onClick={() => onRefresh()}
+        disabled={loading || showProgressModal}
+        className="flex items-center gap-2"
+      >
+        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        {loading ? 'Refreshing...' : 'Refresh'}
+      </Button>
+      <Button
+        onClick={onRunFullCycle}
+        disabled={loading || showProgressModal}
+        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
+      >
+        <Zap className="w-4 h-4" />
+        Full Automation
+      </Button>
+      <Button
+        variant="outline"
+        onClick={onShowLogs}
+        className="flex items-center gap-2"
+      >
+        <Terminal className="w-4 h-4" />
+        Logs
+      </Button>
+      <Button
+        variant="ghost"
+        onClick={onLogout}
+        className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+      >
+        <LogOut className="w-4 h-4" />
+        Sign Out
+      </Button>
     </div>
   </div>
 );
