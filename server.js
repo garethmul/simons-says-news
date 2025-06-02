@@ -1430,8 +1430,8 @@ app.get('/api/eden/content/review', accountContext, async (req, res) => {
     // Handle multiple statuses separated by commas
     const statuses = statusParam.split(',').map(s => s.trim());
     
-    // If limit is 1, they probably just want the count
-    const justCount = limit === 1;
+    // Check for explicit count-only request (not just limit=1)
+    const justCount = req.query.countOnly === 'true' && limit === 1;
     
     if (justCount) {
       // Fast count query for tab display
@@ -1467,20 +1467,8 @@ app.get('/api/eden/content/review', accountContext, async (req, res) => {
     let totalCount = 0;
     
     for (const status of statuses) {
-      const statusContent = await db.query(`
-        SELECT 
-          ga.*,
-          sa.title as source_title,
-          sa.url as source_url,
-          ns.name as source_name
-        FROM ssnews_generated_articles ga
-        LEFT JOIN ssnews_scraped_articles sa ON ga.based_on_scraped_article_id = sa.article_id
-        LEFT JOIN ssnews_news_sources ns ON sa.source_id = ns.source_id
-        WHERE ga.account_id = ? AND ga.status = ?
-        ORDER BY ga.created_at DESC
-        LIMIT ${limit}
-      `, [accountId, status]);
-      
+      // Use the database service method that properly fetches associated content
+      const statusContent = await db.getContentForReview(status, limit, accountId);
       content = content.concat(statusContent);
       
       // Get total count for this status
@@ -1510,6 +1498,91 @@ app.get('/api/eden/content/review', accountContext, async (req, res) => {
 });
 
 // ===== END CONTENT GENERATION API ENDPOINTS =====
+
+// ===== DEBUG ENDPOINTS =====
+
+// Debug Prayer Points for specific article
+app.get('/api/debug/prayer-points/:articleId', accountContext, async (req, res) => {
+  try {
+    const { articleId } = req.params;
+    const accountId = req.accountContext.accountId;
+    
+    console.log(`🔍 Debug: Checking prayer points for article ${articleId} in account ${accountId}`);
+    
+    // Test direct query to generic content table
+    const rawQuery = await db.query(`
+      SELECT * FROM ssnews_generated_content 
+      WHERE based_on_gen_article_id = ? AND prompt_category = ? AND account_id = ?
+    `, [parseInt(articleId), 'prayer_points', accountId]);
+    
+    // Test using the service method
+    const serviceResult = await db.getGenericContent(parseInt(articleId), 'prayer_points', accountId);
+    
+    res.json({
+      success: true,
+      articleId: parseInt(articleId),
+      accountId,
+      rawQueryCount: rawQuery.length,
+      rawQuery: rawQuery,
+      serviceResultCount: serviceResult.length,
+      serviceResult: serviceResult,
+      debug: {
+        queryParams: [parseInt(articleId), 'prayer_points', accountId]
+      }
+    });
+  } catch (error) {
+    console.error('❌ Debug prayer points error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug all generic content to see what exists
+app.get('/api/debug/generic-content', accountContext, async (req, res) => {
+  try {
+    const accountId = req.accountContext.accountId;
+    
+    console.log(`🔍 Debug: Checking all generic content for account ${accountId}`);
+    
+    // Get all generic content for this account
+    const allContent = await db.query(`
+      SELECT 
+        content_id,
+        based_on_gen_article_id,
+        prompt_category,
+        content_data,
+        created_at
+      FROM ssnews_generated_content 
+      WHERE account_id = ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    `, [accountId]);
+    
+    // Get unique categories
+    const categories = await db.query(`
+      SELECT DISTINCT prompt_category, COUNT(*) as count
+      FROM ssnews_generated_content 
+      WHERE account_id = ?
+      GROUP BY prompt_category
+    `, [accountId]);
+    
+    res.json({
+      success: true,
+      accountId,
+      totalContent: allContent.length,
+      categories: categories,
+      recentContent: allContent.slice(0, 5),
+      debug: {
+        tableExists: true,
+        accountFilter: accountId
+      }
+    });
+  } catch (error) {
+    console.error('❌ Debug generic content error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== END DEBUG ENDPOINTS =====
 
 // Test URL submission without middleware
 app.post('/api/test/submit-urls', async (req, res) => {
