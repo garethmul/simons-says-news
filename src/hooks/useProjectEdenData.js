@@ -36,6 +36,7 @@ export const useProjectEdenData = () => {
   const [favoriteStories, setFavoriteStories] = useState(new Set());
   
   const [loading, setLoading] = useState(false);
+  const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [error, setError] = useState(null);
   
   // Helper function to make API requests with account context
@@ -48,7 +49,7 @@ export const useProjectEdenData = () => {
   };
   
   // Fetch all data
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isBackgroundRefresh = false) => {
     // Skip fetching if no account is selected
     if (!selectedAccount) {
       console.log('No account selected, skipping data fetch');
@@ -67,7 +68,15 @@ export const useProjectEdenData = () => {
       return;
     }
 
-    setLoading(true);
+    // Set appropriate loading state based on refresh type
+    if (isBackgroundRefresh) {
+      setBackgroundRefreshing(true);
+      console.log('🔄 Background refresh started (no UI disruption)');
+    } else {
+      setLoading(true);
+      console.log('🔄 Full data fetch started');
+    }
+    
     setError(null);
     
     try {
@@ -151,11 +160,21 @@ export const useProjectEdenData = () => {
         totalArticlesProcessed: articlesData.articles?.length || 0
       }));
 
+      if (isBackgroundRefresh) {
+        console.log('✅ Background refresh completed');
+      } else {
+        console.log('✅ Full data fetch completed');
+      }
+
     } catch (err) {
       console.error('Error fetching data:', err);
       setError(ERROR_MESSAGES.FETCH_FAILED);
     } finally {
-      setLoading(false);
+      if (isBackgroundRefresh) {
+        setBackgroundRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, [currentUser, selectedAccount, hasAccess, withAccountContext, permissionsLoading]);
 
@@ -276,7 +295,7 @@ export const useProjectEdenData = () => {
       setError(null);
       
       // Fetch fresh data for the new account (will wait for permissions to load)
-      fetchData();
+      fetchData(false); // Initial load with loading state
     } else {
       // Clear data when no account is selected
       console.log('🔄 No account selected, clearing all data');
@@ -310,16 +329,17 @@ export const useProjectEdenData = () => {
   useEffect(() => {
     if (selectedAccount && !permissionsLoading && hasAccess) {
       console.log('✅ Permissions loaded with access, fetching data...');
-      fetchData();
+      fetchData(false); // Initial load with loading state
     }
   }, [selectedAccount?.account_id, permissionsLoading, hasAccess, fetchData]);
 
-  // Set up automatic data refresh for current account
+  // Set up automatic background refresh for current account (increased interval, no UI disruption)
   useEffect(() => {
     if (selectedAccount && !permissionsLoading && hasAccess) {
+      // Use longer interval (2 minutes instead of 30 seconds) and background refresh
       const interval = setInterval(() => {
-        fetchData();
-      }, REFRESH_INTERVALS.DATA);
+        fetchData(true); // Background refresh without loading state
+      }, REFRESH_INTERVALS.DATA * 4); // 2 minutes (30s * 4 = 120s)
     
       return () => clearInterval(interval);
     }
@@ -340,12 +360,13 @@ export const useProjectEdenData = () => {
     
     // State
     loading,
+    backgroundRefreshing,
     error,
     hasAccess,
     selectedAccount,
     
     // Actions
-    fetchData,
+    fetchData: (isBackground = false) => fetchData(isBackground),
     fetchJobs,
     toggleFavorite,
     

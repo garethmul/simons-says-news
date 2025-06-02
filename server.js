@@ -2008,7 +2008,7 @@ app.get('/api/eden/jobs/stream', accountContext, async (req, res) => {
     console.error('Error fetching initial job data:', error);
   }
 
-  // Send updates every 5 seconds
+  // Send updates every 10 seconds (less aggressive than 5 seconds)
   const updateInterval = setInterval(async () => {
     try {
       const accountId = req.accountContext.accountId;
@@ -2024,7 +2024,7 @@ app.get('/api/eden/jobs/stream', accountContext, async (req, res) => {
     } catch (error) {
       clearInterval(updateInterval);
     }
-  }, 5000);
+  }, 10000);
 
   req.on('close', () => {
     clearInterval(updateInterval);

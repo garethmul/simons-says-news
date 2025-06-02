@@ -60,9 +60,9 @@ const ProgressModal = ({ isOpen, onClose, onComplete, onReset }) => {
       }
     };
 
-    // Fetch immediately, then every 1 second
+    // Fetch immediately, then every 3 seconds (instead of 1 second for less aggressive polling)
     fetchProgress();
-    intervalId = setInterval(fetchProgress, 1000);
+    intervalId = setInterval(fetchProgress, 3000);
 
     return () => {
       if (intervalId) {

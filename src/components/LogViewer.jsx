@@ -5,6 +5,7 @@ import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useAccount } from '../contexts/AccountContext';
+import { REFRESH_INTERVALS } from '../utils/constants';
 import { 
   Terminal, 
   Play, 
@@ -172,9 +173,9 @@ const LogViewer = ({ isOpen, onClose }) => {
         }
       };
 
-      // Fetch immediately, then every 2 seconds
+      // Fetch immediately, then every 5 seconds (using REFRESH_INTERVALS.LOGS)
       fetchLogs();
-      intervalId = setInterval(fetchLogs, 2000);
+      intervalId = setInterval(fetchLogs, REFRESH_INTERVALS.LOGS);
 
       return () => {
         if (intervalId) {

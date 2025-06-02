@@ -4,7 +4,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import { useAccount } from '../../contexts/AccountContext';
-import { API_ENDPOINTS } from '../../utils/constants';
+import { API_ENDPOINTS, REFRESH_INTERVALS } from '../../utils/constants';
 import { 
   ChevronDown, 
   ChevronUp, 
@@ -96,7 +96,7 @@ const JobLogViewer = ({ job, isExpanded, onToggleExpanded, className = '' }) => 
   // Set up auto-refresh for processing jobs
   useEffect(() => {
     if (autoRefresh && job?.status === 'processing') {
-      autoRefreshRef.current = setInterval(fetchJobLogs, 2000); // Refresh every 2 seconds
+      autoRefreshRef.current = setInterval(fetchJobLogs, REFRESH_INTERVALS.LOGS); // Use LOGS interval instead of 2000
     } else {
       if (autoRefreshRef.current) {
         clearInterval(autoRefreshRef.current);

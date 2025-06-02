@@ -91,9 +91,9 @@ export const API_ENDPOINTS = {
 };
 
 export const REFRESH_INTERVALS = {
-  DATA: 30000, // 30 seconds
-  JOBS: 5000,  // 5 seconds
-  LOGS: 2000   // 2 seconds
+  DATA: 60000,  // 1 minute (was 30 seconds)
+  JOBS: 10000,  // 10 seconds (was 5 seconds)
+  LOGS: 5000    // 5 seconds (was 2 seconds)
 };
 
 export const ERROR_MESSAGES = {
