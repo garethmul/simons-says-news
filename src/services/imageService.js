@@ -552,7 +552,7 @@ class ImageService {
         source_image_id_external: ideogramImage.id,
         sirv_cdn_url: sirvUrl,
         alt_text_suggestion_ai: ideogramImage.prompt.substring(0, 250), // Use prompt as alt text
-        is_approved_human: false,
+        status: 'pending_review', // Set default status to pending_review
         created_at: new Date()
       };
 

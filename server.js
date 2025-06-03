@@ -2114,14 +2114,14 @@ app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) 
     const { currentUserId } = req;
     const { accountId } = req.accountContext;
     const { contentId } = req.params;
+    const { include_archived, status: queryStatus } = req.query;
     
     if (!currentUserId) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    console.log(`🖼️ Fetching images for content ${contentId} in account ${accountId}`);
+    console.log(`🖼️ Fetching images for content ${contentId} in account ${accountId} (include_archived: ${include_archived}, status: ${queryStatus})`);
 
-    // First verify the content belongs to this account
     const content = await db.findOneByAccount(
       'ssnews_generated_articles', 
       accountId,
@@ -2133,24 +2133,34 @@ app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) 
       return res.status(404).json({ error: 'Content not found' });
     }
 
-    // Fetch images from the database
-    const images = await db.query(`
+    let query = `
       SELECT 
         image_id as id,
         sirv_cdn_url as sirvUrl,
         alt_text_suggestion_ai as altText,
         source_api as source,
+        status, -- Select the new status column
         source_image_id_external,
-        created_at,
-        is_approved_human
+        created_at
       FROM ssnews_image_assets
       WHERE associated_content_type = 'gen_article' 
         AND associated_content_id = ?
         AND account_id = ?
-      ORDER BY created_at DESC
-    `, [parseInt(contentId), accountId]);
+    `;
+    const queryParams = [parseInt(contentId), accountId];
 
-    // Format images for frontend consumption
+    if (queryStatus) {
+      query += ' AND status = ?';
+      queryParams.push(queryStatus);
+    } else if (include_archived !== 'true') {
+      query += ' AND status != ?';
+      queryParams.push('archived');
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const images = await db.query(query, queryParams);
+
     const formattedImages = images.map(image => ({
       id: image.id,
       sirvUrl: image.sirvUrl,
@@ -2158,7 +2168,7 @@ app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) 
       source: image.source || 'pexels',
       query: image.source === 'ideogram' ? 'AI Generated' : 'Stock Photo',
       created: image.created_at,
-      approved: image.is_approved_human
+      status: image.status // Include status in formatted response
     }));
 
     console.log(`✅ Found ${formattedImages.length} images for content ${contentId}`);
@@ -2172,6 +2182,69 @@ app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) 
     });
   } catch (error) {
     console.error('❌ Error fetching content images:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update image status (approve, reject, archive)
+app.put('/api/eden/images/:imageId/status', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { imageId } = req.params;
+    const { status } = req.body;
+
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    if (!imageId || !status) {
+      return res.status(400).json({ error: 'Image ID and status are required' });
+    }
+
+    const validStatuses = ['pending_review', 'approved', 'rejected', 'archived'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    console.log(`🖼️ Updating status of image ${imageId} to "${status}" for account ${accountId}`);
+
+    const result = await db.query(`
+      UPDATE ssnews_image_assets
+      SET status = ?
+      WHERE image_id = ? AND account_id = ?
+    `, [status, parseInt(imageId), accountId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Image not found or not owned by this account' });
+    }
+
+    // Fetch the updated image to return it
+    const updatedImage = await db.query(`
+      SELECT 
+        image_id as id,
+        sirv_cdn_url as sirvUrl,
+        alt_text_suggestion_ai as altText,
+        source_api as source,
+        status, -- Include new status field
+        created_at
+      FROM ssnews_image_assets
+      WHERE image_id = ? AND account_id = ?
+    `, [parseInt(imageId), accountId]);
+
+    res.json({
+      success: true,
+      message: `Image ${imageId} status updated to ${status}`,
+      image: updatedImage[0],
+      accountId
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating image status:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -3089,6 +3162,45 @@ app.post('/api/debug/optimize-database', async (req, res) => {
       }
     } else {
       results.push({ action: 'Add preferred_style_codes column', status: 'skipped', reason: 'Column already exists' });
+    }
+
+    // Add image status column and migrate data
+    if (!(await columnExists('ssnews_image_assets', 'status'))) {
+      try {
+        // 1. Add the new status column with a temporary default
+        await db.query(`ALTER TABLE ssnews_image_assets ADD COLUMN status ENUM('pending_review', 'approved', 'rejected', 'archived') DEFAULT 'pending_review' NOT NULL AFTER alt_text_suggestion_ai`);
+        results.push({ action: 'Add status column to ssnews_image_assets', status: 'success' });
+        console.log('✅ Added status column to ssnews_image_assets');
+
+        // 2. Update new status based on old is_approved_human column
+        if (await columnExists('ssnews_image_assets', 'is_approved_human')) {
+          await db.query(`UPDATE ssnews_image_assets SET status = 'approved' WHERE is_approved_human = TRUE`);
+          await db.query(`UPDATE ssnews_image_assets SET status = 'pending_review' WHERE is_approved_human = FALSE`);
+          results.push({ action: 'Migrate is_approved_human to status', status: 'success' });
+          console.log('✅ Migrated data from is_approved_human to status');
+
+          // 3. Drop the old is_approved_human column
+          await db.query(`ALTER TABLE ssnews_image_assets DROP COLUMN is_approved_human`);
+          results.push({ action: 'Drop is_approved_human column', status: 'success' });
+          console.log('✅ Dropped old is_approved_human column');
+        } else {
+          results.push({ action: 'Migrate is_approved_human to status', status: 'skipped', reason: 'is_approved_human column does not exist' });
+        }
+        // 4. Add index on new status column
+        if (!(await indexExists('ssnews_image_assets', 'idx_status'))) {
+            await db.query('CREATE INDEX idx_status ON ssnews_image_assets(status)');
+            results.push({ action: 'Create status index on ssnews_image_assets', status: 'success' });
+            console.log('✅ Created idx_status index on ssnews_image_assets');
+        } else {
+            results.push({ action: 'Create status index on ssnews_image_assets', status: 'skipped', reason: 'Index already exists' });
+        }
+
+      } catch (error) {
+        results.push({ action: 'Modify ssnews_image_assets for status column', status: 'error', error: error.message });
+        console.log('❌ Failed to modify ssnews_image_assets for status column:', error.message);
+      }
+    } else {
+      results.push({ action: 'Modify ssnews_image_assets for status column', status: 'skipped', reason: 'status column already exists' });
     }
 
     console.log(`🔧 Database optimization complete: ${created} created, ${existing} existing, ${errors} errors`);

@@ -59,6 +59,7 @@ const DetailModal = ({
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [imageMetadata, setImageMetadata] = useState([]);
+  const [showArchivedImages, setShowArchivedImages] = useState(false);
 
   // Handle Escape key to close modal and body scroll management
   useEffect(() => {
@@ -85,9 +86,10 @@ const DetailModal = ({
   }, [showModal, selectedContent, onClose]);
 
   // Function to fetch latest images for content
-  const fetchLatestImages = async (contentId) => {
+  const fetchLatestImages = async (contentId, includeArchived = false) => {
     try {
-      const response = await fetch(`/api/eden/content/${contentId}/images`, withAccountContext());
+      const apiUrl = `/api/eden/content/${contentId}/images${includeArchived ? '?include_archived=true' : ''}`;
+      const response = await fetch(apiUrl, withAccountContext());
       if (response.ok) {
         const data = await response.json();
         return data.images || [];
@@ -107,12 +109,12 @@ const DetailModal = ({
       // First set the existing images immediately
       setCurrentImages(selectedContent.images || []);
       
-      // Then fetch the latest images from the database
-      fetchLatestImages(selectedContent.gen_article_id).then(latestImages => {
+      // Then fetch the latest images from the database, considering the filter
+      fetchLatestImages(selectedContent.gen_article_id, showArchivedImages).then(latestImages => {
         setCurrentImages(latestImages);
       });
     }
-  }, [selectedContent, withAccountContext]);
+  }, [selectedContent, showArchivedImages, withAccountContext]);
 
   // Handle image click to open viewer
   const handleImageClick = async (imageIndex) => {
@@ -146,7 +148,7 @@ const DetailModal = ({
     if (newImage === 'REFRESH_ALL_IMAGES') {
       console.log('🔄 Refreshing all images from database...');
       if (selectedContent?.gen_article_id) {
-        fetchLatestImages(selectedContent.gen_article_id).then(latestImages => {
+        fetchLatestImages(selectedContent.gen_article_id, showArchivedImages).then(latestImages => {
           setCurrentImages(latestImages);
           console.log(`✅ Refreshed images: ${latestImages.length} total images loaded`);
         });
@@ -171,6 +173,40 @@ const DetailModal = ({
         created: new Date().toISOString()
       }
     ]);
+  };
+
+  // Handle image status update (archive, unarchive, approve, reject)
+  const handleImageStatusUpdate = async (imageId, newStatus) => {
+    console.log(`🔄 Updating image ${imageId} to status: ${newStatus}`);
+    try {
+      const response = await fetch(`/api/eden/images/${imageId}/status`, withAccountContext({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      }));
+
+      if (response.ok) {
+        const updatedImage = await response.json();
+        console.log('✅ Image status updated:', updatedImage.image);
+        // Refresh images to reflect the change
+        fetchLatestImages(selectedContent.gen_article_id, showArchivedImages).then(latestImages => {
+          setCurrentImages(latestImages);
+        });
+        // Optionally, update image metadata if it's already loaded and contains this image
+        setImageMetadata(prevMeta => prevMeta.map(meta => 
+          meta.result?.imageUrl === updatedImage.image?.sirvUrl || meta.metadata?.ideogramId === updatedImage.image?.ideogramId
+            ? { ...meta, status: newStatus } // This might need more specific mapping based on metadata structure
+            : meta
+        ));
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Failed to update image status:', errorData.error);
+        alert(`Failed to update image status: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Error updating image status:', error);
+      alert('Error updating image status. See console for details.');
+    }
   };
 
   // Early return AFTER all hooks have been called
@@ -267,6 +303,9 @@ const DetailModal = ({
                   contentId={selectedContent.gen_article_id} 
                   onImageGenerated={handleImageGenerated}
                   onImageClick={handleImageClick}
+                  onUpdateImageStatus={handleImageStatusUpdate}
+                  showArchived={showArchivedImages}
+                  setShowArchived={setShowArchivedImages}
                 />
               </TabsContent>
 
@@ -631,10 +670,12 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
   useEffect(() => {
     const loadData = async () => {
       try {
+        let optionsData; // Declare optionsData here
         // Load Ideogram options with current model version
         const optionsResponse = await fetch(`/api/eden/images/ideogram/options?modelVersion=${formData.modelVersion}`);
         if (optionsResponse.ok) {
-          const optionsData = await optionsResponse.json();
+          // Assign to the already declared optionsData
+          optionsData = await optionsResponse.json(); 
           setOptions(optionsData.options);
         }
 
@@ -694,7 +735,8 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
         renderingSpeed: formData.renderingSpeed,
         magicPrompt: formData.magicPrompt,
         styleType: formData.styleType,
-        numImages: parseInt(formData.numImages)
+        numImages: parseInt(formData.numImages),
+        modelVersion: formData.modelVersion
       };
 
       // Add optional parameters if provided
@@ -1196,13 +1238,25 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
 /**
  * Images Tab
  */
-const ImagesTab = ({ images, contentId, onImageGenerated, onImageClick }) => (
+const ImagesTab = ({ images, contentId, onImageGenerated, onImageClick, onUpdateImageStatus, showArchived, setShowArchived }) => (
   <div className="space-y-4 pb-4">
     {/* Ideogram Image Generator */}
     <IdeogramImageGenerator 
       contentId={contentId}
       onImageGenerated={onImageGenerated}
     />
+
+    {/* Filter for Archived Images */}
+    <div className="flex justify-end items-center mb-4">
+      <label htmlFor="showArchivedToggle" className="mr-2 text-sm text-gray-600">Show Archived Images:</label>
+      <input 
+        type="checkbox" 
+        id="showArchivedToggle"
+        checked={showArchived}
+        onChange={(e) => setShowArchived(e.target.checked)}
+        className="form-checkbox h-5 w-5 text-blue-600 transition duration-150 ease-in-out rounded"
+      />
+    </div>
 
     {/* Existing Images */}
     {images.length === 0 ? (
@@ -1225,7 +1279,7 @@ const ImagesTab = ({ images, contentId, onImageGenerated, onImageClick }) => (
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {images.map((image, index) => (
-              <div key={index} className="relative group cursor-pointer" onClick={() => onImageClick && onImageClick(index)}>
+              <div key={image.id || index} className="relative group cursor-pointer" onClick={() => onImageClick && onImageClick(index)}>
                 <div className="aspect-square rounded-lg overflow-hidden bg-gray-200 border hover:border-blue-300 transition-colors">
                   <img
                     src={image.sirvUrl}
@@ -1236,34 +1290,55 @@ const ImagesTab = ({ images, contentId, onImageGenerated, onImageClick }) => (
                       e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjNmNGY2Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNHB4IiBmaWxsPSIjNjU3Mzg5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+SW1hZ2UgZXJyb3I8L3RleHQ+PC9zdmc+';
                     }}
                   />
+                  {image.status === 'archived' && (
+                    <div className="absolute inset-0 bg-gray-700 bg-opacity-60 flex items-center justify-center">
+                      <Badge variant="destructive" className="text-xs bg-gray-800 text-white opacity-90">
+                        <Archive className="w-3 h-3 mr-1" /> Archived
+                      </Badge>
+                    </div>
+                  )}
                 </div>
-                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-75 transition-all duration-200 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
+                <div className={`absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-75 transition-all duration-200 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 ${image.status === 'archived' ? 'group-hover:bg-opacity-85' : ''}`}>
                   <div className="text-white text-center p-2">
-                    <div className="text-xs font-medium mb-1">#{index + 1}</div>
+                    <div className="text-xs font-medium mb-1">#{index + 1} ({image.status || 'pending_review'})</div>
                     <div className="text-xs text-gray-200 line-clamp-2 mb-2">{image.altText}</div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 items-center">
                       <Button
                         size="sm"
                         variant="secondary"
-                        className="h-6 px-2 text-xs"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          window.open(image.sirvUrl, '_blank');
-                        }}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="h-6 px-2 text-xs"
+                        className="h-7 px-2 text-xs"
                         onClick={(e) => {
                           e.stopPropagation();
                           onImageClick && onImageClick(index);
                         }}
                       >
-                        <Eye className="w-3 h-3" />
+                        <Eye className="w-3 h-3 mr-1" /> View
                       </Button>
+                      {image.status !== 'archived' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs bg-yellow-500 hover:bg-yellow-600 text-white border-yellow-600"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUpdateImageStatus(image.id, 'archived');
+                          }}
+                        >
+                          <Archive className="w-3 h-3 mr-1" /> Archive
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs bg-green-500 hover:bg-green-600 text-white border-green-600"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUpdateImageStatus(image.id, 'pending_review'); // Or 'approved' if it was previously
+                          }}
+                        >
+                          <ExternalLink className="w-3 h-3 mr-1" /> Unarchive
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
