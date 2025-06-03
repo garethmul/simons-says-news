@@ -467,8 +467,29 @@ class ImageService {
       console.log(`🔍 Ideogram prompt: "${prompt.substring(0, 100)}..."`);
       console.log(`🎯 Model: ${apiModel} (${modelVersion}), Style: ${styleType}, Aspect: ${aspectRatio}, Magic: ${magicPrompt}`);
 
+      // Determine the correct API endpoint based on model version
+      let apiEndpoint;
+      switch (modelVersion) {
+        case 'v1':
+        case 'v1.0':
+        case 'v2':
+        case 'v2.0':
+        case 'v2a':
+          // Legacy endpoint for v1 and v2 models
+          apiEndpoint = 'https://api.ideogram.ai/generate';
+          break;
+        case 'v3':
+        case 'v3.0':
+        default:
+          // New endpoint for v3 models
+          apiEndpoint = 'https://api.ideogram.ai/v1/ideogram-v3/generate';
+          break;
+      }
+
+      console.log(`🔗 Using API endpoint: ${apiEndpoint}`);
+
       const response = await axios.post(
-        'https://api.ideogram.ai/v1/ideogram-v3/generate',
+        apiEndpoint,
         formData,
         {
           ...this.axiosConfig,
