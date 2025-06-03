@@ -123,7 +123,7 @@ export const useProjectEdenData = () => {
         const data = await archivedCountRes.json();
         contentCounts.archivedContent = data.totalCount || data.count || 0;
       }
-      
+
       if (rejectedCountRes.ok) {
         const data = await rejectedCountRes.json();
         contentCounts.rejectedContent = data.totalCount || data.count || 0;
@@ -236,7 +236,7 @@ export const useProjectEdenData = () => {
                 ...prev, 
                 articlesAnalyzed: articlesData.totalCount || articlesData.articles?.length || 0,
                 totalArticlesProcessed: articlesData.totalCount || articlesData.articles?.length || 0
-              }));
+      }));
             }
             setLoadedTabs(prev => new Set([...prev, 'articles']));
           }
@@ -255,7 +255,7 @@ export const useProjectEdenData = () => {
       }
       
       console.log(`✅ Tab data loaded: ${tabName}`);
-      
+
     } catch (err) {
       console.error(`❌ Error loading ${tabName} data:`, err);
     } finally {

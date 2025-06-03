@@ -21,10 +21,12 @@ import {
   Archive,
   Wand2,
   Plus,
-  Loader2
+  Loader2,
+  Eye
 } from 'lucide-react';
 import { formatDate, getDaysAgo, parseKeywords } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
+import { useAccount } from '../../contexts/AccountContext';
 
 /**
  * Comprehensive Detail Modal Component
@@ -49,8 +51,14 @@ const DetailModal = ({
 }) => {
   // ALL hooks must be called before any conditional logic
   const { getContentTypeName, getContentTypeIcon } = useContentTypes();
+  const { withAccountContext } = useAccount();
   const [activeTab, setActiveTab] = useState('content');
   const [currentImages, setCurrentImages] = useState([]);
+  const [options, setOptions] = useState(null);
+  const [accountSettings, setAccountSettings] = useState(null);
+  const [showImageViewer, setShowImageViewer] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [imageMetadata, setImageMetadata] = useState([]);
 
   // Handle Escape key to close modal and body scroll management
   useEffect(() => {
@@ -76,23 +84,91 @@ const DetailModal = ({
     };
   }, [showModal, selectedContent, onClose]);
 
-  // Update current images when selectedContent changes
-  useEffect(() => {
-    if (selectedContent?.images) {
-      setCurrentImages(selectedContent.images);
+  // Function to fetch latest images for content
+  const fetchLatestImages = async (contentId) => {
+    try {
+      const response = await fetch(`/api/eden/content/${contentId}/images`, withAccountContext());
+      if (response.ok) {
+        const data = await response.json();
+        return data.images || [];
+      } else {
+        console.warn('Failed to fetch latest images, using fallback. Status:', response.status);
+        return selectedContent?.images || [];
+      }
+    } catch (error) {
+      console.warn('Error fetching latest images, using fallback:', error.message);
+      return selectedContent?.images || [];
     }
-  }, [selectedContent]);
+  };
+
+  // Update current images when selectedContent changes and fetch latest from database
+  useEffect(() => {
+    if (selectedContent?.gen_article_id) {
+      // First set the existing images immediately
+      setCurrentImages(selectedContent.images || []);
+      
+      // Then fetch the latest images from the database
+      fetchLatestImages(selectedContent.gen_article_id).then(latestImages => {
+        setCurrentImages(latestImages);
+      });
+    }
+  }, [selectedContent, withAccountContext]);
+
+  // Handle image click to open viewer
+  const handleImageClick = async (imageIndex) => {
+    setSelectedImageIndex(imageIndex);
+    setShowImageViewer(true);
+    
+    // Fetch detailed metadata for all images if not already loaded
+    if (imageMetadata.length === 0 && selectedContent?.gen_article_id) {
+      try {
+        const response = await fetch(`/api/eden/images/generation-history`, withAccountContext());
+        if (response.ok) {
+          const data = await response.json();
+          // Filter metadata for this specific content
+          const contentMetadata = data.history.filter(item => 
+            item.contentId === selectedContent.gen_article_id
+          );
+          setImageMetadata(contentMetadata);
+        }
+      } catch (error) {
+        console.warn('Could not load image metadata:', error);
+        setImageMetadata([]);
+      }
+    }
+  };
 
   // Handle new image generation
   const handleImageGenerated = (newImage) => {
+    console.log('📸 Handling image generation result:', newImage);
+    
+    // Check if this is a signal to refresh all images
+    if (newImage === 'REFRESH_ALL_IMAGES') {
+      console.log('🔄 Refreshing all images from database...');
+      if (selectedContent?.gen_article_id) {
+        fetchLatestImages(selectedContent.gen_article_id).then(latestImages => {
+          setCurrentImages(latestImages);
+          console.log(`✅ Refreshed images: ${latestImages.length} total images loaded`);
+        });
+      }
+      return;
+    }
+    
+    // Handle single image addition (original logic)
+    console.log('📸 Adding new generated image:', newImage);
+    
     setCurrentImages(prevImages => [
       ...prevImages,
       {
-        ...newImage,
-        // Ensure it has the right structure
-        sirvUrl: newImage.sirvUrl,
-        altText: newImage.altText,
-        source: 'ideogram'
+        // Map the API response structure to the expected UI structure
+        sirvUrl: newImage.url || newImage.sirvUrl || '', // API returns 'url', UI expects 'sirvUrl'
+        altText: newImage.altText || newImage.alt_text || 'AI Generated Image',
+        source: 'ideogram', // Mark as AI-generated
+        query: 'AI Generated', // For the badge display
+        // Include metadata for future reference
+        id: newImage.id || `temp_${Date.now()}`,
+        metadata: newImage.metadata || {},
+        created: new Date().toISOString()
       }
     ]);
   };
@@ -186,7 +262,12 @@ const DetailModal = ({
               </TabsContent>
 
               <TabsContent value="images" className="mt-0 h-full">
-                <ImagesTab images={currentImages} contentId={selectedContent.gen_article_id} onImageGenerated={handleImageGenerated} />
+                <ImagesTab 
+                  images={currentImages} 
+                  contentId={selectedContent.gen_article_id} 
+                  onImageGenerated={handleImageGenerated}
+                  onImageClick={handleImageClick}
+                />
               </TabsContent>
 
               <TabsContent value="source" className="mt-0 h-full">
@@ -331,6 +412,17 @@ const DetailModal = ({
           </Button>
         </div>
       </div>
+
+      {/* Image Viewer Modal */}
+      {showImageViewer && (
+        <ImageViewerModal
+          images={currentImages}
+          selectedIndex={selectedImageIndex}
+          metadata={imageMetadata}
+          onClose={() => setShowImageViewer(false)}
+          onIndexChange={setSelectedImageIndex}
+        />
+      )}
     </div>
   );
 };
@@ -515,63 +607,186 @@ const PrayerPointsTab = ({ prayerPoints }) => (
  * Ideogram Image Generator Component
  */
 const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
+  const { withAccountContext } = useAccount();
   const [isGenerating, setIsGenerating] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     prompt: '',
+    seed: '',
+    resolution: '',
     aspectRatio: '16:9',
-    styleType: 'REALISTIC',
-    magicPrompt: 'ON',
-    useChristianPrompt: false
+    renderingSpeed: 'DEFAULT',
+    magicPrompt: 'AUTO',
+    negativePrompt: '',
+    numImages: 1,
+    styleType: 'GENERAL',
+    styleCodes: '',
+    selectedColorTemplate: '',
+    modelVersion: 'v2' // Default to v2 to get ANIME and 3D styles
   });
   const [options, setOptions] = useState(null);
+  const [accountSettings, setAccountSettings] = useState(null);
 
-  // Load Ideogram options when component mounts
+  // Load Ideogram options and account settings when component mounts
   useEffect(() => {
-    const loadOptions = async () => {
+    const loadData = async () => {
       try {
-        const response = await fetch('/api/eden/images/ideogram/options');
-        if (response.ok) {
-          const data = await response.json();
-          setOptions(data.options);
+        // Load Ideogram options with current model version
+        const optionsResponse = await fetch(`/api/eden/images/ideogram/options?modelVersion=${formData.modelVersion}`);
+        if (optionsResponse.ok) {
+          const optionsData = await optionsResponse.json();
+          setOptions(optionsData.options);
+        }
+
+        // Load account image generation settings
+        const settingsResponse = await fetch('/api/eden/settings/image-generation', withAccountContext());
+        if (settingsResponse.ok) {
+          const settingsData = await settingsResponse.json();
+          setAccountSettings(settingsData.settings);
+          
+          // Apply account defaults to form
+          if (settingsData.settings?.defaults) {
+            const defaults = settingsData.settings.defaults;
+            
+            // Validate style type against allowed Ideogram styles for current model
+            const validStyleTypes = optionsData?.options?.styles?.map(s => s.value) || ['AUTO', 'GENERAL', 'REALISTIC', 'DESIGN'];
+            const validatedStyleType = validStyleTypes.includes(defaults.styleType) 
+              ? defaults.styleType 
+              : 'GENERAL'; // fallback to GENERAL if invalid
+            
+            setFormData(prev => ({
+              ...prev,
+              aspectRatio: defaults.aspectRatio || prev.aspectRatio,
+              renderingSpeed: defaults.renderingSpeed || prev.renderingSpeed,
+              magicPrompt: defaults.magicPrompt || prev.magicPrompt,
+              styleType: validatedStyleType,
+              negativePrompt: defaults.negativePrompt || prev.negativePrompt,
+              numImages: defaults.numImages || prev.numImages
+            }));
+          }
+          
+          // Load last selected color template from localStorage
+          const lastSelectedTemplate = localStorage.getItem('ideogram-last-color-template') || '';
+          if (lastSelectedTemplate && settingsData.settings?.brandColors?.some(color => color.name === lastSelectedTemplate)) {
+            setFormData(prev => ({
+              ...prev,
+              selectedColorTemplate: lastSelectedTemplate
+            }));
+          }
         }
       } catch (error) {
-        console.error('Failed to load Ideogram options:', error);
+        console.error('Failed to load generation data:', error);
       }
     };
 
-    if (showForm && !options) {
-      loadOptions();
+    if (showForm && (!options || options.modelVersion !== formData.modelVersion)) {
+      loadData();
     }
-  }, [showForm, options]);
+  }, [showForm, formData.modelVersion, options, accountSettings, withAccountContext]);
 
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const response = await fetch(`/api/eden/images/generate-for-content/${contentId}`, {
+      // Prepare generation payload
+      const payload = {
+        prompt: formData.prompt.trim(),
+        aspectRatio: formData.aspectRatio,
+        renderingSpeed: formData.renderingSpeed,
+        magicPrompt: formData.magicPrompt,
+        styleType: formData.styleType,
+        numImages: parseInt(formData.numImages)
+      };
+
+      // Add optional parameters if provided
+      if (formData.seed) payload.seed = parseInt(formData.seed);
+      if (formData.resolution) payload.resolution = formData.resolution;
+      if (formData.negativePrompt.trim()) payload.negativePrompt = formData.negativePrompt.trim();
+      if (formData.styleCodes.trim()) payload.styleCodes = formData.styleCodes.trim().split(',').map(s => s.trim());
+      
+      // Handle selected color template
+      if (formData.selectedColorTemplate && accountSettings?.brandColors?.length > 0) {
+        const selectedTemplate = accountSettings.brandColors.find(template => template.name === formData.selectedColorTemplate);
+        if (selectedTemplate) {
+          payload.useAccountColors = true;
+          payload.selectedColorTemplate = selectedTemplate;
+          // Save the selection to localStorage
+          localStorage.setItem('ideogram-last-color-template', formData.selectedColorTemplate);
+        }
+      }
+
+      // Apply account prompt prefix/suffix if available
+      if (accountSettings?.promptPrefix || accountSettings?.promptSuffix) {
+        const prefix = accountSettings.promptPrefix || '';
+        const suffix = accountSettings.promptSuffix || '';
+        payload.prompt = `${prefix} ${payload.prompt} ${suffix}`.trim();
+      }
+
+      const response = await fetch(`/api/eden/images/generate-for-content/${contentId}`, withAccountContext({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData)
-      });
+        body: JSON.stringify(payload)
+      }));
 
       if (response.ok) {
         const result = await response.json();
         console.log('✅ Ideogram image generated:', result);
         
-        // Call the callback to refresh the images
-        if (onImageGenerated) {
-          onImageGenerated(result.image);
+        // Show detailed generation information to user
+        const generationInfo = result.generation;
+        let alertMessage = `✅ Image generated successfully!\n\n`;
+        
+        alertMessage += `📝 Final Prompt:\n"${generationInfo.finalPrompt?.substring(0, 150)}..."\n\n`;
+        
+        alertMessage += `📊 Generation Details:\n`;
+        alertMessage += `• Style: ${generationInfo.parameters.styleType}\n`;
+        alertMessage += `• Aspect Ratio: ${generationInfo.parameters.aspectRatio}\n`;
+        alertMessage += `• Rendering Speed: ${generationInfo.parameters.renderingSpeed}\n`;
+        alertMessage += `• Magic Prompt: ${generationInfo.parameters.magicPrompt}\n`;
+        alertMessage += `• Resolution: ${generationInfo.metadata.resolution}\n`;
+        alertMessage += `• Generation Time: ${generationInfo.metadata.generationTimeSeconds?.toFixed(1)}s\n`;
+        alertMessage += `• Estimated Cost: $${generationInfo.metadata.estimatedCostUSD?.toFixed(3)} USD\n`;
+        alertMessage += `• Safe Content: ${generationInfo.metadata.isImageSafe ? 'Yes' : 'No'}`;
+        
+        if (generationInfo.metadata.seed) {
+          alertMessage += `\n• Seed: ${generationInfo.metadata.seed}`;
+        }
+        
+        alert(alertMessage);
+        
+        // For multiple images, trigger a full refresh instead of using the callback
+        if (result.images && result.images.length > 1) {
+          console.log(`🖼️ Multiple images generated (${result.images.length}), triggering refresh...`);
+          // Signal the parent to refresh all images from database
+          if (onImageGenerated) {
+            onImageGenerated('REFRESH_ALL_IMAGES'); // Special signal to trigger full refresh
+          }
+        } else {
+          // Single image - use the callback
+          if (onImageGenerated) {
+            onImageGenerated(result.image);
+          }
         }
 
         // Reset form and close
         setFormData({
           prompt: '',
-          aspectRatio: '16:9',
-          styleType: 'REALISTIC',
-          magicPrompt: 'ON',
-          useChristianPrompt: false
+          seed: '',
+          resolution: '',
+          aspectRatio: accountSettings?.defaults?.aspectRatio || '16:9',
+          renderingSpeed: accountSettings?.defaults?.renderingSpeed || 'DEFAULT',
+          magicPrompt: accountSettings?.defaults?.magicPrompt || 'AUTO',
+          negativePrompt: accountSettings?.defaults?.negativePrompt || '',
+          numImages: accountSettings?.defaults?.numImages || 1,
+          styleType: (() => {
+            const validStyleTypes = ['AUTO', 'GENERAL', 'REALISTIC', 'DESIGN', 'CUSTOM'];
+            const defaultStyle = accountSettings?.defaults?.styleType || 'GENERAL';
+            return validStyleTypes.includes(defaultStyle) ? defaultStyle : 'GENERAL';
+          })(),
+          styleCodes: '',
+          selectedColorTemplate: '',
+          modelVersion: 'v2'
         });
         setShowForm(false);
       } else {
@@ -592,6 +807,15 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
       ...prev,
       [field]: value
     }));
+    
+    // Save color template selection to localStorage
+    if (field === 'selectedColorTemplate') {
+      if (value) {
+        localStorage.setItem('ideogram-last-color-template', value);
+      } else {
+        localStorage.removeItem('ideogram-last-color-template');
+      }
+    }
   };
 
   if (!showForm) {
@@ -599,9 +823,9 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
       <div className="mb-4 p-4 border-2 border-dashed border-gray-300 rounded-lg text-center">
         <div className="flex flex-col items-center gap-2">
           <Wand2 className="w-8 h-8 text-gray-400" />
-          <h3 className="text-sm font-medium text-gray-700">Generate Custom Image</h3>
+          <h3 className="text-sm font-medium text-gray-700">Generate Custom AI Image</h3>
           <p className="text-xs text-gray-500 mb-3">
-            Use Ideogram.ai to create custom images tailored to your content
+            Use Ideogram.ai to create custom images with advanced controls
           </p>
           <Button 
             onClick={() => setShowForm(true)}
@@ -622,7 +846,7 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Wand2 className="w-5 h-5 text-blue-600" />
-          <h3 className="text-sm font-medium text-blue-900">Generate Custom Image</h3>
+          <h3 className="text-sm font-medium text-blue-900">Generate Custom AI Image</h3>
         </div>
         <Button
           onClick={() => setShowForm(false)}
@@ -635,114 +859,305 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
       </div>
 
       <div className="space-y-4">
-        {/* Christian Auto-Prompt Toggle */}
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="useChristianPrompt"
-            checked={formData.useChristianPrompt}
-            onChange={(e) => handleInputChange('useChristianPrompt', e.target.checked)}
-            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-          />
-          <label htmlFor="useChristianPrompt" className="text-sm text-gray-700">
-            Use AI-generated Christian theme prompt (based on article content)
+        {/* Model Version Selection */}
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+          <label className="block text-sm font-medium text-blue-900 mb-2">
+            🎨 Ideogram Model Version
           </label>
+          <select
+            value={formData.modelVersion}
+            onChange={(e) => {
+              handleInputChange('modelVersion', e.target.value);
+              // Clear options to trigger reload
+              setOptions(null);
+            }}
+            className="w-full px-3 py-2 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+          >
+            <option value="v3">Version 3.0 (Latest, Best Quality) - 4 styles</option>
+            <option value="v2">Version 2.0/2a (ANIME + 3D) - 6 styles</option>
+            <option value="v1">Version 1.0 (Most Styles) - 20+ styles</option>
+          </select>
+          <p className="text-xs text-blue-700 mt-1">
+            {formData.modelVersion === 'v3' && 'Latest model with highest quality. Limited to 4 core styles.'}
+            {formData.modelVersion === 'v2' && 'Includes ANIME and 3D styles you remember! Good balance of quality and options.'}
+            {formData.modelVersion === 'v1' && 'Widest style selection including Cinematic, Dark Fantasy, Graffiti, and more.'}
+          </p>
+        </div>
+        
+        {/* Main Prompt */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Image Prompt *
+          </label>
+          <textarea
+            value={formData.prompt}
+            onChange={(e) => handleInputChange('prompt', e.target.value)}
+            placeholder="Describe the image you want to generate..."
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            rows={3}
+            required
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            {accountSettings?.promptPrefix && (
+              <span className="text-green-600">Prefix: "{accountSettings.promptPrefix}" will be added. </span>
+            )}
+            {accountSettings?.promptSuffix && (
+              <span className="text-green-600">Suffix: "{accountSettings.promptSuffix}" will be added.</span>
+            )}
+          </p>
         </div>
 
-        {/* Custom Prompt */}
-        {!formData.useChristianPrompt && (
+        {/* Account Brand Colors */}
+        {accountSettings?.brandColors?.length > 0 && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Image Prompt *
+              Brand Color Template
             </label>
-            <textarea
-              value={formData.prompt}
-              onChange={(e) => handleInputChange('prompt', e.target.value)}
-              placeholder="Describe the image you want to generate..."
+            <select
+              value={formData.selectedColorTemplate}
+              onChange={(e) => handleInputChange('selectedColorTemplate', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              rows={3}
-              required={!formData.useChristianPrompt}
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Be specific and descriptive. Avoid mentioning Jesus' face or overly religious symbols.
-            </p>
+            >
+              <option value="">None - Use default colors</option>
+              {accountSettings.brandColors.map((colorSet, index) => (
+                <option key={index} value={colorSet.name}>
+                  {colorSet.name} ({colorSet.colors.length} color{colorSet.colors.length !== 1 ? 's' : ''})
+                </option>
+              ))}
+            </select>
+            {formData.selectedColorTemplate && (
+              <div className="mt-2">
+                <div className="text-xs text-gray-600 mb-1">Selected template colors:</div>
+                <div className="flex flex-wrap gap-2">
+                  {accountSettings.brandColors
+                    .filter(colorSet => colorSet.name === formData.selectedColorTemplate)
+                    .map((colorSet, index) => (
+                      <div key={index} className="flex items-center gap-1 px-2 py-1 bg-white rounded border">
+                        <span className="text-xs font-medium">{colorSet.name}:</span>
+                        {colorSet.colors.map((color, colorIndex) => (
+                          <div
+                            key={colorIndex}
+                            className="w-4 h-4 rounded border border-gray-300"
+                            style={{ backgroundColor: color }}
+                            title={color}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Additional Prompt for Christian Auto-Prompt */}
-        {formData.useChristianPrompt && (
+        {/* Advanced Options */}
+        {options && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Aspect Ratio vs Resolution */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Aspect Ratio
+                </label>
+                <select
+                  value={formData.aspectRatio}
+                  onChange={(e) => handleInputChange('aspectRatio', e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={!!formData.resolution}
+                >
+                  {options.aspectRatios.map(ratio => (
+                    <option key={ratio.value} value={ratio.value}>
+                      {ratio.label}
+                    </option>
+                  ))}
+                </select>
+                {formData.resolution && (
+                  <p className="text-xs text-gray-500 mt-1">Disabled when using specific resolution</p>
+                )}
+              </div>
+
+              {/* Resolution (Advanced) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Specific Resolution (Advanced)
+                </label>
+                <select
+                  value={formData.resolution}
+                  onChange={(e) => handleInputChange('resolution', e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">Use Aspect Ratio Instead</option>
+                  {options.resolutions && options.resolutions.map(res => (
+                    <option key={res.value} value={res.value}>
+                      {res.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Override aspect ratio with exact pixel dimensions
+                </p>
+              </div>
+
+              {/* Style Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Style Type
+                </label>
+                <select
+                  value={formData.styleType}
+                  onChange={(e) => handleInputChange('styleType', e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {options.styles.map(style => (
+                    <option key={style.value} value={style.value}>
+                      {style.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Rendering Speed */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rendering Speed
+                </label>
+                <select
+                  value={formData.renderingSpeed}
+                  onChange={(e) => handleInputChange('renderingSpeed', e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="TURBO">Turbo (Fastest)</option>
+                  <option value="DEFAULT">Default</option>
+                  <option value="QUALITY">Quality (Slowest, Best)</option>
+                </select>
+              </div>
+
+              {/* Magic Prompt */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Magic Prompt
+                </label>
+                <select
+                  value={formData.magicPrompt}
+                  onChange={(e) => handleInputChange('magicPrompt', e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="AUTO">Auto</option>
+                  <option value="ON">On</option>
+                  <option value="OFF">Off</option>
+                </select>
+              </div>
+
+              {/* Number of Images */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Number of Images
+                </label>
+                <select
+                  value={formData.numImages}
+                  onChange={(e) => handleInputChange('numImages', e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {[1,2,3,4].map(num => (
+                    <option key={num} value={num}>{num} image{num > 1 ? 's' : ''}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Seed */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Seed (Optional)
+                </label>
+                <input
+                  type="number"
+                  value={formData.seed}
+                  onChange={(e) => handleInputChange('seed', e.target.value)}
+                  placeholder="Leave empty for random"
+                  min="0"
+                  max="2147483647"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Advanced Text Inputs */}
+        <div className="space-y-3">
+          {/* Negative Prompt */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Additional Details (Optional)
+              Negative Prompt (Optional)
             </label>
             <input
               type="text"
-              value={formData.prompt}
-              onChange={(e) => handleInputChange('prompt', e.target.value)}
-              placeholder="Add specific elements or style preferences..."
+              value={formData.negativePrompt}
+              onChange={(e) => handleInputChange('negativePrompt', e.target.value)}
+              placeholder="Describe what to exclude from the image..."
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
-        )}
 
-        {/* Generation Options */}
-        {options && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Aspect Ratio */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Aspect Ratio
-              </label>
-              <select
-                value={formData.aspectRatio}
-                onChange={(e) => handleInputChange('aspectRatio', e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                {options.aspectRatios.map(ratio => (
-                  <option key={ratio.value} value={ratio.value}>
-                    {ratio.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Style Type */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Style
-              </label>
-              <select
-                value={formData.styleType}
-                onChange={(e) => handleInputChange('styleType', e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                {options.styles.map(style => (
-                  <option key={style.value} value={style.value}>
-                    {style.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Magic Prompt */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Prompt Enhancement
-              </label>
-              <select
-                value={formData.magicPrompt}
-                onChange={(e) => handleInputChange('magicPrompt', e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                {options.magicPromptOptions.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Style Codes */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Style Codes (Optional)
+            </label>
+            <input
+              type="text"
+              value={formData.styleCodes}
+              onChange={(e) => handleInputChange('styleCodes', e.target.value)}
+              placeholder="8-character hex codes, comma separated (e.g., 1A2B3C4D, 5E6F7A8B)"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Advanced: Use 8-character hexadecimal style codes for precise style control
+            </p>
           </div>
-        )}
+
+          {/* Preferred Style Codes */}
+          {accountSettings?.preferredStyleCodes?.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Your Preferred Styles
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {accountSettings.preferredStyleCodes.map((styleCode, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => {
+                      if (styleCode.type === 'seed') {
+                        handleInputChange('seed', styleCode.value);
+                      } else {
+                        // Add to style codes
+                        const currentCodes = formData.styleCodes ? formData.styleCodes.split(',').map(s => s.trim()) : [];
+                        if (!currentCodes.includes(styleCode.value)) {
+                          const newCodes = [...currentCodes, styleCode.value].filter(Boolean).join(', ');
+                          handleInputChange('styleCodes', newCodes);
+                        }
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-md transition-colors"
+                  >
+                    <span className="font-mono">
+                      {styleCode.type === 'seed' ? `Seed: ${styleCode.value}` : styleCode.value}
+                    </span>
+                    {styleCode.prompt && (
+                      <span className="text-blue-600" title={styleCode.prompt}>
+                        💡
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Click to apply your saved preferred styles to this generation
+              </p>
+            </div>
+          )}
+        </div>
 
         {/* Generate Button */}
         <div className="flex justify-end gap-2 pt-2">
@@ -756,7 +1171,7 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
           </Button>
           <Button
             onClick={handleGenerate}
-            disabled={isGenerating || (!formData.useChristianPrompt && !formData.prompt.trim())}
+            disabled={isGenerating || !formData.prompt.trim()}
             size="sm"
             className="flex items-center gap-2"
           >
@@ -768,7 +1183,7 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
             ) : (
               <>
                 <Wand2 className="w-4 h-4" />
-                Generate Image
+                Generate {formData.numImages > 1 ? `${formData.numImages} Images` : 'Image'}
               </>
             )}
           </Button>
@@ -781,7 +1196,7 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
 /**
  * Images Tab
  */
-const ImagesTab = ({ images, contentId, onImageGenerated }) => (
+const ImagesTab = ({ images, contentId, onImageGenerated, onImageClick }) => (
   <div className="space-y-4 pb-4">
     {/* Ideogram Image Generator */}
     <IdeogramImageGenerator 
@@ -810,8 +1225,8 @@ const ImagesTab = ({ images, contentId, onImageGenerated }) => (
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {images.map((image, index) => (
-              <div key={index} className="relative group">
-                <div className="aspect-square rounded-lg overflow-hidden bg-gray-200 border">
+              <div key={index} className="relative group cursor-pointer" onClick={() => onImageClick && onImageClick(index)}>
+                <div className="aspect-square rounded-lg overflow-hidden bg-gray-200 border hover:border-blue-300 transition-colors">
                   <img
                     src={image.sirvUrl}
                     alt={image.altText}
@@ -826,14 +1241,30 @@ const ImagesTab = ({ images, contentId, onImageGenerated }) => (
                   <div className="text-white text-center p-2">
                     <div className="text-xs font-medium mb-1">#{index + 1}</div>
                     <div className="text-xs text-gray-200 line-clamp-2 mb-2">{image.altText}</div>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => window.open(image.sirvUrl, '_blank')}
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-6 px-2 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.open(image.sirvUrl, '_blank');
+                        }}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-6 px-2 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onImageClick && onImageClick(index);
+                        }}
+                      >
+                        <Eye className="w-3 h-3" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 {/* Source indicator */}
@@ -924,6 +1355,360 @@ const SourceArticleTab = ({ sourceArticle }) => {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+};
+
+/**
+ * Image Viewer Modal with Carousel and Metadata
+ */
+const ImageViewerModal = ({ images, selectedIndex, metadata, onClose, onIndexChange }) => {
+  const [currentIndex, setCurrentIndex] = useState(selectedIndex);
+
+  // Handle keyboard navigation
+  useEffect(() => {
+    const handleKeydown = (e) => {
+      switch (e.key) {
+        case 'Escape':
+          onClose();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          goToPrevious();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          goToNext();
+          break;
+      }
+    };
+
+    document.addEventListener('keydown', handleKeydown);
+    return () => document.removeEventListener('keydown', handleKeydown);
+  }, [currentIndex]);
+
+  // Update currentIndex when selectedIndex changes
+  useEffect(() => {
+    setCurrentIndex(selectedIndex);
+  }, [selectedIndex]);
+
+  const goToPrevious = () => {
+    const newIndex = currentIndex > 0 ? currentIndex - 1 : images.length - 1;
+    setCurrentIndex(newIndex);
+    onIndexChange(newIndex);
+  };
+
+  const goToNext = () => {
+    const newIndex = currentIndex < images.length - 1 ? currentIndex + 1 : 0;
+    setCurrentIndex(newIndex);
+    onIndexChange(newIndex);
+  };
+
+  const currentImage = images[currentIndex];
+  const currentMetadata = metadata.find(m => 
+    m.result?.imageUrl === currentImage?.sirvUrl ||
+    m.metadata?.ideogramId === currentImage?.ideogramId
+  );
+
+  if (!currentImage) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center p-8 z-[60]" onClick={onClose}>
+      <div className="flex w-full h-full max-w-7xl max-h-[90vh] bg-white rounded-lg overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+        {/* Left Panel - Metadata */}
+        <div className="bg-white p-6 overflow-y-auto border-r border-gray-200" style={{ width: '45%', minWidth: '400px' }}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Image Details</h3>
+            <Button variant="ghost" size="sm" onClick={onClose} className="hover:bg-gray-100">
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+
+          {/* Basic Image Info */}
+          <div className="space-y-4">
+            <div>
+              <h4 className="font-medium text-gray-900 mb-2">Basic Information</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Image #{currentIndex + 1}</span>
+                  <span>{images.length} total</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Source:</span>
+                  <span className="capitalize">{currentImage.source}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Created:</span>
+                  <span>{formatDate(currentImage.created)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* AI Generation Metadata */}
+            {currentMetadata && (
+              <>
+                <div className="border-t pt-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Generation Details</h4>
+                  <div className="space-y-2 text-sm">
+                    {currentMetadata.prompts?.userPrompt && (
+                      <div>
+                        <span className="text-gray-600 block mb-1">User Prompt:</span>
+                        <p className="bg-gray-50 p-3 rounded text-sm mt-1 break-words leading-relaxed">
+                          {currentMetadata.prompts.userPrompt}
+                        </p>
+                      </div>
+                    )}
+                    {currentMetadata.prompts?.finalPrompt && (
+                      <div>
+                        <span className="text-gray-600 block mb-1">Final Prompt:</span>
+                        <p className="bg-gray-50 p-3 rounded text-sm mt-1 break-words leading-relaxed">
+                          {currentMetadata.prompts.finalPrompt}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h4 className="font-medium text-gray-900 mb-2">AI Parameters</h4>
+                  <div className="space-y-2 text-sm">
+                    {currentMetadata.parameters?.styleType && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Style:</span>
+                        <span className="capitalize">{currentMetadata.parameters.styleType.toLowerCase()}</span>
+                      </div>
+                    )}
+                    {currentMetadata.parameters?.aspectRatio && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Aspect Ratio:</span>
+                        <span>{currentMetadata.parameters.aspectRatio}</span>
+                      </div>
+                    )}
+                    {currentMetadata.parameters?.renderingSpeed && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Speed:</span>
+                        <span className="capitalize">{currentMetadata.parameters.renderingSpeed.toLowerCase()}</span>
+                      </div>
+                    )}
+                    {currentMetadata.parameters?.magicPrompt && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Magic Prompt:</span>
+                        <span>{currentMetadata.parameters.magicPrompt}</span>
+                      </div>
+                    )}
+                    {currentMetadata.result?.seed && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Seed:</span>
+                        <span className="font-mono text-xs">{currentMetadata.result.seed}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Generation Stats</h4>
+                  <div className="space-y-2 text-sm">
+                    {currentMetadata.metadata?.generationTimeSeconds && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Generation Time:</span>
+                        <span>{currentMetadata.metadata.generationTimeSeconds.toFixed(1)}s</span>
+                      </div>
+                    )}
+                    {currentMetadata.metadata?.estimatedCostUSD && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Estimated Cost:</span>
+                        <span>${currentMetadata.metadata.estimatedCostUSD.toFixed(3)}</span>
+                      </div>
+                    )}
+                    {currentMetadata.result?.resolution && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Resolution:</span>
+                        <span>{currentMetadata.result.resolution}</span>
+                      </div>
+                    )}
+                    {currentMetadata.result?.isImageSafe !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Safe Content:</span>
+                        <span className={currentMetadata.result.isImageSafe ? 'text-green-600' : 'text-red-600'}>
+                          {currentMetadata.result.isImageSafe ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Account Settings Used */}
+                {currentMetadata.metadata?.accountSettings && (
+                  <div className="border-t pt-4">
+                    <h4 className="font-medium text-gray-900 mb-2">Account Settings Applied</h4>
+                    <div className="space-y-2 text-sm">
+                      {currentMetadata.metadata.accountSettings.prefixUsed && (
+                        <div className="text-green-600">✓ Prompt prefix applied</div>
+                      )}
+                      {currentMetadata.metadata.accountSettings.suffixUsed && (
+                        <div className="text-green-600">✓ Prompt suffix applied</div>
+                      )}
+                      {currentMetadata.metadata.accountSettings.brandColorsUsed && (
+                        <div className="text-green-600">✓ Brand colors applied</div>
+                      )}
+                      {currentMetadata.metadata.accountSettings.selectedColorTemplate && (
+                        <div className="text-blue-600">
+                          Color template: {currentMetadata.metadata.accountSettings.selectedColorTemplate}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Alternative text */}
+            <div className="border-t pt-4">
+              <h4 className="font-medium text-gray-900 mb-2">Alt Text</h4>
+              <p className="text-sm text-gray-700 bg-gray-50 p-2 rounded">
+                {currentImage.altText}
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="border-t pt-4">
+              <h4 className="font-medium text-gray-900 mb-2">Actions</h4>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => window.open(currentImage.sirvUrl, '_blank')}
+                  className="flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Open Original
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(currentImage.sirvUrl);
+                    // You could add a toast notification here
+                  }}
+                  className="flex items-center gap-1"
+                >
+                  📋 Copy URL
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Panel - Image Display */}
+        <div className="flex flex-col bg-gray-900" style={{ width: '55%' }}>
+          {/* Navigation Header */}
+          <div className="bg-black bg-opacity-50 text-white p-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <span className="text-sm">
+                {currentIndex + 1} of {images.length}
+              </span>
+              {currentImage.source === 'ideogram' && (
+                <Badge variant="secondary" className="bg-purple-600 text-white">
+                  <Wand2 className="w-3 h-3 mr-1" />
+                  AI Generated
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={goToPrevious}
+                disabled={images.length <= 1}
+                className="text-white hover:bg-white hover:bg-opacity-20"
+              >
+                ← Previous
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={goToNext}
+                disabled={images.length <= 1}
+                className="text-white hover:bg-white hover:bg-opacity-20"
+              >
+                Next →
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClose}
+                className="text-white hover:bg-white hover:bg-opacity-20 ml-2"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Main Image Display */}
+          <div className="flex-1 flex items-center justify-center p-8 bg-gray-900">
+            <div className="relative max-w-full max-h-full">
+              <img
+                src={currentImage.sirvUrl}
+                alt={currentImage.altText}
+                className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+                onError={(e) => {
+                  e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMzMzIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNHB4IiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+SW1hZ2UgZXJyb3I8L3RleHQ+PC9zdmc+';
+                }}
+              />
+
+              {/* Navigation arrows overlay */}
+              {images.length > 1 && (
+                <>
+                  <button
+                    onClick={goToPrevious}
+                    className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-75 text-white p-3 rounded-full transition-all"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={goToNext}
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-75 text-white p-3 rounded-full transition-all"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Thumbnail Strip */}
+          {images.length > 1 && (
+            <div className="bg-black bg-opacity-50 p-4">
+              <div className="flex gap-2 justify-center overflow-x-auto max-w-full">
+                {images.map((image, index) => (
+                  <button
+                    key={index}
+                    onClick={() => {
+                      setCurrentIndex(index);
+                      onIndexChange(index);
+                    }}
+                    className={`flex-shrink-0 w-16 h-16 rounded overflow-hidden border-2 transition-all ${
+                      index === currentIndex 
+                        ? 'border-blue-400 opacity-100' 
+                        : 'border-transparent opacity-60 hover:opacity-80'
+                    }`}
+                  >
+                    <img
+                      src={image.sirvUrl}
+                      alt={`Thumbnail ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

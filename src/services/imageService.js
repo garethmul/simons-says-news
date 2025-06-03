@@ -409,7 +409,8 @@ class ImageService {
         negativePrompt = '',
         seed = null,
         numImages = 1,
-        renderingSpeed = 'DEFAULT'
+        renderingSpeed = 'DEFAULT',
+        modelVersion = 'v2'
       } = options;
 
       if (!prompt) {
@@ -424,11 +425,35 @@ class ImageService {
       formData.append('num_images', numImages.toString());
       formData.append('rendering_speed', renderingSpeed);
 
+      // Add model version parameter - map to API format
+      let apiModel;
+      switch (modelVersion) {
+        case 'v1':
+        case 'v1.0':
+          apiModel = 'V_1';
+          break;
+        case 'v2':
+        case 'v2.0':
+          apiModel = 'V_2';
+          break;
+        case 'v2a':
+          apiModel = 'V_2_TURBO';
+          break;
+        case 'v3':
+        case 'v3.0':
+        default:
+          apiModel = 'V_3'; // Default to latest
+          break;
+      }
+      formData.append('model', apiModel);
+
       // Use either resolution or aspect ratio, not both
       if (resolution) {
         formData.append('resolution', resolution);
       } else {
-        formData.append('aspect_ratio', aspectRatio);
+        // Convert aspect ratio format from 16:9 to 16x9 for Ideogram API
+        const ideogramAspectRatio = aspectRatio.replace(':', 'x');
+        formData.append('aspect_ratio', ideogramAspectRatio);
       }
 
       if (negativePrompt) {
@@ -440,7 +465,7 @@ class ImageService {
       }
 
       console.log(`🔍 Ideogram prompt: "${prompt.substring(0, 100)}..."`);
-      console.log(`🎯 Style: ${styleType}, Aspect: ${aspectRatio}, Magic: ${magicPrompt}`);
+      console.log(`🎯 Model: ${apiModel} (${modelVersion}), Style: ${styleType}, Aspect: ${aspectRatio}, Magic: ${magicPrompt}`);
 
       const response = await axios.post(
         'https://api.ideogram.ai/v1/ideogram-v3/generate',
@@ -479,60 +504,34 @@ class ImageService {
   }
 
   async generateChristianContentImage(articleTitle, articleContent, customPrompt = null) {
-    console.log('⛪ Generating Christian-themed image with Ideogram...');
+    console.log('⛪ Generating image with custom prompt...');
 
     try {
-      // Create a Christian-themed prompt if none provided
-      let prompt = customPrompt;
-      
-      if (!prompt) {
-        prompt = this.createChristianImagePrompt(articleTitle, articleContent);
+      // Use only the custom prompt provided
+      if (!customPrompt || !customPrompt.trim()) {
+        throw new Error('Custom prompt is required for image generation');
       }
 
-      // Add Christian content guidelines to negative prompt
-      const negativePrompt = 'Jesus face, crucifix, overly Catholic iconography, mystical symbols, occult imagery, abstract religious symbols, distorted Bible, inappropriate religious content';
-
       const options = {
-        prompt,
+        prompt: customPrompt.trim(),
         aspectRatio: '16:9',
         styleType: 'REALISTIC',
         magicPrompt: 'ON',
-        negativePrompt,
         numImages: 1,
         renderingSpeed: 'DEFAULT'
       };
 
       return await this.generateIdeogramImage(options);
     } catch (error) {
-      console.error('❌ Christian content image generation failed:', error.message);
+      console.error('❌ Custom image generation failed:', error.message);
       throw error;
     }
   }
 
+  // Deprecated - keeping for backward compatibility but will return simple fallback
   createChristianImagePrompt(title, content) {
-    // Extract key themes from title and content
-    const text = (title + ' ' + content).toLowerCase();
-    
-    let basePrompt = 'A warm, hopeful image with soft natural lighting showing ';
-    
-    // Add specific elements based on content
-    if (text.includes('prayer') || text.includes('pray')) {
-      basePrompt += 'diverse people with hands in prayer, peaceful expressions, ';
-    } else if (text.includes('bible') || text.includes('scripture')) {
-      basePrompt += 'an open Bible being read, warm candlelight, peaceful study setting, ';
-    } else if (text.includes('church') || text.includes('community')) {
-      basePrompt += 'people gathering in fellowship, diverse community, warm expressions, ';
-    } else if (text.includes('faith') || text.includes('hope')) {
-      basePrompt += 'sunrise breaking through clouds, path through peaceful landscape, symbols of hope, ';
-    } else if (text.includes('family')) {
-      basePrompt += 'diverse family praying together, peaceful home setting, ';
-    } else {
-      basePrompt += 'peaceful natural scene with warm golden light, representing hope and faith, ';
-    }
-
-    basePrompt += 'modern photography style, editorial quality, warm colors, natural expressions, authentic moments, high quality, professional lighting';
-
-    return basePrompt;
+    console.warn('⚠️ createChristianImagePrompt is deprecated. Use custom prompts with account prefix/suffix instead.');
+    return 'A warm, professional image with good lighting and composition';
   }
 
   async processIdeogramImageForContent(ideogramImage, contentId, accountId = null) {
@@ -581,28 +580,116 @@ class ImageService {
     }
   }
 
-  // Utility method to get available Ideogram styles
-  getIdeogramStyles() {
-    return [
-      { value: 'AUTO', label: 'Auto (System Decides)', description: 'Let Ideogram choose the best style' },
-      { value: 'GENERAL', label: 'General', description: 'Default versatile style' },
-      { value: 'REALISTIC', label: 'Realistic', description: 'Photorealistic images' },
-      { value: 'DESIGN', label: 'Design', description: 'Graphic design elements' },
-      { value: 'RENDER_3D', label: '3D Render', description: '3D rendered images' },
-      { value: 'ANIME', label: 'Anime', description: 'Anime-style illustrations' }
-    ];
+  // Utility method to get available Ideogram styles by model version
+  getIdeogramStyles(modelVersion = 'v2') {
+    switch (modelVersion) {
+      case 'v3':
+      case 'v3.0':
+        return [
+          { value: 'AUTO', label: 'Auto (System Decides)', description: 'Let Ideogram choose the best style automatically' },
+          { value: 'GENERAL', label: 'General', description: 'Versatile style for artistic works, sketches, digital art' },
+          { value: 'REALISTIC', label: 'Realistic', description: 'Photorealistic images with natural lighting' },
+          { value: 'DESIGN', label: 'Design', description: 'Graphic design elements, logos, promotional materials' }
+        ];
+      
+      case 'v2':
+      case 'v2.0':
+      case 'v2a':
+        return [
+          { value: 'AUTO', label: 'Auto (System Decides)', description: 'Let Ideogram choose the best style automatically' },
+          { value: 'GENERAL', label: 'General', description: 'Versatile style for artistic works, sketches, digital art' },
+          { value: 'REALISTIC', label: 'Realistic', description: 'Photorealistic images with natural lighting' },
+          { value: 'DESIGN', label: 'Design', description: 'Graphic design elements, logos, promotional materials' },
+          { value: '3D', label: '3D', description: 'Perfect for 3D characters, objects, and visual appeal' },
+          { value: 'ANIME', label: 'Anime', description: 'Ideal for anime-style images and characters' }
+        ];
+      
+      case 'v1':
+      case 'v1.0':
+        return [
+          { value: 'RANDOM', label: 'Random', description: 'AI randomly selects from vast style database' },
+          { value: 'GENERAL', label: 'General', description: 'Versatile style for most content' },
+          { value: 'REALISTIC', label: 'Realistic', description: 'Photorealistic images' },
+          { value: 'DESIGN', label: 'Design', description: 'Graphic design and illustrations' },
+          { value: '3D_RENDER', label: '3D Render', description: '3D rendered style' },
+          { value: 'ANIME', label: 'Anime', description: 'Anime and manga style' },
+          { value: 'ARCHITECTURE', label: 'Architecture', description: 'Architectural visualization' },
+          { value: 'CINEMATIC', label: 'Cinematic', description: 'Movie-like dramatic lighting' },
+          { value: 'CONCEPTUAL_ART', label: 'Conceptual Art', description: 'Abstract conceptual artwork' },
+          { value: 'DARK_FANTASY', label: 'Dark Fantasy', description: 'Gothic and dark fantasy themes' },
+          { value: 'FASHION', label: 'Fashion', description: 'Fashion photography and styling' },
+          { value: 'GRAFFITI', label: 'Graffiti', description: 'Street art and graffiti style' },
+          { value: 'ILLUSTRATION', label: 'Illustration', description: 'Digital illustration style' },
+          { value: 'PAINTING', label: 'Painting', description: 'Traditional painting techniques' },
+          { value: 'PHOTO', label: 'Photo', description: 'Photographic style' },
+          { value: 'PORTRAIT_PHOTOGRAPHY', label: 'Portrait Photography', description: 'Professional portrait style' },
+          { value: 'POSTER', label: 'Poster', description: 'Poster and advertisement design' },
+          { value: 'PRODUCT', label: 'Product', description: 'Product photography style' },
+          { value: 'TYPOGRAPHY', label: 'Typography', description: 'Text and typography focus' },
+          { value: 'UKIYO_E', label: 'Ukiyo-e', description: 'Traditional Japanese art style' },
+          { value: 'VIBRANT', label: 'Vibrant', description: 'Bright and colorful style' },
+          { value: 'WILDLIFE_PHOTOGRAPHY', label: 'Wildlife Photography', description: 'Nature and wildlife photography' }
+        ];
+      
+      default:
+        // Default to v3 styles
+        return this.getIdeogramStyles('v3');
+    }
   }
 
   // Utility method to get available aspect ratios
   getAspectRatios() {
     return [
-      { value: '1:1', label: 'Square (1:1)', description: 'Perfect for social media posts' },
-      { value: '16:9', label: 'Landscape (16:9)', description: 'Great for blog headers' },
-      { value: '9:16', label: 'Portrait (9:16)', description: 'Mobile-friendly format' },
+      { value: '1:1', label: 'Square (1:1)', description: 'Perfect for social media posts and profile images' },
+      { value: '16:9', label: 'Landscape (16:9)', description: 'Great for blog headers and wide displays' },
+      { value: '9:16', label: 'Portrait (9:16)', description: 'Mobile-friendly vertical format' },
       { value: '4:3', label: 'Standard (4:3)', description: 'Classic photo format' },
       { value: '3:2', label: 'Photo (3:2)', description: 'Traditional photography ratio' },
-      { value: '2:3', label: 'Tall Portrait (2:3)', description: 'Vertical content' },
-      { value: '3:1', label: 'Wide Banner (3:1)', description: 'Banner and header images' }
+      { value: '2:3', label: 'Tall Portrait (2:3)', description: 'Vertical content and posters' },
+      { value: '3:1', label: 'Wide Banner (3:1)', description: 'Banner and header images' },
+      { value: '1:3', label: 'Tall Banner (1:3)', description: 'Vertical banners and sidebars' },
+      { value: '4:5', label: 'Instagram Portrait (4:5)', description: 'Instagram portrait posts' },
+      { value: '5:4', label: 'Instagram Landscape (5:4)', description: 'Instagram landscape posts' },
+      { value: '9:21', label: 'Story Format (9:21)', description: 'Instagram/Facebook stories' },
+      { value: '21:9', label: 'Ultrawide (21:9)', description: 'Cinematic and ultrawide displays' },
+      { value: '2:1', label: 'Banner (2:1)', description: 'Web banners and covers' },
+      { value: '1:2', label: 'Vertical Banner (1:2)', description: 'Tall vertical content' },
+      { value: '3:4', label: 'Portrait Standard (3:4)', description: 'Standard portrait orientation' }
+    ];
+  }
+
+  // Utility method to get available resolutions (based on Ideogram API)
+  getResolutions() {
+    return [
+      // Square formats
+      { value: '1024x1024', label: '1024×1024 (1:1)', category: 'Square' },
+      { value: '1536x1536', label: '1536×1536 (1:1 HD)', category: 'Square' },
+      
+      // Landscape formats
+      { value: '1024x768', label: '1024×768 (4:3)', category: 'Landscape' },
+      { value: '1152x896', label: '1152×896 (9:7)', category: 'Landscape' },
+      { value: '1216x832', label: '1216×832 (19:13)', category: 'Landscape' },
+      { value: '1344x768', label: '1344×768 (7:4)', category: 'Landscape' },
+      { value: '1408x704', label: '1408×704 (2:1)', category: 'Landscape' },
+      { value: '1472x736', label: '1472×736 (2:1)', category: 'Landscape' },
+      { value: '1536x640', label: '1536×640 (12:5)', category: 'Landscape' },
+      { value: '1600x640', label: '1600×640 (5:2)', category: 'Landscape' },
+      { value: '1792x1024', label: '1792×1024 (7:4 HD)', category: 'Landscape' },
+      { value: '1984x1024', label: '1984×1024 (31:16)', category: 'Landscape' },
+      { value: '2048x1152', label: '2048×1152 (16:9 HD)', category: 'Landscape' },
+      
+      // Portrait formats
+      { value: '768x1024', label: '768×1024 (3:4)', category: 'Portrait' },
+      { value: '768x1344', label: '768×1344 (4:7)', category: 'Portrait' },
+      { value: '832x1216', label: '832×1216 (13:19)', category: 'Portrait' },
+      { value: '896x1152', label: '896×1152 (7:9)', category: 'Portrait' },
+      { value: '704x1408', label: '704×1408 (1:2)', category: 'Portrait' },
+      { value: '736x1472', label: '736×1472 (1:2)', category: 'Portrait' },
+      { value: '640x1536', label: '640×1536 (5:12)', category: 'Portrait' },
+      { value: '640x1600', label: '640×1600 (2:5)', category: 'Portrait' },
+      { value: '1024x1792', label: '1024×1792 (4:7 HD)', category: 'Portrait' },
+      { value: '1024x1984', label: '1024×1984 (16:31)', category: 'Portrait' },
+      { value: '1152x2048', label: '1152×2048 (9:16 HD)', category: 'Portrait' }
     ];
   }
 }

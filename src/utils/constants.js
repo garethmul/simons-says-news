@@ -47,7 +47,8 @@ export const TAB_ROUTES = {
   JOBS: 'jobs',
   SOURCES: 'sources',
   PROMPTS: 'prompts',
-  USERS: 'users'
+  USERS: 'users',
+  IMAGE_SETTINGS: 'image-settings'
 };
 
 export const API_ENDPOINTS = {

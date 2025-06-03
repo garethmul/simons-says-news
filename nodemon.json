@@ -12,7 +12,8 @@
     "src/App.jsx",
     "src/main.jsx",
     "src/index.css",
-    "*.test.js"
+    "*.test.js",
+    "*.log"
   ],
   "verbose": true,
   "watch": [
@@ -26,8 +27,16 @@
     "server.js"
   ],
   "ext": "js,jsx,json",
-  "delay": "1000",
+  "delay": "2000",
   "env": {
-    "NODE_ENV": "development"
+    "NODE_ENV": "development",
+    "DEBUG": "app:*"
+  },
+  "signal": "SIGTERM",
+  "nodeArgs": ["--trace-warnings"],
+  "events": {
+    "restart": "echo '🔄 Restarting server due to file changes...'",
+    "crash": "echo '💥 Server crashed! Check logs above for errors.'",
+    "exit": "echo '👋 Server process exited.'"
   }
 }

@@ -26,6 +26,49 @@ import { accountContext, optionalAccountContext } from './src/middleware/account
 // Load environment variables
 dotenv.config();
 
+// Add comprehensive error handling for development
+process.on('uncaughtException', (error) => {
+  console.error('🚨 Uncaught Exception:', error);
+  console.error('Stack:', error.stack);
+  // Don't exit in development, just log the error
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit in development, just log the error
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+});
+
+// Handle SIGTERM and SIGINT more gracefully
+process.on('SIGTERM', async () => {
+  console.log('📡 SIGTERM received, shutting down gracefully');
+  try {
+    if (db && db.close) {
+      await db.close();
+    }
+  } catch (error) {
+    console.error('Error closing database:', error);
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('📡 SIGINT received, shutting down gracefully');
+  try {
+    if (db && db.close) {
+      await db.close();
+    }
+  } catch (error) {
+    console.error('Error closing database:', error);
+  }
+  process.exit(0);
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -74,35 +117,94 @@ async function initializeSystem() {
   try {
     console.log('🚀 Initializing Project Eden system...');
     
-    // Initialize database with timeout
+    // Initialize database with timeout and retry logic
+    const maxRetries = 3;
+    let retries = 0;
+    
+    while (retries < maxRetries) {
+      try {
     const initPromise = db.initialize();
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Database initialization timeout')), 30000)
     );
     
     await Promise.race([initPromise, timeoutPromise]);
+        console.log('✅ Database connected successfully');
+        break; // Success, exit retry loop
+        
+      } catch (dbError) {
+        retries++;
+        console.error(`❌ Database initialization attempt ${retries} failed:`, dbError.message);
+        
+        if (retries >= maxRetries) {
+          throw new Error(`Database initialization failed after ${maxRetries} attempts: ${dbError.message}`);
+        }
+        
+        console.log(`⏳ Retrying database connection in 5 seconds... (${retries}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    }
+    
+    // Initialize additional database tables with error handling
+    try {
+      await ensureImageGenerationTable();
+      console.log('✅ Image generation tracking table ready');
+    } catch (error) {
+      console.warn('⚠️ Image generation table setup failed:', error.message);
+    }
+    
+    try {
+      await ensureAccountImageSettingsTable();
+      console.log('✅ Account image settings table ready');
+    } catch (error) {
+      console.warn('⚠️ Account image settings table setup failed:', error.message);
+    }
     
     // Initialize prompt manager after database is ready
+    try {
     promptManager = new PromptManager();
+      console.log('✅ Prompt manager initialized');
+    } catch (error) {
+      console.warn('⚠️ Prompt manager initialization failed:', error.message);
+    }
     
     // Initialize AI service prompt manager
+    try {
     aiService.initializePromptManager();
+      console.log('✅ AI Service prompt manager initialized');
+    } catch (error) {
+      console.warn('⚠️ AI service prompt manager initialization failed:', error.message);
+    }
     
     // Start job worker
+    try {
     console.log('🔄 Starting background job worker...');
     jobWorker.start();
+      console.log('🚀 Job worker started');
+      console.log('🧹 Checking for stale jobs from previous sessions...');
+    } catch (error) {
+      console.warn('⚠️ Job worker failed to start:', error.message);
+    }
     
     isSystemReady = true;
     initializationError = null;
     console.log('✅ Project Eden system ready!');
+    
   } catch (error) {
     console.error('❌ System initialization failed:', error.message);
     console.error('Full error:', error);
     isSystemReady = false;
     initializationError = error.message;
     
-    // Don't exit the process, just log the error
+    // Don't exit the process in development - allow the server to continue
     // This allows the health check endpoint to still work
+    if (process.env.NODE_ENV === 'production') {
+      console.error('💀 Exiting due to initialization failure in production');
+      process.exit(1);
+    } else {
+      console.log('🔄 Continuing in development mode with partial functionality');
+      console.log('🩺 Health check endpoint will remain available at /api/health');
+    }
   }
 }
 
@@ -347,7 +449,7 @@ app.get('/api/eden/news/sources/status', accountContext, async (req, res) => {
     
     // Cache the result
     setCache(cacheKey, status, CACHE_TTL.SOURCES);
-    
+
     res.json({
       success: true,
       sources: status,
@@ -1499,90 +1601,582 @@ app.get('/api/eden/content/review', accountContext, async (req, res) => {
 
 // ===== END CONTENT GENERATION API ENDPOINTS =====
 
-// ===== DEBUG ENDPOINTS =====
+// ===== IMAGE GENERATION API ENDPOINTS =====
 
-// Debug Prayer Points for specific article
-app.get('/api/debug/prayer-points/:articleId', accountContext, async (req, res) => {
+// Database schema for detailed image generation tracking
+const createImageGenerationTableSQL = `
+  CREATE TABLE IF NOT EXISTS ssnews_image_generations (
+    generation_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64) NOT NULL,
+    content_id INT NOT NULL,
+    image_asset_id INT NULL,
+    
+    -- Prompt Details
+    user_prompt TEXT NULL,
+    auto_generated_prompt TEXT NULL,
+    final_prompt TEXT NULL,
+    negative_prompt TEXT NULL,
+    
+    -- Generation Parameters  
+    style_type VARCHAR(50) NULL,
+    aspect_ratio VARCHAR(10) NULL,
+    magic_prompt_mode VARCHAR(20) NULL,
+    rendering_speed VARCHAR(20) NULL,
+    
+    -- AI Provider Details
+    provider VARCHAR(50) DEFAULT 'ideogram',
+    provider_image_id VARCHAR(255) NULL,
+    provider_request_id VARCHAR(255) NULL,
+    
+    -- Generation Results
+    generated_image_url TEXT NULL,
+    resolution VARCHAR(20) NULL,
+    seed BIGINT NULL,
+    is_image_safe BOOLEAN DEFAULT true,
+    
+    -- Cost & Usage Tracking
+    tokens_used INT NULL,
+    credits_consumed DECIMAL(10,4) NULL,
+    estimated_cost_usd DECIMAL(10,4) NULL,
+    
+    -- Generation Metadata
+    generation_time_seconds DECIMAL(8,2) NULL,
+    content_title TEXT NULL,
+    content_summary TEXT NULL,
+    
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL,
+    
+    -- Status
+    status ENUM('queued', 'processing', 'completed', 'failed') DEFAULT 'queued',
+    error_message TEXT NULL,
+    
+    -- Indexes
+    INDEX idx_account_content (account_id, content_id),
+    INDEX idx_account_created (account_id, created_at DESC),
+    INDEX idx_status (status),
+    
+    -- Foreign Key Constraints
+    FOREIGN KEY (image_asset_id) REFERENCES ssnews_image_assets(image_asset_id) ON DELETE SET NULL
+  ) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+
+// Initialize image generation tracking table
+async function ensureImageGenerationTable() {
   try {
-    const { articleId } = req.params;
-    const accountId = req.accountContext.accountId;
+    await db.query(createImageGenerationTableSQL);
+    console.log('✅ Image generation tracking table ready');
+  } catch (error) {
+    console.warn('⚠️ Could not create image generation table:', error.message);
+  }
+}
+
+// Account Image Settings Table Schema
+const createAccountImageSettingsTableSQL = `
+  CREATE TABLE IF NOT EXISTS ssnews_account_image_settings (
+    settings_id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id VARCHAR(64) NOT NULL UNIQUE,
     
-    console.log(`🔍 Debug: Checking prayer points for article ${articleId} in account ${accountId}`);
+    -- Prompt Customization
+    prompt_prefix TEXT NULL,
+    prompt_suffix TEXT NULL,
     
-    // Test direct query to generic content table
-    const rawQuery = await db.query(`
-      SELECT * FROM ssnews_generated_content 
-      WHERE based_on_gen_article_id = ? AND prompt_category = ? AND account_id = ?
-    `, [parseInt(articleId), 'prayer_points', accountId]);
+    -- Brand Colors (JSON array of color sets)
+    brand_colors JSON NULL COMMENT 'Array of {name, colors[]} objects',
     
-    // Test using the service method
-    const serviceResult = await db.getGenericContent(parseInt(articleId), 'prayer_points', accountId);
+    -- Preferred Style Codes (JSON array of preferred styles)
+    preferred_style_codes JSON NULL COMMENT 'Array of preferred style codes and seeds',
+    
+    -- Default Ideogram Settings (JSON)
+    default_settings JSON NULL COMMENT 'Default parameters for image generation',
+    
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    -- Indexes
+    INDEX idx_account_id (account_id)
+  ) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+
+// Initialize account image settings table
+async function ensureAccountImageSettingsTable() {
+  try {
+    await db.query(createAccountImageSettingsTableSQL);
+    console.log('✅ Account image settings table ready');
+  } catch (error) {
+    console.warn('⚠️ Could not create account image settings table:', error.message);
+  }
+}
+
+// Generate AI image for specific content
+app.post('/api/eden/images/generate-for-content/:contentId', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { contentId } = req.params;
+    const { 
+      prompt: userPrompt,
+      seed,
+      resolution,
+      aspectRatio = '16:9',
+      renderingSpeed = 'DEFAULT',
+      magicPrompt = 'AUTO',
+      negativePrompt,
+      numImages = 1,
+      styleType = 'GENERAL',
+      styleCodes,
+      useAccountColors = false,
+      selectedColorTemplate = null,
+      modelVersion = 'v2'
+    } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    if (!userPrompt || !userPrompt.trim()) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    console.log(`🎨 Generating AI image for content ${contentId} in account ${accountId}`);
+    console.log(`📝 Base prompt: "${userPrompt.substring(0, 100)}..."`);
+
+    const startTime = Date.now();
+
+    // Get the content details
+    const content = await db.findOneByAccount(
+      'ssnews_generated_articles', 
+      accountId,
+      'gen_article_id = ?', 
+      [parseInt(contentId)]
+    );
+
+    if (!content) {
+      return res.status(404).json({ error: 'Content not found' });
+    }
+
+    // Get account image generation settings
+    let accountSettings = null;
+    try {
+      const settingsData = await db.query(`
+        SELECT prompt_prefix, prompt_suffix, default_settings, brand_colors
+        FROM ssnews_account_image_settings 
+        WHERE account_id = ?
+      `, [accountId]);
+      
+      if (settingsData.length > 0) {
+        accountSettings = {
+          promptPrefix: settingsData[0].prompt_prefix,
+          promptSuffix: settingsData[0].prompt_suffix,
+          defaults: settingsData[0].default_settings ? JSON.parse(settingsData[0].default_settings) : {},
+          brandColors: settingsData[0].brand_colors ? JSON.parse(settingsData[0].brand_colors) : []
+        };
+      }
+    } catch (settingsError) {
+      console.warn('⚠️ Could not load account settings:', settingsError.message);
+    }
+
+    // Build final prompt with prefix/suffix
+    let finalPrompt = userPrompt.trim();
+    if (accountSettings?.promptPrefix) {
+      finalPrompt = `${accountSettings.promptPrefix} ${finalPrompt}`;
+    }
+    if (accountSettings?.promptSuffix) {
+      finalPrompt = `${finalPrompt} ${accountSettings.promptSuffix}`;
+    }
+    finalPrompt = finalPrompt.trim();
+
+    console.log(`🎯 Final prompt: "${finalPrompt.substring(0, 150)}..."`);
+
+    // Create generation tracking record
+    const generationData = {
+      account_id: accountId,
+      content_id: parseInt(contentId),
+      user_prompt: userPrompt,
+      final_prompt: finalPrompt,
+      negative_prompt: negativePrompt || null,
+      style_type: styleType,
+      aspect_ratio: aspectRatio,
+      magic_prompt_mode: magicPrompt,
+      rendering_speed: renderingSpeed,
+      provider: 'ideogram',
+      content_title: content.title,
+      content_summary: (content.body_draft || content.body_final || '').substring(0, 500),
+      status: 'processing'
+    };
+
+    const generationId = await db.insert('ssnews_image_generations', generationData);
+    console.log(`📊 Created generation tracking record: ${generationId}`);
+
+    try {
+      // Prepare Ideogram generation options
+      const generationOptions = {
+        prompt: finalPrompt,
+        aspectRatio: aspectRatio,
+        styleType: styleType,
+        magicPrompt: magicPrompt,
+        renderingSpeed: renderingSpeed,
+        numImages: parseInt(numImages),
+        modelVersion: modelVersion
+      };
+
+      // Add optional parameters
+      if (seed && !isNaN(parseInt(seed))) {
+        generationOptions.seed = parseInt(seed);
+      }
+      
+      if (resolution) {
+        generationOptions.resolution = resolution;
+        // Remove aspectRatio if resolution is specified (Ideogram API requirement)
+        delete generationOptions.aspectRatio;
+      }
+
+      if (negativePrompt && negativePrompt.trim()) {
+        generationOptions.negativePrompt = negativePrompt.trim();
+      }
+
+      if (styleCodes && styleCodes.length > 0) {
+        generationOptions.styleCodes = styleCodes;
+      }
+
+      // Handle brand colors if requested
+      if (useAccountColors && accountSettings?.brandColors?.length > 0) {
+        // Convert specific selected color template to Ideogram color palette format
+        const colorPalette = {
+          members: []
+        };
+        
+        // If a specific template was selected, use only that template
+        if (selectedColorTemplate && selectedColorTemplate.name) {
+          console.log(`🎨 Using specific color template: ${selectedColorTemplate.name}`);
+          selectedColorTemplate.colors.forEach(color => {
+            colorPalette.members.push({
+              color: color.startsWith('#') ? color : `#${color}`,
+              weight: 1.0
+            });
+          });
+        } else {
+          // Fallback: use all brand colors (legacy behavior)
+          console.log(`🎨 Using all available brand colors as fallback`);
+          accountSettings.brandColors.forEach(colorSet => {
+            colorSet.colors.forEach(color => {
+              colorPalette.members.push({
+                color: color.startsWith('#') ? color : `#${color}`,
+                weight: 1.0
+              });
+            });
+          });
+        }
+
+        if (colorPalette.members.length > 0) {
+          generationOptions.colorPalette = colorPalette;
+          console.log(`🎨 Applied ${colorPalette.members.length} colors to generation`);
+        }
+      }
+
+      console.log(`🚀 Sending to Ideogram API with ${Object.keys(generationOptions).length} parameters`);
+      const generatedImages = await imageService.generateIdeogramImage(generationOptions);
+
+      if (!generatedImages || generatedImages.length === 0) {
+        throw new Error('No images generated by Ideogram API');
+      }
+
+      // Process all generated images
+      const processedImages = [];
+      for (let i = 0; i < generatedImages.length; i++) {
+        const image = generatedImages[i];
+        const processedImage = await imageService.processIdeogramImageForContent(
+          image,
+          parseInt(contentId),
+          accountId
+        );
+        processedImages.push(processedImage);
+      }
+
+      const generationTime = (Date.now() - startTime) / 1000;
+      console.log(`✅ Ideogram generation complete in ${generationTime}s`);
+
+      // Calculate estimated cost (Ideogram pricing: varies by model/speed)
+      const baseCost = renderingSpeed === 'TURBO' ? 0.06 : 
+                      renderingSpeed === 'QUALITY' ? 0.12 : 0.08;
+      const estimatedCost = baseCost * numImages;
+
+      // Update generation tracking with results
+      await db.query(`
+        UPDATE ssnews_image_generations 
+        SET 
+          image_asset_id = ?,
+          provider_image_id = ?,
+          generated_image_url = ?,
+          resolution = ?,
+          seed = ?,
+          is_image_safe = ?,
+          estimated_cost_usd = ?,
+          generation_time_seconds = ?,
+          status = 'completed',
+          completed_at = NOW()
+        WHERE generation_id = ?
+      `, [
+        processedImages[0].id, // Primary image ID
+        generatedImages[0].id,
+        generatedImages[0].url,
+        generatedImages[0].resolution,
+        generatedImages[0].seed,
+        generatedImages[0].isImageSafe !== false,
+        estimatedCost,
+        generationTime,
+        generationId
+      ]);
+
+      console.log(`✅ AI image(s) generated and saved for content ${contentId}`);
+
+      // Return comprehensive response
+      res.json({
+        success: true,
+        message: `${numImages > 1 ? `${numImages} images` : 'Image'} generated successfully`,
+        image: processedImages[0], // Primary image for backward compatibility
+        images: processedImages,    // All generated images
+        generation: {
+          id: generationId,
+          userPrompt: userPrompt,
+          finalPrompt: finalPrompt,
+          parameters: {
+            styleType: styleType,
+            aspectRatio: aspectRatio,
+            renderingSpeed: renderingSpeed,
+            magicPrompt: magicPrompt,
+            numImages: numImages,
+            seed: seed || null,
+            resolution: resolution || null,
+            negativePrompt: negativePrompt || null,
+            useAccountColors: useAccountColors,
+            styleCodes: styleCodes || null,
+            selectedColorTemplate: selectedColorTemplate ? selectedColorTemplate.name : null
+          },
+          metadata: {
+            ideogramId: generatedImages[0].id,
+            resolution: generatedImages[0].resolution,
+            seed: generatedImages[0].seed,
+            isImageSafe: generatedImages[0].isImageSafe,
+            generationTimeSeconds: generationTime,
+            estimatedCostUSD: estimatedCost,
+            accountSettings: accountSettings ? {
+              prefixUsed: !!accountSettings.promptPrefix,
+              suffixUsed: !!accountSettings.promptSuffix,
+              brandColorsUsed: useAccountColors && accountSettings.brandColors?.length > 0,
+              selectedColorTemplate: selectedColorTemplate ? selectedColorTemplate.name : null
+            } : null
+          }
+        },
+        contentId: parseInt(contentId),
+        accountId
+      });
+
+    } catch (generationError) {
+      // Update tracking record with error
+      await db.query(`
+        UPDATE ssnews_image_generations 
+        SET 
+          status = 'failed',
+          error_message = ?,
+          completed_at = NOW()
+        WHERE generation_id = ?
+      `, [generationError.message, generationId]);
+
+      throw generationError;
+    }
+
+  } catch (error) {
+    console.error('❌ AI image generation failed:', error.message);
+    res.status(500).json({ 
+      error: `Image generation failed: ${error.message}`,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Search images for content
+app.get('/api/eden/images/search', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { query, count = 5 } = req.query;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
+    const images = await imageService.searchAndValidateImages(query, parseInt(count));
     
     res.json({
       success: true,
-      articleId: parseInt(articleId),
-      accountId,
-      rawQueryCount: rawQuery.length,
-      rawQuery: rawQuery,
-      serviceResultCount: serviceResult.length,
-      serviceResult: serviceResult,
-      debug: {
-        queryParams: [parseInt(articleId), 'prayer_points', accountId]
-      }
+      images,
+      count: images.length,
+      accountId
     });
   } catch (error) {
-    console.error('❌ Debug prayer points error:', error.message);
+    console.error('❌ Image search failed:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Debug all generic content to see what exists
-app.get('/api/debug/generic-content', accountContext, async (req, res) => {
+// Get image statistics
+app.get('/api/eden/stats/images', accountContext, async (req, res) => {
   try {
-    const accountId = req.accountContext.accountId;
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
     
-    console.log(`🔍 Debug: Checking all generic content for account ${accountId}`);
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const stats = await imageService.getImageStats(accountId);
     
-    // Get all generic content for this account
-    const allContent = await db.query(`
+    res.json({
+      success: true,
+      stats,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error getting image stats:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get Ideogram generation options and styles
+app.get('/api/eden/images/ideogram/options', async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { modelVersion = 'v2' } = req.query;
+
+    // Return comprehensive Ideogram options based on API reference and model version
+    const options = {
+      modelVersion,
+      styles: imageService.getIdeogramStyles(modelVersion),
+      aspectRatios: imageService.getAspectRatios(),
+      resolutions: imageService.getResolutions(),
+      renderingSpeeds: [
+        { value: 'TURBO', label: 'Turbo (Fastest)', description: 'Quick generation, lower cost' },
+        { value: 'DEFAULT', label: 'Default', description: 'Balanced speed and quality' },
+        { value: 'QUALITY', label: 'Quality (Slowest, Best)', description: 'Highest quality, higher cost' }
+      ],
+      magicPromptOptions: [
+        { value: 'AUTO', label: 'Auto', description: 'Let Ideogram decide when to enhance prompts' },
+        { value: 'ON', label: 'On', description: 'Always enhance prompts for better results' },
+        { value: 'OFF', label: 'Off', description: 'Use prompts exactly as written' }
+      ],
+      numImagesOptions: [1, 2, 3, 4, 5, 6, 7, 8],
+      styleCodeInfo: {
+        description: 'Use 8-character hexadecimal codes for precise style control',
+        example: '1A2B3C4D',
+        maxCodes: 10
+      }
+    };
+    
+    res.json({
+      success: true,
+      options
+    });
+  } catch (error) {
+    console.error('❌ Error getting Ideogram options:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get images for specific content
+app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { contentId } = req.params;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`🖼️ Fetching images for content ${contentId} in account ${accountId}`);
+
+    // First verify the content belongs to this account
+    const content = await db.findOneByAccount(
+      'ssnews_generated_articles', 
+      accountId,
+      'gen_article_id = ?', 
+      [parseInt(contentId)]
+    );
+
+    if (!content) {
+      return res.status(404).json({ error: 'Content not found' });
+    }
+
+    // Fetch images from the database
+    const images = await db.query(`
       SELECT 
-        content_id,
-        based_on_gen_article_id,
-        prompt_category,
-        content_data,
-        created_at
-      FROM ssnews_generated_content 
-      WHERE account_id = ?
+        image_id as id,
+        sirv_cdn_url as sirvUrl,
+        alt_text_suggestion_ai as altText,
+        source_api as source,
+        source_image_id_external,
+        created_at,
+        is_approved_human
+      FROM ssnews_image_assets
+      WHERE associated_content_type = 'gen_article' 
+        AND associated_content_id = ?
+        AND account_id = ?
       ORDER BY created_at DESC
-      LIMIT 20
-    `, [accountId]);
-    
-    // Get unique categories
-    const categories = await db.query(`
-      SELECT DISTINCT prompt_category, COUNT(*) as count
-      FROM ssnews_generated_content 
-      WHERE account_id = ?
-      GROUP BY prompt_category
-    `, [accountId]);
-    
+    `, [parseInt(contentId), accountId]);
+
+    // Format images for frontend consumption
+    const formattedImages = images.map(image => ({
+      id: image.id,
+      sirvUrl: image.sirvUrl,
+      altText: image.altText || 'Generated image',
+      source: image.source || 'pexels',
+      query: image.source === 'ideogram' ? 'AI Generated' : 'Stock Photo',
+      created: image.created_at,
+      approved: image.is_approved_human
+    }));
+
+    console.log(`✅ Found ${formattedImages.length} images for content ${contentId}`);
+
     res.json({
       success: true,
-      accountId,
-      totalContent: allContent.length,
-      categories: categories,
-      recentContent: allContent.slice(0, 5),
-      debug: {
-        tableExists: true,
-        accountFilter: accountId
-      }
+      images: formattedImages,
+      count: formattedImages.length,
+      contentId: parseInt(contentId),
+      accountId
     });
   } catch (error) {
-    console.error('❌ Debug generic content error:', error.message);
+    console.error('❌ Error fetching content images:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-// ===== END DEBUG ENDPOINTS =====
+// ===== END IMAGE GENERATION API ENDPOINTS =====
 
 // Test URL submission without middleware
 app.post('/api/test/submit-urls', async (req, res) => {
@@ -1821,52 +2415,522 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  res.status(500).json({ 
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message 
-  });
-});
+// ===== ACCOUNT IMAGE SETTINGS API ENDPOINTS =====
 
-// 404 handler for API routes
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ error: 'API endpoint not found' });
-});
+// Get account image generation settings
+app.get('/api/eden/settings/image-generation', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
 
-// Initialize system and start server
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Project Eden server running on port ${PORT}`);
-  console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 System Status: ${isSystemReady ? 'Ready' : 'Initializing...'}`);
-  
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`🌐 Frontend: http://localhost:${PORTS.FRONTEND}`);
-    console.log(`🔗 API: http://localhost:${PORT}/api`);
-    console.log(`📋 API Documentation: http://localhost:${PORT}/`);
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`⚙️ Fetching image generation settings for account ${accountId}`);
+
+    // Try to get settings with preferred_style_codes, but handle if column doesn't exist
+    let settingsData;
+    try {
+      settingsData = await db.query(`
+        SELECT 
+          prompt_prefix,
+          prompt_suffix,
+          brand_colors,
+          preferred_style_codes,
+          default_settings,
+          created_at,
+          updated_at
+        FROM ssnews_account_image_settings 
+        WHERE account_id = ?
+      `, [accountId]);
+    } catch (error) {
+      if (error.message.includes('preferred_style_codes')) {
+        // Column doesn't exist yet, query without it
+        console.log('⚠️ preferred_style_codes column not found, querying without it');
+        settingsData = await db.query(`
+          SELECT 
+            prompt_prefix,
+            prompt_suffix,
+            brand_colors,
+            default_settings,
+            created_at,
+            updated_at
+          FROM ssnews_account_image_settings 
+          WHERE account_id = ?
+        `, [accountId]);
+      } else {
+        throw error;
+      }
+    }
+
+    let settings = {
+      promptPrefix: '',
+      promptSuffix: '',
+      brandColors: [],
+      preferredStyleCodes: [],
+      defaults: {
+        aspectRatio: '16:9',
+        styleType: 'GENERAL',
+        renderingSpeed: 'DEFAULT',
+        magicPrompt: 'AUTO',
+        negativePrompt: '',
+        numImages: 1
+      }
+    };
+
+    if (settingsData.length > 0) {
+      const dbSettings = settingsData[0];
+      
+      // Parse JSON fields with error handling
+      let parsedBrandColors = [];
+      let parsedPreferredStyleCodes = [];
+      let parsedDefaultSettings = settings.defaults;
+      
+      if (dbSettings.brand_colors) {
+        try {
+          // Handle case where data might already be parsed as objects
+          if (typeof dbSettings.brand_colors === 'string') {
+            parsedBrandColors = JSON.parse(dbSettings.brand_colors);
+          } else if (Array.isArray(dbSettings.brand_colors)) {
+            // Data is already parsed as objects - use directly
+            parsedBrandColors = dbSettings.brand_colors;
+          } else {
+            console.warn('⚠️ Unexpected brand_colors format:', typeof dbSettings.brand_colors);
+            parsedBrandColors = [];
+          }
+        } catch (error) {
+          console.warn('⚠️ Invalid JSON in brand_colors field:', error.message);
+          console.warn('⚠️ Raw brand_colors data:', dbSettings.brand_colors);
+          console.warn('⚠️ Data type:', typeof dbSettings.brand_colors);
+          parsedBrandColors = [];
+        }
+      }
+      
+      if (dbSettings.preferred_style_codes) {
+        try {
+          // Handle case where data might already be parsed as objects
+          if (typeof dbSettings.preferred_style_codes === 'string') {
+            parsedPreferredStyleCodes = JSON.parse(dbSettings.preferred_style_codes);
+          } else if (Array.isArray(dbSettings.preferred_style_codes)) {
+            // Data is already parsed as objects - use directly
+            parsedPreferredStyleCodes = dbSettings.preferred_style_codes;
+          } else {
+            console.warn('⚠️ Unexpected preferred_style_codes format:', typeof dbSettings.preferred_style_codes);
+            parsedPreferredStyleCodes = [];
+          }
+        } catch (error) {
+          console.warn('⚠️ Invalid JSON in preferred_style_codes field:', error.message);
+          console.warn('⚠️ Raw preferred_style_codes data:', dbSettings.preferred_style_codes);
+          console.warn('⚠️ Data type:', typeof dbSettings.preferred_style_codes);
+          parsedPreferredStyleCodes = [];
+        }
+      }
+      
+      if (dbSettings.default_settings) {
+        try {
+          // Handle case where data might already be parsed as objects
+          if (typeof dbSettings.default_settings === 'string') {
+            parsedDefaultSettings = JSON.parse(dbSettings.default_settings);
+          } else if (typeof dbSettings.default_settings === 'object' && dbSettings.default_settings !== null) {
+            // Data is already parsed as objects - use directly
+            parsedDefaultSettings = dbSettings.default_settings;
+          } else {
+            console.warn('⚠️ Unexpected default_settings format:', typeof dbSettings.default_settings);
+            parsedDefaultSettings = settings.defaults;
+          }
+        } catch (error) {
+          console.warn('⚠️ Invalid JSON in default_settings field:', error.message);
+          console.warn('⚠️ Raw default_settings data:', dbSettings.default_settings);
+          console.warn('⚠️ Data type:', typeof dbSettings.default_settings);
+          parsedDefaultSettings = settings.defaults;
+        }
+      }
+      
+      settings = {
+        promptPrefix: dbSettings.prompt_prefix || '',
+        promptSuffix: dbSettings.prompt_suffix || '',
+        brandColors: parsedBrandColors,
+        preferredStyleCodes: parsedPreferredStyleCodes,
+        defaults: parsedDefaultSettings,
+        createdAt: dbSettings.created_at,
+        updatedAt: dbSettings.updated_at
+      };
+    }
+
+    res.json({
+      success: true,
+      settings,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error fetching account image settings:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Initialize system in background after server starts
-initializeSystem().catch(error => {
-  console.error('❌ System initialization failed:', error.message);
-  // Don't exit the process, just log the error
+// Update account image generation settings
+app.put('/api/eden/settings/image-generation', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { 
+      promptPrefix = '',
+      promptSuffix = '',
+      brandColors = [],
+      defaults = {},
+      preferredStyleCodes = []
+    } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`⚙️ Updating image generation settings for account ${accountId}`);
+
+    // Validate brand colors format
+    if (brandColors && Array.isArray(brandColors)) {
+      for (const colorSet of brandColors) {
+        if (!colorSet.name || !Array.isArray(colorSet.colors)) {
+          return res.status(400).json({ error: 'Invalid brand colors format. Expected: [{name, colors: []}]' });
+        }
+        
+        // Validate color format (hex colors)
+        for (const color of colorSet.colors) {
+          if (!/^#?[0-9A-Fa-f]{6}$/.test(color)) {
+            return res.status(400).json({ error: `Invalid color format: ${color}. Expected hex format (e.g., #FF0000)` });
+          }
+        }
+      }
+    }
+
+    // Prepare data for database with JSON serialization error handling
+    let brandColorsJson, preferredStyleCodesJson, defaultSettingsJson;
+    
+    try {
+      brandColorsJson = JSON.stringify(brandColors);
+    } catch (error) {
+      console.error('❌ Failed to serialize brand colors:', error.message);
+      console.error('Data that failed to serialize:', brandColors);
+      console.error('Data type:', typeof brandColors);
+      console.error('Is Array:', Array.isArray(brandColors));
+      console.error('Length:', brandColors?.length);
+      console.error('First item:', brandColors?.[0]);
+      return res.status(500).json({ error: 'Failed to serialize brand colors data' });
+    }
+    
+    try {
+      preferredStyleCodesJson = JSON.stringify(preferredStyleCodes);
+    } catch (error) {
+      console.error('❌ Failed to serialize preferred style codes:', error.message);
+      return res.status(500).json({ error: 'Failed to serialize preferred style codes data' });
+    }
+    
+    try {
+      defaultSettingsJson = JSON.stringify({
+        aspectRatio: defaults.aspectRatio || '16:9',
+        styleType: defaults.styleType || 'GENERAL',
+        renderingSpeed: defaults.renderingSpeed || 'DEFAULT',
+        magicPrompt: defaults.magicPrompt || 'AUTO',
+        negativePrompt: defaults.negativePrompt || '',
+        numImages: parseInt(defaults.numImages) || 1
+      });
+    } catch (error) {
+      console.error('❌ Failed to serialize default settings:', error.message);
+      return res.status(500).json({ error: 'Failed to serialize default settings data' });
+    }
+    
+    const settingsData = {
+      account_id: accountId,
+      prompt_prefix: promptPrefix.trim() || null,
+      prompt_suffix: promptSuffix.trim() || null,
+      brand_colors: brandColorsJson,
+      preferred_style_codes: preferredStyleCodesJson,
+      default_settings: defaultSettingsJson
+    };
+
+    // Check if settings exist for this account
+    const existingSettings = await db.query(`
+      SELECT settings_id FROM ssnews_account_image_settings 
+      WHERE account_id = ?
+    `, [accountId]);
+
+    if (existingSettings.length > 0) {
+      // Update existing settings - handle if preferred_style_codes column doesn't exist
+      try {
+        await db.query(`
+          UPDATE ssnews_account_image_settings 
+          SET 
+            prompt_prefix = ?,
+            prompt_suffix = ?,
+            brand_colors = ?,
+            preferred_style_codes = ?,
+            default_settings = ?,
+            updated_at = NOW()
+          WHERE account_id = ?
+        `, [
+          settingsData.prompt_prefix,
+          settingsData.prompt_suffix,
+          settingsData.brand_colors,
+          settingsData.preferred_style_codes,
+          settingsData.default_settings,
+          accountId
+        ]);
+      } catch (error) {
+        if (error.message.includes('preferred_style_codes')) {
+          // Column doesn't exist yet, update without it
+          console.log('⚠️ preferred_style_codes column not found, updating without it');
+          await db.query(`
+            UPDATE ssnews_account_image_settings 
+            SET 
+              prompt_prefix = ?,
+              prompt_suffix = ?,
+              brand_colors = ?,
+              default_settings = ?,
+              updated_at = NOW()
+            WHERE account_id = ?
+          `, [
+            settingsData.prompt_prefix,
+            settingsData.prompt_suffix,
+            settingsData.brand_colors,
+            settingsData.default_settings,
+            accountId
+          ]);
+        } else {
+          throw error;
+        }
+      }
+      console.log(`✅ Updated image settings for account ${accountId}`);
+    } else {
+      // Create new settings - handle if preferred_style_codes column doesn't exist
+      try {
+        await db.insert('ssnews_account_image_settings', settingsData);
+      } catch (error) {
+        if (error.message.includes('preferred_style_codes')) {
+          // Column doesn't exist yet, create without it
+          console.log('⚠️ preferred_style_codes column not found, creating without it');
+          const { preferred_style_codes, ...settingsWithoutPreferred } = settingsData;
+          await db.insert('ssnews_account_image_settings', settingsWithoutPreferred);
+        } else {
+          throw error;
+        }
+      }
+      console.log(`✅ Created image settings for account ${accountId}`);
+    }
+
+    res.json({
+      success: true,
+      message: 'Image generation settings updated successfully',
+      settings: {
+        promptPrefix: settingsData.prompt_prefix || '',
+        promptSuffix: settingsData.prompt_suffix || '',
+        brandColors: brandColors,  // Use original data instead of parsing JSON
+        defaults: {
+          aspectRatio: defaults.aspectRatio || '16:9',
+          styleType: defaults.styleType || 'GENERAL',
+          renderingSpeed: defaults.renderingSpeed || 'DEFAULT',
+          magicPrompt: defaults.magicPrompt || 'AUTO',
+          negativePrompt: defaults.negativePrompt || '',
+          numImages: parseInt(defaults.numImages) || 1
+        },
+        preferredStyleCodes: preferredStyleCodes  // Use original data instead of parsing JSON
+      },
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error updating account image settings:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  await db.close();
-  process.exit(0);
+// Add a new brand color set
+app.post('/api/eden/settings/brand-colors', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { name, colors } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    if (!name || !Array.isArray(colors) || colors.length === 0) {
+      return res.status(400).json({ error: 'Name and colors array are required' });
+    }
+
+    // Validate color format
+    for (const color of colors) {
+      if (!/^#?[0-9A-Fa-f]{6}$/.test(color)) {
+        return res.status(400).json({ error: `Invalid color format: ${color}. Expected hex format (e.g., #FF0000)` });
+      }
+    }
+
+    console.log(`🎨 Adding brand color set "${name}" for account ${accountId}`);
+
+    // Get current settings
+    const currentSettings = await db.query(`
+      SELECT brand_colors FROM ssnews_account_image_settings 
+      WHERE account_id = ?
+    `, [accountId]);
+
+    let brandColors = [];
+    if (currentSettings.length > 0 && currentSettings[0].brand_colors) {
+      try {
+        brandColors = JSON.parse(currentSettings[0].brand_colors);
+      } catch (parseError) {
+        console.warn('⚠️ Invalid JSON in existing brand_colors, starting fresh:', parseError.message);
+        brandColors = [];
+      }
+    }
+
+    // Add new color set (normalize colors to include #)
+    const normalizedColors = colors.map(color => color.startsWith('#') ? color : `#${color}`);
+    const newColorSet = {
+      name: name.trim(),
+      colors: normalizedColors,
+      createdAt: new Date().toISOString()
+    };
+    
+    brandColors.push(newColorSet);
+
+    // Serialize with error handling
+    let brandColorsJson;
+    try {
+      brandColorsJson = JSON.stringify(brandColors);
+    } catch (serializeError) {
+      console.error('❌ Failed to serialize brand colors:', serializeError.message);
+      console.error('Data that failed to serialize:', brandColors);
+      console.error('Data type:', typeof brandColors);
+      console.error('Is Array:', Array.isArray(brandColors));
+      console.error('Length:', brandColors?.length);
+      console.error('First item:', brandColors?.[0]);
+      return res.status(500).json({ error: 'Failed to serialize brand colors data' });
+    }
+
+    // Update or create settings
+    if (currentSettings.length > 0) {
+      await db.query(`
+        UPDATE ssnews_account_image_settings 
+        SET brand_colors = ?, updated_at = NOW()
+        WHERE account_id = ?
+      `, [brandColorsJson, accountId]);
+    } else {
+      await db.insert('ssnews_account_image_settings', {
+        account_id: accountId,
+        brand_colors: brandColorsJson,
+        default_settings: JSON.stringify({
+          aspectRatio: '16:9',
+          styleType: 'GENERAL',
+          renderingSpeed: 'DEFAULT',
+          magicPrompt: 'AUTO',
+          negativePrompt: '',
+          numImages: 1
+        })
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Brand color set "${name}" added successfully`,
+      brandColors,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error adding brand color set:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
 });
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully');
-  await db.close();
-  process.exit(0);
+// Remove a brand color set
+app.delete('/api/eden/settings/brand-colors/:colorSetIndex', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { colorSetIndex } = req.params;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const index = parseInt(colorSetIndex);
+    if (isNaN(index) || index < 0) {
+      return res.status(400).json({ error: 'Invalid color set index' });
+    }
+
+    console.log(`🗑️ Removing brand color set at index ${index} for account ${accountId}`);
+
+    // Get current settings
+    const currentSettings = await db.query(`
+      SELECT brand_colors FROM ssnews_account_image_settings 
+      WHERE account_id = ?
+    `, [accountId]);
+
+    if (currentSettings.length === 0 || !currentSettings[0].brand_colors) {
+      return res.status(404).json({ error: 'No brand colors found' });
+    }
+
+    let brandColors;
+    try {
+      brandColors = JSON.parse(currentSettings[0].brand_colors);
+    } catch (parseError) {
+      console.error('❌ Invalid JSON in brand_colors field:', parseError.message);
+      return res.status(500).json({ error: 'Invalid brand colors data in database' });
+    }
+    
+    if (index >= brandColors.length) {
+      return res.status(404).json({ error: 'Color set index not found' });
+    }
+
+    const removedColorSet = brandColors.splice(index, 1)[0];
+
+    // Update settings with JSON serialization error handling
+    let updatedBrandColorsJson;
+    try {
+      updatedBrandColorsJson = JSON.stringify(brandColors);
+    } catch (serializeError) {
+      console.error('❌ Failed to serialize updated brand colors:', serializeError.message);
+      return res.status(500).json({ error: 'Failed to serialize brand colors data' });
+    }
+
+    await db.query(`
+      UPDATE ssnews_account_image_settings 
+      SET brand_colors = ?, updated_at = NOW()
+      WHERE account_id = ?
+    `, [updatedBrandColorsJson, accountId]);
+
+    res.json({
+      success: true,
+      message: `Brand color set "${removedColorSet.name}" removed successfully`,
+      brandColors,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error removing brand color set:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
 });
+
+// ===== END ACCOUNT IMAGE SETTINGS API ENDPOINTS =====
 
 // Database optimization endpoint - Create indexes for better performance
 app.post('/api/debug/optimize-database', async (req, res) => {
@@ -1885,6 +2949,19 @@ app.post('/api/debug/optimize-database', async (req, res) => {
         const result = await db.query(
           'SELECT COUNT(*) as count FROM information_schema.statistics WHERE table_name = ? AND index_name = ? AND table_schema = DATABASE()',
           [table, indexName]
+        );
+        return result[0].count > 0;
+      } catch (error) {
+        return false;
+      }
+    };
+
+    // Helper function to check if column exists  
+    const columnExists = async (table, column) => {
+      try {
+        const result = await db.query(
+          'SELECT COUNT(*) as count FROM information_schema.columns WHERE table_name = ? AND column_name = ? AND table_schema = DATABASE()',
+          [table, column]
         );
         return result[0].count > 0;
       } catch (error) {
@@ -2000,6 +3077,20 @@ app.post('/api/debug/optimize-database', async (req, res) => {
     const existing = results.filter(r => r.status === 'exists').length;
     const errors = results.filter(r => r.status === 'error').length;
 
+    // Add preferred_style_codes column to account image settings if it doesn't exist
+    if (!(await columnExists('ssnews_account_image_settings', 'preferred_style_codes'))) {
+      try {
+        await db.query('ALTER TABLE ssnews_account_image_settings ADD COLUMN preferred_style_codes JSON NULL COMMENT \'Array of preferred style codes and seeds\'');
+        results.push({ action: 'Add preferred_style_codes column', status: 'success' });
+        console.log('✅ Added preferred_style_codes column to ssnews_account_image_settings');
+      } catch (error) {
+        results.push({ action: 'Add preferred_style_codes column', status: 'error', error: error.message });
+        console.log('❌ Failed to add preferred_style_codes column:', error.message);
+      }
+    } else {
+      results.push({ action: 'Add preferred_style_codes column', status: 'skipped', reason: 'Column already exists' });
+    }
+
     console.log(`🔧 Database optimization complete: ${created} created, ${existing} existing, ${errors} errors`);
 
     res.json({
@@ -2017,6 +3108,143 @@ app.post('/api/debug/optimize-database', async (req, res) => {
     console.error('❌ Database optimization failed:', error.message);
     res.status(500).json({ error: error.message });
   }
+});
+
+// Get generation history and analytics
+app.get('/api/eden/images/generation-history', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`📊 Fetching generation history for account ${accountId}`);
+
+    // Fetch generation history for this account with error handling
+    let history = [];
+    try {
+      history = await db.query(`
+        SELECT 
+          generation_id as id,
+          content_id,
+          user_prompt,
+          final_prompt,
+          negative_prompt,
+          style_type,
+          aspect_ratio,
+          magic_prompt_mode,
+          rendering_speed,
+          provider,
+          generated_image_url,
+          resolution,
+          seed,
+          is_image_safe,
+          estimated_cost_usd,
+          generation_time_seconds,
+          content_title,
+          content_summary,
+          status,
+          error_message,
+          created_at,
+          completed_at
+        FROM ssnews_image_generations
+        WHERE account_id = ?
+        ORDER BY created_at DESC
+        LIMIT 100
+      `, [accountId]);
+    } catch (dbError) {
+      if (dbError.message.includes("doesn't exist")) {
+        console.log(`⚠️ Image generations table doesn't exist yet for account ${accountId}`);
+        history = [];
+      } else {
+        throw dbError;
+      }
+    }
+
+    // Format the response to match the expected structure
+    const formattedHistory = history.map(item => ({
+      id: item.id,
+      contentId: item.content_id,
+      prompts: {
+        userPrompt: item.user_prompt,
+        finalPrompt: item.final_prompt
+      },
+      parameters: {
+        styleType: item.style_type,
+        aspectRatio: item.aspect_ratio,
+        magicPrompt: item.magic_prompt_mode,
+        renderingSpeed: item.rendering_speed,
+        negativePrompt: item.negative_prompt
+      },
+      result: {
+        imageUrl: item.generated_image_url,
+        resolution: item.resolution,
+        seed: item.seed,
+        isImageSafe: item.is_image_safe
+      },
+      metadata: {
+        provider: item.provider,
+        estimatedCostUSD: parseFloat(item.estimated_cost_usd || 0),
+        generationTimeSeconds: parseFloat(item.generation_time_seconds || 0),
+        contentTitle: item.content_title,
+        contentSummary: item.content_summary
+      },
+      status: item.status,
+      errorMessage: item.error_message,
+      createdAt: item.created_at,
+      completedAt: item.completed_at
+    }));
+
+    res.json({
+      success: true,
+      history: formattedHistory,
+      total: formattedHistory.length,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error fetching generation history:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err.stack);
+  res.status(500).json({ 
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : err.message 
+  });
+});
+
+// 404 handler for API routes
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
+
+// Initialize system and start server
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Project Eden server running on port ${PORT}`);
+  console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 System Status: ${isSystemReady ? 'Ready' : 'Initializing...'}`);
+  
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`🌐 Frontend: http://localhost:${PORTS.FRONTEND}`);
+    console.log(`🔗 API: http://localhost:${PORT}/api`);
+    console.log(`📋 API Documentation: http://localhost:${PORT}/`);
+  }
+});
+
+// Initialize system in background after server starts
+initializeSystem().catch(error => {
+  console.error('❌ System initialization failed:', error.message);
+  // Don't exit the process, just log the error
 });
 
 // Simple in-memory cache for frequently accessed data
@@ -2058,3 +3286,143 @@ setInterval(() => {
     }
   }
 }, 60000); // Clean every minute
+
+// Debug endpoint to check and clean corrupt JSON data
+app.post('/api/debug/clean-image-settings-json', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`🧹 Checking and cleaning JSON data for account ${accountId}`);
+
+    // Get all settings for this account
+    const allSettings = await db.query(`
+      SELECT 
+        settings_id,
+        account_id,
+        brand_colors,
+        preferred_style_codes,
+        default_settings
+      FROM ssnews_account_image_settings 
+      WHERE account_id = ?
+    `, [accountId]);
+
+    const results = [];
+
+    if (allSettings.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No settings found for this account',
+        results: []
+      });
+    }
+
+    for (const setting of allSettings) {
+      const result = {
+        settingsId: setting.settings_id,
+        accountId: setting.account_id,
+        issues: [],
+        fixes: []
+      };
+
+      // Check brand_colors
+      if (setting.brand_colors) {
+        try {
+          JSON.parse(setting.brand_colors);
+          result.issues.push('brand_colors: Valid JSON');
+        } catch (error) {
+          result.issues.push(`brand_colors: Invalid JSON - ${error.message}`);
+          result.issues.push(`brand_colors raw data: ${setting.brand_colors}`);
+          
+          // Try to fix by resetting to empty array
+          try {
+            await db.query(`
+              UPDATE ssnews_account_image_settings 
+              SET brand_colors = '[]'
+              WHERE settings_id = ?
+            `, [setting.settings_id]);
+            result.fixes.push('brand_colors: Reset to empty array');
+          } catch (fixError) {
+            result.fixes.push(`brand_colors: Failed to fix - ${fixError.message}`);
+          }
+        }
+      }
+
+      // Check preferred_style_codes
+      if (setting.preferred_style_codes) {
+        try {
+          JSON.parse(setting.preferred_style_codes);
+          result.issues.push('preferred_style_codes: Valid JSON');
+        } catch (error) {
+          result.issues.push(`preferred_style_codes: Invalid JSON - ${error.message}`);
+          result.issues.push(`preferred_style_codes raw data: ${setting.preferred_style_codes}`);
+          
+          // Try to fix by resetting to empty array
+          try {
+            await db.query(`
+              UPDATE ssnews_account_image_settings 
+              SET preferred_style_codes = '[]'
+              WHERE settings_id = ?
+            `, [setting.settings_id]);
+            result.fixes.push('preferred_style_codes: Reset to empty array');
+          } catch (fixError) {
+            result.fixes.push(`preferred_style_codes: Failed to fix - ${fixError.message}`);
+          }
+        }
+      }
+
+      // Check default_settings
+      if (setting.default_settings) {
+        try {
+          JSON.parse(setting.default_settings);
+          result.issues.push('default_settings: Valid JSON');
+        } catch (error) {
+          result.issues.push(`default_settings: Invalid JSON - ${error.message}`);
+          result.issues.push(`default_settings raw data: ${setting.default_settings}`);
+          
+          // Try to fix by resetting to default object
+          const defaultSettings = JSON.stringify({
+            aspectRatio: '16:9',
+            styleType: 'GENERAL',
+            renderingSpeed: 'DEFAULT',
+            magicPrompt: 'AUTO',
+            negativePrompt: '',
+            numImages: 1
+          });
+          
+          try {
+            await db.query(`
+              UPDATE ssnews_account_image_settings 
+              SET default_settings = ?
+              WHERE settings_id = ?
+            `, [defaultSettings, setting.settings_id]);
+            result.fixes.push('default_settings: Reset to default values');
+          } catch (fixError) {
+            result.fixes.push(`default_settings: Failed to fix - ${fixError.message}`);
+          }
+        }
+      }
+
+      results.push(result);
+    }
+
+    res.json({
+      success: true,
+      message: `Checked and cleaned JSON data for account ${accountId}`,
+      results,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error cleaning image settings JSON:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});

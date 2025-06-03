@@ -14,6 +14,7 @@ import SourcesTab from './sources/SourcesTab';
 import ProgressModal from './ProgressModal';
 import PromptManagement from './PromptManagement';
 import AccountUserManagement from './AccountUserManagement';
+import ImageGenerationSettings from './ImageGenerationSettings';
 import LogViewer from './LogViewer';
 import DetailModal from './content/DetailModal';
 import { 
@@ -28,7 +29,15 @@ import { useContentActions } from '../hooks/useContentActions';
 import { useSourceActions } from '../hooks/useSourceActions';
 import { useJobActions } from '../hooks/useJobActions';
 import { TAB_ROUTES } from '../utils/constants';
-import { getTabFromHash } from '../utils/helpers';
+import { 
+  getTabFromHash, 
+  getContentIdFromHash, 
+  updateUrlForTab, 
+  updateUrlForModal, 
+  closeModalAndUpdateUrl,
+  shouldOpenModalFromUrl,
+  parseUrlHash
+} from '../utils/helpers';
 import { useAccount } from '../contexts/AccountContext';
 import AccountSwitcher from './AccountSwitcher';
 
@@ -118,12 +127,70 @@ const ProjectEden = () => {
     setActiveTab(getTabFromHash(validTabs));
 
     const handleHashChange = () => {
-      setActiveTab(getTabFromHash(validTabs));
+      const newTab = getTabFromHash(validTabs);
+      setActiveTab(newTab);
+      
+      // Handle modal routing from URL
+      const contentId = getContentIdFromHash();
+      if (contentId && shouldOpenModalFromUrl()) {
+        // Find the content with this ID and open modal
+        handleOpenModalFromUrl(newTab, contentId);
+      } else if (!shouldOpenModalFromUrl() && showDetailModal) {
+        // Close modal if URL doesn't indicate modal should be open
+        setShowDetailModal(false);
+        setSelectedContent(null);
+      }
     };
+
+    // Handle initial page load with modal routing
+    const contentId = getContentIdFromHash();
+    if (contentId && shouldOpenModalFromUrl()) {
+      const currentTab = getTabFromHash(validTabs);
+      handleOpenModalFromUrl(currentTab, contentId);
+    }
 
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  }, [showDetailModal]);
+
+  // Handle opening modal from URL
+  const handleOpenModalFromUrl = async (tab, contentId) => {
+    console.log(`🔗 Opening modal from URL: ${tab}/${contentId}`);
+    
+    // Ensure we have the right data loaded for this tab
+    let contentArray = [];
+    switch (tab) {
+      case TAB_ROUTES.REVIEW:
+        if (!contentForReview.length) await fetchTabData('review');
+        contentArray = contentForReview;
+        break;
+      case TAB_ROUTES.APPROVED:
+        if (!approvedContent.length) await fetchTabData('approved');
+        contentArray = approvedContent;
+        break;
+      case TAB_ROUTES.ARCHIVED:
+        if (!archivedContent.length) await fetchTabData('archived');
+        contentArray = archivedContent;
+        break;
+      case TAB_ROUTES.REJECTED:
+        if (!rejectedContent.length) await fetchTabData('rejected');
+        contentArray = rejectedContent;
+        break;
+      default:
+        return;
+    }
+
+    // Find the content with matching ID
+    const content = contentArray.find(item => item.gen_article_id === contentId);
+    if (content) {
+      setSelectedContent(content);
+      setShowDetailModal(true);
+    } else {
+      console.warn(`Content with ID ${contentId} not found in ${tab} tab`);
+      // Fallback: remove the content ID from URL
+      updateUrlForTab(tab);
+    }
+  };
 
   // Load data for initial tab when system is ready
   useEffect(() => {
@@ -162,7 +229,7 @@ const ProjectEden = () => {
   // Handle tab changes and update URL
   const handleTabChange = (tabValue) => {
     setActiveTab(tabValue);
-    window.history.pushState(null, null, `#${tabValue}`);
+    updateUrlForTab(tabValue);
     
     // Lazy load data for the new tab
     switch (tabValue) {
@@ -206,11 +273,15 @@ const ProjectEden = () => {
   const openDetailedReview = (content) => {
     setSelectedContent(content);
     setShowDetailModal(true);
+    // Update URL to include content ID
+    updateUrlForModal(activeTab, content.gen_article_id);
   };
 
   const closeDetailModal = () => {
     setShowDetailModal(false);
     setSelectedContent(null);
+    // Update URL to remove content ID
+    closeModalAndUpdateUrl(activeTab);
   };
 
   // Progress modal handlers
@@ -405,7 +476,7 @@ const ProjectEden = () => {
 
           {/* Main Interface */}
           <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-11">
+            <TabsList className="grid w-full grid-cols-12">
               <TabsTrigger value={TAB_ROUTES.DASHBOARD}>Dashboard</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.REVIEW}>Review ({stats.pendingReview || 0})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.APPROVED}>Approved ({stats.approvedContent || 0})</TabsTrigger>
@@ -417,6 +488,7 @@ const ProjectEden = () => {
               <TabsTrigger value={TAB_ROUTES.SOURCES}>Sources ({sources.length})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.PROMPTS}>Prompts</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.USERS}>Users</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.IMAGE_SETTINGS}>Image Settings</TabsTrigger>
             </TabsList>
 
             {/* Automation Running Message */}
@@ -541,6 +613,10 @@ const ProjectEden = () => {
             <TabsContent value={TAB_ROUTES.USERS}>
               <AccountUserManagement />
             </TabsContent>
+
+            <TabsContent value={TAB_ROUTES.IMAGE_SETTINGS}>
+              <ImageGenerationSettings />
+            </TabsContent>
           </Tabs>
         </div>
 
@@ -599,7 +675,7 @@ const Header = ({
         </div>
       )}
       <AccountSwitcher />
-    </div>
+      </div>
     <div className="flex items-center gap-3">
       <Button
         variant="outline"
@@ -609,7 +685,7 @@ const Header = ({
       >
         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         {loading ? 'Refreshing...' : 'Refresh'}
-      </Button>
+        </Button>
       <Button
         onClick={onRunFullCycle}
         disabled={loading || showProgressModal}
@@ -617,7 +693,7 @@ const Header = ({
       >
         <Zap className="w-4 h-4" />
         Full Automation
-      </Button>
+        </Button>
       <Button
         variant="outline"
         onClick={onShowLogs}
@@ -625,15 +701,15 @@ const Header = ({
       >
         <Terminal className="w-4 h-4" />
         Logs
-      </Button>
-      <Button
-        variant="ghost"
-        onClick={onLogout}
+        </Button>
+        <Button 
+          variant="ghost" 
+          onClick={onLogout}
         className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-      >
+        >
         <LogOut className="w-4 h-4" />
         Sign Out
-      </Button>
+        </Button>
     </div>
   </div>
 );

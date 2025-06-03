@@ -129,11 +129,78 @@ export const getTabUrl = (tabValue) => {
 };
 
 /**
+ * Get content modal URL for routing
+ */
+export const getContentModalUrl = (tabValue, contentId) => {
+  return `${window.location.origin}${window.location.pathname}#${tabValue}/${contentId}`;
+};
+
+/**
+ * Parse URL hash to get tab and content ID
+ */
+export const parseUrlHash = () => {
+  const hash = window.location.hash.substring(1); // Remove the #
+  const parts = hash.split('/');
+  
+  return {
+    tab: parts[0] || '',
+    contentId: parts[1] ? parseInt(parts[1]) : null,
+    hasModal: parts.length > 1 && !isNaN(parseInt(parts[1]))
+  };
+};
+
+/**
  * Get current tab from URL hash
  */
 export const getTabFromHash = (validTabs, defaultTab = 'dashboard') => {
-  const hash = window.location.hash.substring(1); // Remove the #
-  return validTabs.includes(hash) ? hash : defaultTab;
+  const { tab } = parseUrlHash();
+  return validTabs.includes(tab) ? tab : defaultTab;
+};
+
+/**
+ * Get current content ID from URL hash
+ */
+export const getContentIdFromHash = () => {
+  const { contentId } = parseUrlHash();
+  return contentId;
+};
+
+/**
+ * Update URL hash for tab navigation
+ */
+export const updateUrlForTab = (tabValue) => {
+  const newUrl = `#${tabValue}`;
+  if (window.location.hash !== newUrl) {
+    window.history.pushState(null, null, newUrl);
+  }
+};
+
+/**
+ * Update URL hash for modal navigation
+ */
+export const updateUrlForModal = (tabValue, contentId) => {
+  const newUrl = `#${tabValue}/${contentId}`;
+  if (window.location.hash !== newUrl) {
+    window.history.pushState(null, null, newUrl);
+  }
+};
+
+/**
+ * Close modal and update URL back to tab
+ */
+export const closeModalAndUpdateUrl = (tabValue) => {
+  const newUrl = `#${tabValue}`;
+  if (window.location.hash !== newUrl) {
+    window.history.pushState(null, null, newUrl);
+  }
+};
+
+/**
+ * Check if URL indicates a modal should be open
+ */
+export const shouldOpenModalFromUrl = () => {
+  const { hasModal } = parseUrlHash();
+  return hasModal;
 };
 
 /**
