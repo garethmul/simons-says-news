@@ -2547,7 +2547,9 @@ app.get('/api/eden/settings/image-generation', accountContext, async (req, res) 
       brandColors: [],
       preferredStyleCodes: [],
       defaults: {
+        modelVersion: 'v2', // Add model version to defaults
         aspectRatio: '16:9',
+        resolution: '', // Add resolution to defaults
         styleType: 'GENERAL',
         renderingSpeed: 'DEFAULT',
         magicPrompt: 'AUTO',
@@ -2710,7 +2712,9 @@ app.put('/api/eden/settings/image-generation', accountContext, async (req, res) 
     
     try {
       defaultSettingsJson = JSON.stringify({
+        modelVersion: defaults.modelVersion || 'v2', // Add model version
         aspectRatio: defaults.aspectRatio || '16:9',
+        resolution: defaults.resolution || '', // Add resolution
         styleType: defaults.styleType || 'GENERAL',
         renderingSpeed: defaults.renderingSpeed || 'DEFAULT',
         magicPrompt: defaults.magicPrompt || 'AUTO',
@@ -2808,7 +2812,9 @@ app.put('/api/eden/settings/image-generation', accountContext, async (req, res) 
         promptSuffix: settingsData.prompt_suffix || '',
         brandColors: brandColors,  // Use original data instead of parsing JSON
         defaults: {
+          modelVersion: defaults.modelVersion || 'v2', // Add model version
           aspectRatio: defaults.aspectRatio || '16:9',
+          resolution: defaults.resolution || '', // Add resolution
           styleType: defaults.styleType || 'GENERAL',
           renderingSpeed: defaults.renderingSpeed || 'DEFAULT',
           magicPrompt: defaults.magicPrompt || 'AUTO',

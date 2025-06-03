@@ -697,7 +697,9 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
             
             setFormData(prev => ({
               ...prev,
+              modelVersion: defaults.modelVersion || prev.modelVersion,
               aspectRatio: defaults.aspectRatio || prev.aspectRatio,
+              resolution: defaults.resolution || prev.resolution,
               renderingSpeed: defaults.renderingSpeed || prev.renderingSpeed,
               magicPrompt: defaults.magicPrompt || prev.magicPrompt,
               styleType: validatedStyleType,
@@ -815,7 +817,7 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
         setFormData({
           prompt: '',
           seed: '',
-          resolution: '',
+          resolution: accountSettings?.defaults?.resolution || '',
           aspectRatio: accountSettings?.defaults?.aspectRatio || '16:9',
           renderingSpeed: accountSettings?.defaults?.renderingSpeed || 'DEFAULT',
           magicPrompt: accountSettings?.defaults?.magicPrompt || 'AUTO',
@@ -828,7 +830,7 @@ const IdeogramImageGenerator = ({ contentId, onImageGenerated }) => {
           })(),
           styleCodes: '',
           selectedColorTemplate: '',
-          modelVersion: 'v2'
+          modelVersion: accountSettings?.defaults?.modelVersion || 'v2'
         });
         setShowForm(false);
       } else {

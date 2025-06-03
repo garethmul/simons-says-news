@@ -32,7 +32,9 @@ const ImageGenerationSettings = () => {
     promptSuffix: '',
     brandColors: [],
     defaults: {
+      modelVersion: 'v2',
       aspectRatio: '16:9',
+      resolution: '',
       styleType: 'GENERAL',
       renderingSpeed: 'DEFAULT',
       magicPrompt: 'AUTO',
@@ -55,37 +57,22 @@ const ImageGenerationSettings = () => {
   // Load settings and options on component mount
   useEffect(() => {
     const loadData = async () => {
+      if (!selectedAccount || accountLoading) return;
+      
+      setIsLoading(true);
+      setSaveStatus(null);
+      
       try {
-        setIsLoading(true);
-        
-        // Wait for account loading to complete
-        if (accountLoading) {
-          console.log('⏳ Account context still loading...');
-          setIsLoading(false);
-          return;
-        }
-        
-        // Check if account is selected
-        if (!selectedAccount) {
-          console.warn('⚠️ No account selected yet, waiting...');
-          setIsLoading(false);
-          return;
+        // Load Ideogram options (we'll reload when model version changes)
+        const optionsResponse = await fetch(`/api/eden/images/ideogram/options?modelVersion=${settings.defaults.modelVersion}`);
+        if (optionsResponse.ok) {
+          const optionsData = await optionsResponse.json();
+          setOptions(optionsData.options);
+        } else {
+          console.warn('Failed to load Ideogram options');
         }
 
-        console.log('✅ Account selected:', selectedAccount.name, '- loading settings...');
-
-        // Load Ideogram options (no account context required)
-        try {
-          const optionsResponse = await fetch('/api/eden/images/ideogram/options');
-          if (optionsResponse.ok) {
-            const optionsData = await optionsResponse.json();
-            setOptions(optionsData.options);
-          }
-        } catch (optionsError) {
-          console.warn('Failed to load Ideogram options:', optionsError.message);
-        }
-
-        // Load account image generation settings
+        // Load settings
         try {
           const settingsResponse = await fetch('/api/eden/settings/image-generation', withAccountContext());
           if (settingsResponse.ok) {
@@ -99,7 +86,9 @@ const ImageGenerationSettings = () => {
                 ...prev,
                 defaults: {
                   ...prev.defaults,
+                  modelVersion: defaults.modelVersion || prev.defaults.modelVersion,
                   aspectRatio: defaults.aspectRatio || prev.defaults.aspectRatio,
+                  resolution: defaults.resolution || prev.defaults.resolution,
                   renderingSpeed: defaults.renderingSpeed || prev.defaults.renderingSpeed,
                   magicPrompt: defaults.magicPrompt || prev.defaults.magicPrompt,
                   styleType: defaults.styleType || prev.defaults.styleType,
@@ -107,6 +96,15 @@ const ImageGenerationSettings = () => {
                   numImages: defaults.numImages || prev.defaults.numImages
                 }
               }));
+              
+              // Reload options if model version changed
+              if (defaults.modelVersion && defaults.modelVersion !== settings.defaults.modelVersion) {
+                const newOptionsResponse = await fetch(`/api/eden/images/ideogram/options?modelVersion=${defaults.modelVersion}`);
+                if (newOptionsResponse.ok) {
+                  const newOptionsData = await newOptionsResponse.json();
+                  setOptions(newOptionsData.options);
+                }
+              }
             }
             
             // Load preferred style codes
@@ -126,28 +124,29 @@ const ImageGenerationSettings = () => {
         }
 
         // Load generated images for style preferences
+        setIsLoadingImages(true);
         try {
-          await loadGeneratedImages();
-        } catch (imagesError) {
-          console.warn('Failed to load generated images:', imagesError.message);
+          const historyResponse = await fetch('/api/eden/images/generation-history', withAccountContext());
+          if (historyResponse.ok) {
+            const historyData = await historyResponse.json();
+            setGeneratedImages(historyData.history.slice(0, 20)); // Show last 20 generations
+          }
+        } catch (historyError) {
+          console.warn('Failed to load generation history:', historyError.message);
+        } finally {
+          setIsLoadingImages(false);
         }
         
       } catch (error) {
-        console.error('Failed to load data:', error);
-        setSaveStatus({ type: 'error', message: `Failed to load settings: ${error.message}` });
+        console.error('❌ Failed to load data:', error.message);
+        setSaveStatus({ type: 'error', message: `Failed to load data: ${error.message}` });
       } finally {
         setIsLoading(false);
       }
     };
 
-    // Only load data if we have an account selected and not loading
-    if (!accountLoading && selectedAccount) {
-      loadData();
-    } else {
-      // Set loading to false so we show the appropriate waiting message
-      setIsLoading(false);
-    }
-  }, [selectedAccount, accountLoading, withAccountContext]); // Re-run when account selection or loading state changes
+    loadData();
+  }, [selectedAccount, accountLoading, withAccountContext]);
 
   const handleSaveSettings = async () => {
     if (!selectedAccount) {
@@ -277,7 +276,9 @@ const ImageGenerationSettings = () => {
     setSettings(prev => ({
       ...prev,
       defaults: {
+        modelVersion: 'v2',
         aspectRatio: '16:9',
+        resolution: '',
         styleType: 'GENERAL',
         renderingSpeed: 'DEFAULT',
         magicPrompt: 'AUTO',
@@ -285,30 +286,6 @@ const ImageGenerationSettings = () => {
         numImages: 1
       }
     }));
-  };
-
-  const loadGeneratedImages = async () => {
-    if (!selectedAccount) {
-      console.warn('⚠️ Cannot load generated images - no account selected');
-      return;
-    }
-
-    try {
-      setIsLoadingImages(true);
-      const response = await fetch('/api/eden/images/generation-history?limit=50&status=completed', withAccountContext());
-      if (response.ok) {
-        const data = await response.json();
-        setGeneratedImages(data.history || []);
-        console.log(`✅ Loaded ${data.history?.length || 0} generated images`);
-      } else {
-        const errorData = await response.json();
-        console.error('Failed to load generated images:', errorData.error);
-      }
-    } catch (error) {
-      console.error('Error loading generated images:', error);
-    } finally {
-      setIsLoadingImages(false);
-    }
   };
 
   // Toggle image selection for style preferences
@@ -678,8 +655,55 @@ const ImageGenerationSettings = () => {
             <CardContent className="space-y-4">
               {options && (
                 <>
+                  {/* Model Version Selection */}
+                  <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      🎨 Default Ideogram Model Version
+                    </label>
+                    <select
+                      value={settings.defaults.modelVersion}
+                      onChange={async (e) => {
+                        const newModelVersion = e.target.value;
+                        setSettings(prev => ({
+                          ...prev,
+                          defaults: { ...prev.defaults, modelVersion: newModelVersion }
+                        }));
+                        
+                        // Reload options for the new model version
+                        try {
+                          const newOptionsResponse = await fetch(`/api/eden/images/ideogram/options?modelVersion=${newModelVersion}`);
+                          if (newOptionsResponse.ok) {
+                            const newOptionsData = await newOptionsResponse.json();
+                            setOptions(newOptionsData.options);
+                            
+                            // Validate current style type against new model
+                            const validStyleTypes = newOptionsData.options.styles?.map(s => s.value) || ['GENERAL'];
+                            if (!validStyleTypes.includes(settings.defaults.styleType)) {
+                              setSettings(prev => ({
+                                ...prev,
+                                defaults: { ...prev.defaults, styleType: 'GENERAL' }
+                              }));
+                            }
+                          }
+                        } catch (error) {
+                          console.error('Failed to reload options:', error);
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                    >
+                      <option value="v3">Version 3.0 (Latest, Best Quality) - 4 styles</option>
+                      <option value="v2">Version 2.0/2a (ANIME + 3D) - 6 styles</option>
+                      <option value="v1">Version 1.0 (Most Styles) - 20+ styles</option>
+                    </select>
+                    <p className="text-xs text-blue-700 mt-1">
+                      {settings.defaults.modelVersion === 'v3' && 'Latest model with highest quality. Limited to 4 core styles.'}
+                      {settings.defaults.modelVersion === 'v2' && 'Includes ANIME and 3D styles! Good balance of quality and options.'}
+                      {settings.defaults.modelVersion === 'v1' && 'Widest style selection including Cinematic, Dark Fantasy, Graffiti, and more.'}
+                    </p>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {/* Aspect Ratio */}
+                    {/* Aspect Ratio vs Resolution */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Default Aspect Ratio
@@ -691,6 +715,7 @@ const ImageGenerationSettings = () => {
                           defaults: { ...prev.defaults, aspectRatio: e.target.value }
                         }))}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled={!!settings.defaults.resolution}
                       >
                         {options.aspectRatios.map(ratio => (
                           <option key={ratio.value} value={ratio.value}>
@@ -698,6 +723,34 @@ const ImageGenerationSettings = () => {
                           </option>
                         ))}
                       </select>
+                      {settings.defaults.resolution && (
+                        <p className="text-xs text-gray-500 mt-1">Disabled when using specific resolution</p>
+                      )}
+                    </div>
+
+                    {/* Resolution Override */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Default Resolution (Optional)
+                      </label>
+                      <select
+                        value={settings.defaults.resolution}
+                        onChange={(e) => setSettings(prev => ({
+                          ...prev,
+                          defaults: { ...prev.defaults, resolution: e.target.value }
+                        }))}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="">Use Aspect Ratio Instead</option>
+                        {options.resolutions && options.resolutions.map(res => (
+                          <option key={res.value} value={res.value}>
+                            {res.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Override aspect ratio with exact pixel dimensions
+                      </p>
                     </div>
 
                     {/* Style Type */}

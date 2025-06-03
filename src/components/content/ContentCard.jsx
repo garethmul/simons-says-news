@@ -303,66 +303,56 @@ const AssociatedContent = ({ content }) => {
 /**
  * Image Gallery Component
  */
-const ImageGallery = ({ images, contentId }) => (
-  <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
-    <div className="flex items-center gap-2 mb-3">
-      <Image className="w-4 h-4 text-gray-600" />
-      <span className="text-sm font-medium text-gray-700">Generated Images ({images.length})</span>
-      <Badge variant="secondary" className="text-xs">Sirv CDN + Pexels</Badge>
+const ImageGallery = ({ images, contentId }) => {
+  // Sort images by creation date (most recent first)
+  const sortedImages = [...images].sort((a, b) => {
+    const dateA = new Date(a.created || a.created_at || 0);
+    const dateB = new Date(b.created || b.created_at || 0);
+    return dateB - dateA;
+  });
+
+  return (
+    <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
+      <div className="flex items-center gap-2 mb-3">
+        <Image className="w-4 h-4 text-gray-600" />
+        <span className="text-sm font-medium text-gray-700">Generated Images ({sortedImages.length})</span>
+        <Badge variant="secondary" className="text-xs">Sirv CDN + Pexels</Badge>
+      </div>
+      
+      {/* Horizontal scrolling carousel */}
+      <div className="flex gap-2 overflow-x-auto pb-2">
+        {sortedImages.map((image, imageIndex) => (
+          <ImageThumbnail 
+            key={`content-${contentId}-image-${image.id || imageIndex}`}
+            image={image} 
+            index={imageIndex} 
+          />
+        ))}
+      </div>
+      
+      <div className="mt-2 text-xs text-gray-500">
+        Images sourced from Pexels and optimised via Sirv CDN • AI-generated alt text and search queries
+      </div>
     </div>
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-      {images.map((image, imageIndex) => (
-        <ImageThumbnail 
-          key={`content-${contentId}-image-${image.id || imageIndex}`}
-          image={image} 
-          index={imageIndex} 
-        />
-      ))}
-    </div>
-    <div className="mt-2 text-xs text-gray-500">
-      Images sourced from Pexels and optimised via Sirv CDN • AI-generated alt text and search queries
-    </div>
-  </div>
-);
+  );
+};
 
 /**
  * Image Thumbnail Component
  */
 const ImageThumbnail = ({ image, index }) => (
-  <div className="relative group">
-    <div className="aspect-square rounded-lg overflow-hidden bg-gray-200 border">
+  <div className="flex-shrink-0">
+    <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-200 border hover:border-blue-300 transition-colors cursor-pointer">
       <img
         src={image.sirvUrl}
         alt={image.altText}
-        className="w-full h-full object-cover transition-transform group-hover:scale-105"
+        className="w-full h-full object-cover hover:scale-105 transition-transform"
         loading="lazy"
+        onClick={() => window.open(image.sirvUrl, '_blank')}
         onError={(e) => {
-          e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjNmNGY2Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNHB4IiBmaWxsPSIjNjU3Mzg5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+SW1hZ2UgZXJyb3I8L3RleHQ+PC9zdmc+';
+          e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2YzZjRmNiIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTBweCIgZmlsbD0iIzY1NzM4OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPjwhLS0gZXJyb3IgLS0+PC90ZXh0Pjwvc3ZnPg==';
         }}
       />
-    </div>
-    {/* Image overlay with details */}
-    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-75 transition-all duration-200 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
-      <div className="text-white text-center p-2">
-        <div className="text-xs font-medium mb-1">#{index + 1}</div>
-        <div className="text-xs text-gray-200 line-clamp-2 mb-2">{image.altText}</div>
-        <div className="flex gap-1">
-          <Button
-            size="sm"
-            variant="secondary"
-            className="h-6 px-2 text-xs"
-            onClick={() => window.open(image.sirvUrl, '_blank')}
-          >
-            <ExternalLink className="w-3 h-3" />
-          </Button>
-        </div>
-      </div>
-    </div>
-    {/* Search query badge */}
-    <div className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity">
-      <Badge variant="outline" className="text-xs bg-white/90 text-gray-700">
-        {image.query}
-      </Badge>
     </div>
   </div>
 );
