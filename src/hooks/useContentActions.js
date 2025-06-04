@@ -144,7 +144,73 @@ export const useContentActions = (onDataRefresh) => {
     }
   }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
 
-  // Generate content from story
+  // Regenerate content - archives existing content and creates new job
+  const regenerateContent = useCallback(async (contentId, storyId, onTabChange) => {
+    if (!selectedAccount) {
+      throw new Error('No account selected');
+    }
+    
+    const actionId = `regenerate-${contentId}`;
+    
+    try {
+      setActionLoading(actionId, true);
+      console.log(`🔄 Regenerating content ${contentId} from story ${storyId} in account ${selectedAccount.name}`);
+      
+      // First, archive the current content to remove it from review
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      const statusResponse = await fetch(`${baseUrl}/api/eden/content/article/${contentId}/status`, {
+        ...withAccountContext({
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'archived' })
+        })
+      });
+
+      if (!statusResponse.ok) {
+        const errorData = await statusResponse.json();
+        throw new Error(`Failed to archive content: ${errorData.error}`);
+      }
+
+      console.log('✅ Original content archived');
+
+      // Then create the regeneration job
+      const jobResponse = await fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_GENERATE}`, {
+        ...withAccountContext({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 1, specificStoryId: storyId })
+        })
+      });
+
+      if (jobResponse.ok) {
+        const data = await jobResponse.json();
+        console.log('✅ Regeneration job created:', data.jobId);
+        
+        // Refresh data to update tabs
+        if (onDataRefresh) await onDataRefresh();
+        
+        // Switch to queued tab if provided
+        if (onTabChange) onTabChange('queued');
+        
+        return { 
+          success: true, 
+          jobId: data.jobId,
+          message: `Original content archived and regeneration job created! Job ID: ${data.jobId}`
+        };
+      } else {
+        const errorData = await jobResponse.json();
+        console.error('❌ Regeneration job creation failed:', errorData.error);
+        throw new Error(`Failed to create regeneration job: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Regeneration error:', error);
+      throw new Error(`Error regenerating content: ${error.message}`);
+    } finally {
+      setActionLoading(actionId, false);
+    }
+  }, [onDataRefresh, setActionLoading, selectedAccount, withAccountContext]);
+
+  // Generate content from story (original function)
   const generateContentFromStory = useCallback(async (storyId, onTabChange) => {
     if (!selectedAccount) {
       throw new Error('No account selected');
@@ -326,6 +392,7 @@ export const useContentActions = (onDataRefresh) => {
     rejectContent,
     updateContentStatus,
     generateContentFromStory,
+    regenerateContent,
     analyzeMoreArticles,
     runFullCycle,
     createContentJob,

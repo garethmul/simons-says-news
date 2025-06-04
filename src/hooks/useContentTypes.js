@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_ENDPOINTS } from '../utils/constants';
+import { useAccount } from '../contexts/AccountContext';
 
 /**
  * Custom hook for dynamic content type management
@@ -11,14 +12,23 @@ export const useContentTypes = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Get account context for API requests
+  const { selectedAccount, withAccountContext } = useAccount();
+
   // Fetch content types from API
   const fetchContentTypes = useCallback(async () => {
+    // Don't fetch if no account is selected
+    if (!selectedAccount) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
 
       const baseUrl = import.meta.env.VITE_API_URL || '';
-      const response = await fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_TYPES}`);
+      const response = await fetch(`${baseUrl}${API_ENDPOINTS.CONTENT_TYPES}`, withAccountContext());
       
       if (response.ok) {
         const data = await response.json();
@@ -84,7 +94,7 @@ export const useContentTypes = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedAccount, withAccountContext]);
 
   // Get display name for a content type
   const getContentTypeName = useCallback((typeId) => {
@@ -117,7 +127,7 @@ export const useContentTypes = () => {
     return !!contentTypeMap[typeId];
   }, [contentTypeMap]);
 
-  // Load content types on mount
+  // Load content types when account changes
   useEffect(() => {
     fetchContentTypes();
   }, [fetchContentTypes]);

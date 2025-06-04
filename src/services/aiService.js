@@ -814,6 +814,158 @@ class AIService {
     return themes.slice(0, 5); // Return up to 5 themes
   }
 
+  /**
+   * Generate content with pre-built prompts for workflow chaining
+   */
+  async generateSocialMediaPostsWithPrompt(prompt, systemMessage, generatedArticleId = null) {
+    return await this.generateWithPrompt(prompt, systemMessage, 'social_media', generatedArticleId);
+  }
+
+  async generateVideoScriptWithPrompt(prompt, systemMessage, generatedArticleId = null) {
+    return await this.generateWithPrompt(prompt, systemMessage, 'video_script', generatedArticleId);
+  }
+
+  async generatePrayerPointsWithPrompt(prompt, systemMessage, generatedArticleId = null) {
+    return await this.generateWithPrompt(prompt, systemMessage, 'prayer_points', generatedArticleId);
+  }
+
+  async generateGenericContentWithPrompt(prompt, systemMessage, category, generatedArticleId = null) {
+    return await this.generateWithPrompt(prompt, systemMessage, category, generatedArticleId);
+  }
+
+  /**
+   * Core method for generating content with pre-built prompts
+   */
+  async generateWithPrompt(prompt, systemMessage, category, generatedArticleId = null, generationConfig = {}) {
+    try {
+      const startTime = Date.now();
+      
+      // Use generation config or defaults
+      const config = {
+        temperature: generationConfig?.temperature || 0.7,
+        maxOutputTokens: generationConfig?.max_tokens || 1500,
+        ...generationConfig
+      };
+
+      const response = await this.geminiModel.generateContent({
+        contents: [{ 
+          role: 'user', 
+          parts: [{ text: prompt }] 
+        }],
+        systemInstruction: systemMessage || `You are an AI assistant generating ${category} content for Christian audiences.`,
+        generationConfig: config
+      });
+
+      const generationTime = Date.now() - startTime;
+      const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
+      const resultText = response.response.text();
+
+      console.log(`✨ Generated ${category} content: ${resultText.substring(0, 100)}...`);
+      
+      const processingTime = Date.now() - startTime;
+      console.log(`⏱️ ${category} generation completed in ${processingTime}ms`);
+      
+      return resultText;
+    } catch (error) {
+      console.error(`❌ Error generating ${category} content with prompt:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generic content generation for new template types
+   * This enables extensible content generation without hardcoded methods
+   */
+  async generateGenericContent(category, article, generationConfig, generatedArticleId = null) {
+    try {
+      const startTime = Date.now();
+      
+      // Ensure prompt manager is available
+      const promptManager = await this.ensurePromptManager();
+      
+      // Get prompt template for this category
+      let promptData;
+      try {
+        promptData = await promptManager.getPromptForGeneration(category, {
+          article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
+        });
+      } catch (error) {
+        console.log(`⚠️ Could not get ${category} template: ${error.message}`);
+        throw error;
+      }
+
+      // Use generation config or defaults
+      const config = {
+        temperature: generationConfig?.temperature || 0.7,
+        maxOutputTokens: generationConfig?.max_tokens || 1500,
+        ...generationConfig
+      };
+
+      const response = await this.geminiModel.generateContent({
+        contents: [{ 
+          role: 'user', 
+          parts: [{ text: promptData.prompt }] 
+        }],
+        systemInstruction: promptData.systemMessage || `You are an AI assistant generating ${category} content for Christian audiences.`,
+        generationConfig: config
+      });
+
+      const generationTime = Date.now() - startTime;
+      const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
+      const resultText = response.response.text();
+
+      // Log the generation
+      if (generatedArticleId && generatedArticleId !== 999) {
+        try {
+          await promptManager.logGeneration(
+            generatedArticleId,
+            promptData.templateId,
+            promptData.versionId,
+            'gemini',
+            'gemini-1.5-flash',
+            tokensUsed,
+            generationTime,
+            true
+          );
+        } catch (logError) {
+          console.warn('⚠️ Failed to log generation (non-critical):', logError.message);
+        }
+      }
+
+      console.log(`✨ Generated ${category} content: ${resultText.substring(0, 100)}...`);
+      
+      const processingTime = Date.now() - startTime;
+      console.log(`⏱️ ${category} generation completed in ${processingTime}ms`);
+      
+      return resultText;
+    } catch (error) {
+      console.error(`❌ Error generating ${category} content:`, error);
+      
+      // Log the error
+      if (generatedArticleId && generatedArticleId !== 999) {
+        try {
+          const promptManager = await this.ensurePromptManager();
+          const promptData = await promptManager.getPromptForGeneration(category, {});
+          await promptManager.logGeneration(
+            generatedArticleId,
+            promptData.templateId,
+            promptData.versionId,
+            'gemini',
+            'gemini-1.5-flash',
+            0,
+            0,
+            false,
+            error.message
+          );
+        } catch (logError) {
+          console.warn('⚠️ Failed to log generation error (non-critical):', logError.message);
+        }
+      }
+      
+      throw error;
+    }
+  }
+
   async generateImageSearchQueries(content, count = 3) {
     const prompt = `For an article about "${content.title}", suggest ${count} AI image generation prompts suitable for creating custom images with Ideogram.
     

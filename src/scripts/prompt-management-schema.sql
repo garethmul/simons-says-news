@@ -1,14 +1,19 @@
 -- Prompt Templates Table
 CREATE TABLE IF NOT EXISTS ssnews_prompt_templates (
     template_id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE,
+    account_id VARCHAR(64) NOT NULL,
+    name VARCHAR(255) NOT NULL,
     description TEXT,
     category ENUM('blog_post', 'social_media', 'video_script', 'analysis', 'prayer', 'image_generation', 'devotional', 'newsletter', 'sermon') NOT NULL,
+    execution_order INT DEFAULT 999,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_category (category),
-    INDEX idx_active (is_active)
+    INDEX idx_active (is_active),
+    INDEX idx_account_id (account_id),
+    INDEX idx_execution_order (account_id, execution_order),
+    UNIQUE KEY unique_name_per_account (account_id, name)
 );
 
 -- Prompt Versions Table

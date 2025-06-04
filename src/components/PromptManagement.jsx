@@ -31,7 +31,11 @@ import {
   Heart,
   BookOpen,
   Users,
-  Share2
+  Share2,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
+  Workflow
 } from 'lucide-react';
 import HelpSection from './common/HelpSection';
 
@@ -148,6 +152,11 @@ const PromptManagement = () => {
   const [newTemplatePrompt, setNewTemplatePrompt] = useState('');
   const [newTemplateSystemMessage, setNewTemplateSystemMessage] = useState('');
 
+  // Prompt ordering and chaining states
+  const [showWorkflowView, setShowWorkflowView] = useState(false);
+  const [templateOrder, setTemplateOrder] = useState([]);
+  const [dragging, setDragging] = useState(null);
+
   const { selectedAccount, selectedOrganization, withAccountContext } = useAccount();
 
   useEffect(() => {
@@ -189,7 +198,12 @@ const PromptManagement = () => {
       const data = await response.json();
       
       if (data.success) {
-        setTemplates(data.templates);
+        // Sort templates by execution order (for workflow view)
+        const sortedTemplates = data.templates.sort((a, b) => 
+          (a.execution_order || 999) - (b.execution_order || 999)
+        );
+        setTemplates(sortedTemplates);
+        setTemplateOrder(sortedTemplates.map(t => t.template_id));
         console.log(`📋 Loaded ${data.templates.length} templates for ${selectedAccount.name}`);
       } else {
         throw new Error(data.error || 'Failed to fetch templates');
@@ -391,6 +405,95 @@ const PromptManagement = () => {
     }
   };
 
+  // Prompt ordering and workflow functions
+  const moveTemplate = async (templateId, direction) => {
+    if (!selectedAccount) return;
+    
+    const currentIndex = templateOrder.indexOf(templateId);
+    if (currentIndex === -1) return;
+    
+    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (newIndex < 0 || newIndex >= templateOrder.length) return;
+    
+    const newOrder = [...templateOrder];
+    [newOrder[currentIndex], newOrder[newIndex]] = [newOrder[newIndex], newOrder[currentIndex]];
+    
+    setTemplateOrder(newOrder);
+    await updateTemplateOrder(newOrder);
+  };
+
+  const updateTemplateOrder = async (newOrder) => {
+    if (!selectedAccount) return;
+    
+    try {
+      const orderUpdates = newOrder.map((templateId, index) => ({
+        templateId,
+        executionOrder: index + 1
+      }));
+
+      const response = await fetch('/api/prompts/templates/reorder', {
+        ...withAccountContext({
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order: orderUpdates })
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        await fetchTemplates(); // Refresh to get updated order
+        console.log('✅ Template order updated successfully');
+      }
+    } catch (error) {
+      console.error('Error updating template order:', error);
+    }
+  };
+
+  const handleDragStart = (e, templateId) => {
+    setDragging(templateId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e, targetTemplateId) => {
+    e.preventDefault();
+    
+    if (!dragging || dragging === targetTemplateId) {
+      setDragging(null);
+      return;
+    }
+    
+    const dragIndex = templateOrder.indexOf(dragging);
+    const dropIndex = templateOrder.indexOf(targetTemplateId);
+    
+    const newOrder = [...templateOrder];
+    newOrder.splice(dragIndex, 1);
+    newOrder.splice(dropIndex, 0, dragging);
+    
+    setTemplateOrder(newOrder);
+    updateTemplateOrder(newOrder);
+    setDragging(null);
+  };
+
+  const getAvailablePlaceholders = (currentTemplateId) => {
+    const currentIndex = templateOrder.indexOf(currentTemplateId);
+    const previousTemplates = templateOrder.slice(0, currentIndex);
+    
+    return previousTemplates.map(templateId => {
+      const template = templates.find(t => t.template_id === templateId);
+      return {
+        id: templateId,
+        name: template?.name || 'Unknown',
+        category: template?.category || 'unknown',
+        placeholder: `{${template?.category || 'output'}_output}`
+      };
+    });
+  };
+
   const getCategoryIcon = (category) => {
     switch (category) {
       case 'blog_post': return <FileText className="w-4 h-4" />;
@@ -487,11 +590,23 @@ const PromptManagement = () => {
           <div className="lg:col-span-1">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="w-5 h-5" />
-                  Prompt Templates
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Prompt Templates
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowWorkflowView(!showWorkflowView)}
+                    className={showWorkflowView ? 'bg-blue-100 text-blue-600' : ''}
+                  >
+                    <Workflow className="w-4 h-4" />
+                  </Button>
                 </CardTitle>
-                <CardDescription>Select a template to manage</CardDescription>
+                <CardDescription>
+                  {showWorkflowView ? 'Workflow view - drag to reorder execution' : 'Select a template to manage'}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
                 <div className="mb-4">
@@ -588,33 +703,107 @@ const PromptManagement = () => {
                   </Card>
                 )}
 
-                {templates.map((template) => (
-                  <div
-                    key={template.template_id}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                      selectedTemplate?.template_id === template.template_id
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                    onClick={() => setSelectedTemplate(template)}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {getCategoryIcon(template.category)}
-                        <span className="font-medium">{template.name}</span>
-                      </div>
-                      <Badge className={getCategoryColor(template.category)}>
-                        {template.category.replace('_', ' ')}
-                      </Badge>
+                {showWorkflowView ? (
+                  /* Workflow View - Draggable with order indicators */
+                  <div className="space-y-2">
+                    <div className="text-xs text-gray-500 mb-3 p-2 bg-blue-50 rounded">
+                      💡 Templates execute in this order. Drag to reorder, or use ↑↓ buttons.
                     </div>
-                    <div className="text-sm text-gray-600 mb-2">{template.description}</div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <span>v{template.current_version}</span>
-                      <span>•</span>
-                      <span>Updated {new Date(template.updated_at).toLocaleDateString()}</span>
-                    </div>
+                    {templateOrder.map((templateId, index) => {
+                      const template = templates.find(t => t.template_id === templateId);
+                      if (!template) return null;
+                      
+                      return (
+                        <div
+                          key={template.template_id}
+                          className={`p-3 rounded-lg border transition-all ${
+                            selectedTemplate?.template_id === template.template_id
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          } ${dragging === template.template_id ? 'opacity-50' : ''}`}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, template.template_id)}
+                          onDragOver={handleDragOver}
+                          onDrop={(e) => handleDrop(e, template.template_id)}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="flex flex-col">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-4 p-0 text-gray-400 hover:text-gray-600"
+                                onClick={() => moveTemplate(template.template_id, 'up')}
+                                disabled={index === 0}
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-4 p-0 text-gray-400 hover:text-gray-600"
+                                onClick={() => moveTemplate(template.template_id, 'down')}
+                                disabled={index === templateOrder.length - 1}
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </Button>
+                            </div>
+                            <GripVertical className="w-4 h-4 text-gray-400 cursor-grab" />
+                            <div className="bg-blue-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
+                              {index + 1}
+                            </div>
+                            <div className="flex-1" onClick={() => setSelectedTemplate(template)}>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  {getCategoryIcon(template.category)}
+                                  <span className="font-medium">{template.name}</span>
+                                </div>
+                                <Badge className={getCategoryColor(template.category)}>
+                                  {template.category.replace('_', ' ')}
+                                </Badge>
+                              </div>
+                              <div className="text-sm text-gray-600 mt-1">{template.description}</div>
+                              {/* Show available inputs for this step */}
+                              {index > 0 && (
+                                <div className="mt-2 text-xs text-green-600">
+                                  📎 Can use: {getAvailablePlaceholders(template.template_id).map(p => p.placeholder).join(', ')}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
+                ) : (
+                  /* Normal View - Simple list */
+                  templates.map((template) => (
+                    <div
+                      key={template.template_id}
+                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                        selectedTemplate?.template_id === template.template_id
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                      onClick={() => setSelectedTemplate(template)}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          {getCategoryIcon(template.category)}
+                          <span className="font-medium">{template.name}</span>
+                        </div>
+                        <Badge className={getCategoryColor(template.category)}>
+                          {template.category.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                      <div className="text-sm text-gray-600 mb-2">{template.description}</div>
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <span>v{template.current_version}</span>
+                        <span>•</span>
+                        <span>Updated {new Date(template.updated_at).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </CardContent>
             </Card>
           </div>
@@ -662,6 +851,34 @@ const PromptManagement = () => {
                         <div className="space-y-4">
                           <div>
                             <Label htmlFor="prompt-content">Prompt Content</Label>
+                            {showWorkflowView && (
+                              <div className="mb-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                <div className="text-sm font-medium text-yellow-800 mb-2">💡 Available Placeholders:</div>
+                                <div className="space-y-1 text-xs">
+                                  <div className="text-yellow-700">
+                                    <code className="bg-yellow-100 px-1 rounded">{`{article_content}`}</code> - Original article content
+                                  </div>
+                                  {getAvailablePlaceholders(selectedTemplate.template_id).map((placeholder, index) => (
+                                    <div key={index} className="text-green-700">
+                                      <code 
+                                        className="bg-green-100 px-1 rounded cursor-pointer hover:bg-green-200"
+                                        onClick={() => {
+                                          const cursorPos = document.getElementById('prompt-content').selectionStart;
+                                          const beforeCursor = newPromptContent.substring(0, cursorPos);
+                                          const afterCursor = newPromptContent.substring(cursorPos);
+                                          setNewPromptContent(beforeCursor + placeholder.placeholder + afterCursor);
+                                        }}
+                                      >
+                                        {placeholder.placeholder}
+                                      </code> - Output from {placeholder.name}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="text-xs text-yellow-600 mt-2">
+                                  💡 Click a placeholder to insert it at cursor position
+                                </div>
+                              </div>
+                            )}
                             <Textarea
                               id="prompt-content"
                               value={newPromptContent}

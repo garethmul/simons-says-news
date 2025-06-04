@@ -22,6 +22,28 @@ router.get('/prompts/templates', accountContext, async (req, res) => {
   }
 });
 
+// Update template execution order
+router.put('/prompts/templates/reorder', accountContext, async (req, res) => {
+  try {
+    const accountId = req.accountContext.accountId;
+    const { order } = req.body;
+    
+    if (!Array.isArray(order)) {
+      return res.status(400).json({ error: 'Order must be an array' });
+    }
+    
+    await promptManager.updateTemplateOrder(accountId, order);
+    
+    res.json({
+      success: true,
+      message: 'Template order updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating template order:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get a specific prompt template by ID
 router.get('/prompts/templates/:templateId', accountContext, async (req, res) => {
   try {

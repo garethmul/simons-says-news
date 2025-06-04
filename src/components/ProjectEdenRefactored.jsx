@@ -75,6 +75,7 @@ const ProjectEden = () => {
     rejectContent,
     updateContentStatus,
     generateContentFromStory,
+    regenerateContent,
     analyzeMoreArticles,
     runFullCycle,
     isActionLoading,
@@ -292,6 +293,31 @@ const ProjectEden = () => {
     } catch (error) {
       console.error('Full cycle error:', error);
       setShowProgressModal(false);
+    }
+  };
+
+  // Regenerate content handler
+  const handleRegenerateContent = async (contentOrStoryId) => {
+    try {
+      // If called from content review/management, contentOrStoryId is a content object
+      if (typeof contentOrStoryId === 'object' && contentOrStoryId.gen_article_id) {
+        const content = contentOrStoryId;
+        const contentId = content.gen_article_id;
+        const storyId = content.sourceArticle?.article_id || content.based_on_scraped_article_id;
+        
+        if (!storyId) {
+          console.error('❌ No source article ID found for regeneration');
+          throw new Error('Cannot regenerate: No source article found');
+        }
+        
+        await regenerateContent(contentId, storyId, handleTabChange);
+      } else {
+        // If called from stories tab, contentOrStoryId is just the story ID
+        await generateContentFromStory(contentOrStoryId, handleTabChange);
+      }
+    } catch (error) {
+      console.error('Regeneration error:', error);
+      // Could show a toast notification here
     }
   };
 
@@ -515,6 +541,7 @@ const ProjectEden = () => {
                 onApprove={approveContent}
                 onReject={rejectContent}
                 onReview={openDetailedReview}
+                onRegenerate={handleRegenerateContent}
                 isActionLoading={isActionLoading}
               />
             </TabsContent>
@@ -549,7 +576,7 @@ const ProjectEden = () => {
                 stats={stats}
                 loading={loading}
                 onReturnToReview={updateContentStatus}
-                onRegenerate={generateContentFromStory}
+                onRegenerate={handleRegenerateContent}
                 onReview={openDetailedReview}
                 isActionLoading={isActionLoading}
               />
@@ -631,7 +658,7 @@ const ProjectEden = () => {
           onReturnToReview={updateContentStatus}
           onReturnToApproved={updateContentStatus}
           onArchive={updateContentStatus}
-          onRegenerate={generateContentFromStory}
+          onRegenerate={handleRegenerateContent}
           isActionLoading={isActionLoading}
           {...getModalActionProps()}
         />

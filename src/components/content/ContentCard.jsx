@@ -410,6 +410,18 @@ const ActionButtons = ({
           <X className="w-4 h-4 mr-2" />
           Reject
         </Button>
+        {onRegenerate && (
+          <Button 
+            size="sm" 
+            variant="secondary"
+            onClick={() => onRegenerate(content)}
+            disabled={loading || isUpdating}
+            className="text-gray-700 hover:text-gray-900"
+          >
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Regenerate
+          </Button>
+        )}
       </>
     )}
     
@@ -463,7 +475,7 @@ const ActionButtons = ({
         <Button 
           size="sm" 
           variant="default"
-          onClick={() => onRegenerate(content.sourceArticle?.article_id || content.gen_article_id)}
+          onClick={() => onRegenerate(content)}
           disabled={loading || isUpdating}
         >
           <RotateCcw className="w-4 h-4 mr-2" />
@@ -486,7 +498,7 @@ const ActionButtons = ({
         <Button 
           size="sm" 
           variant="default"
-          onClick={() => onRegenerate(content.sourceArticle?.article_id || content.gen_article_id)}
+          onClick={() => onRegenerate(content)}
           disabled={loading || isUpdating}
         >
           <RotateCcw className="w-4 h-4 mr-2" />

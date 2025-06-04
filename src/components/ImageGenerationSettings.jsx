@@ -715,7 +715,7 @@ const ImageGenerationSettings = () => {
                       Colors
                     </label>
                     <div className="flex flex-wrap gap-2 mb-3">
-                      {newColorSet.colors.map((color, index) => (
+                      {newColorSet.colors?.map((color, index) => (
                         <div key={index} className="flex items-center gap-2">
                           <input
                             type="color"
@@ -846,11 +846,11 @@ const ImageGenerationSettings = () => {
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         disabled={!!settings.defaults.resolution}
                       >
-                        {options.aspectRatios.map(ratio => (
+                        {options.aspectRatios?.map(ratio => (
                           <option key={ratio.value} value={ratio.value}>
                             {ratio.label}
                           </option>
-                        ))}
+                        )) || <option value="">Loading...</option>}
                       </select>
                       {settings.defaults.resolution && (
                         <p className="text-xs text-gray-500 mt-1">Disabled when using specific resolution</p>
@@ -871,11 +871,11 @@ const ImageGenerationSettings = () => {
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
                         <option value="">Use Aspect Ratio Instead</option>
-                        {options.resolutions && options.resolutions.map(res => (
+                        {options.resolutions?.map(res => (
                           <option key={res.value} value={res.value}>
                             {res.label}
                           </option>
-                        ))}
+                        )) || <option value="">Loading...</option>}
                       </select>
                       <p className="text-xs text-gray-500 mt-1">
                         Override aspect ratio with exact pixel dimensions
@@ -895,11 +895,11 @@ const ImageGenerationSettings = () => {
                         }))}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
-                        {options.styles.map(style => (
+                        {options.styles?.map(style => (
                           <option key={style.value} value={style.value}>
                             {style.label}
                           </option>
-                        ))}
+                        )) || <option value="">Loading...</option>}
                       </select>
                     </div>
 
@@ -916,11 +916,11 @@ const ImageGenerationSettings = () => {
                         }))}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
-                        {options.renderingSpeeds.map(speed => (
+                        {options.renderingSpeeds?.map(speed => (
                           <option key={speed.value} value={speed.value}>
                             {speed.label}
                           </option>
-                        ))}
+                        )) || <option value="">Loading...</option>}
                       </select>
                     </div>
 
@@ -937,11 +937,11 @@ const ImageGenerationSettings = () => {
                         }))}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
-                        {options.magicPromptOptions.map(option => (
+                        {options.magicPromptOptions?.map(option => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
-                        ))}
+                        )) || <option value="">Loading...</option>}
                       </select>
                     </div>
 
@@ -958,11 +958,11 @@ const ImageGenerationSettings = () => {
                         }))}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
-                        {options.numImagesOptions.map(num => (
+                        {options.numImagesOptions?.map(num => (
                           <option key={num} value={num}>
                             {num} image{num > 1 ? 's' : ''}
                           </option>
-                        ))}
+                        )) || <option value="1">Loading...</option>}
                       </select>
                     </div>
                   </div>

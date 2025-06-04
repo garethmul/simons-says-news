@@ -460,6 +460,89 @@ class PromptManager {
     }
   }
 
+  // Update template execution order for workflow chaining
+  async updateTemplateOrder(accountId, orderUpdates) {
+    const connection = await this.db.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      // Update execution order for each template
+      for (const { templateId, executionOrder } of orderUpdates) {
+        // Verify template belongs to account
+        const [templateCheck] = await connection.execute(`
+          SELECT template_id FROM ssnews_prompt_templates 
+          WHERE template_id = ? AND account_id = ?
+        `, [templateId, accountId]);
+        
+        if (templateCheck.length === 0) {
+          throw new Error(`Template ${templateId} not found or access denied`);
+        }
+
+        // Update execution order
+        await connection.execute(`
+          UPDATE ssnews_prompt_templates 
+          SET execution_order = ?, updated_at = CURRENT_TIMESTAMP 
+          WHERE template_id = ? AND account_id = ?
+        `, [executionOrder, templateId, accountId]);
+      }
+
+      await connection.commit();
+      console.log(`✅ Updated execution order for ${orderUpdates.length} templates in account ${accountId}`);
+    } catch (error) {
+      await connection.rollback();
+      console.error('❌ Error updating template order:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  // Get prompts for workflow execution with chaining support
+  async getWorkflowPrompts(accountId, variables = {}) {
+    try {
+      // Get all active templates ordered by execution order
+      const templates = await this.getAllTemplates(accountId);
+      const orderedTemplates = templates
+        .filter(t => t.is_active)
+        .sort((a, b) => (a.execution_order || 999) - (b.execution_order || 999));
+
+      const workflowSteps = [];
+      
+      for (const template of orderedTemplates) {
+        let prompt = template.current_prompt;
+        let systemMessage = template.current_system_message;
+
+        // Replace variables in prompt (including outputs from previous steps)
+        for (const [key, value] of Object.entries(variables)) {
+          const placeholder = `{${key}}`;
+          if (prompt) {
+            prompt = prompt.replace(new RegExp(placeholder, 'g'), value || '');
+          }
+          if (systemMessage) {
+            systemMessage = systemMessage.replace(new RegExp(placeholder, 'g'), value || '');
+          }
+        }
+
+        workflowSteps.push({
+          templateId: template.template_id,
+          versionId: template.current_version_id,
+          category: template.category,
+          name: template.name,
+          executionOrder: template.execution_order || 999,
+          prompt,
+          systemMessage,
+          parameters: template.current_parameters ? JSON.parse(template.current_parameters) : null
+        });
+      }
+
+      return workflowSteps;
+    } catch (error) {
+      console.error('❌ Error getting workflow prompts:', error);
+      throw error;
+    }
+  }
+
   // Legacy method name for backward compatibility
   async getTemplates(accountId = null) {
     return this.getAllTemplates(accountId);

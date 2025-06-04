@@ -23,6 +23,7 @@ const ContentReviewTab = ({
   onApprove,
   onReject,
   onReview,
+  onRegenerate,
   isActionLoading
 }) => {
   // Dynamic content types
@@ -156,6 +157,7 @@ const ContentReviewTab = ({
               <li>Review each content piece for accuracy and tone</li>
               <li>Check source article information for context</li>
               <li>Approve quality content or reject for revision</li>
+              <li>Use "Regenerate" to create fresh content from the same source</li>
               <li>Approved content moves to the "Approved Content" tab</li>
             </ul>
           </HelpSection>
@@ -184,6 +186,7 @@ const ContentReviewTab = ({
                 onApprove={onApprove}
                 onReject={onReject}
                 onReview={onReview}
+                onRegenerate={onRegenerate}
                 loading={loading}
                 isActionLoading={isActionLoading}
               />
@@ -227,6 +230,7 @@ const ContentList = ({
   onApprove,
   onReject,
   onReview,
+  onRegenerate,
   loading,
   isActionLoading
 }) => (
@@ -245,6 +249,7 @@ const ContentList = ({
         onApprove={onApprove}
         onReject={onReject}
         onReview={onReview}
+        onRegenerate={onRegenerate}
         showApprovalActions={true}
         showPublishActions={false}
         loading={loading}

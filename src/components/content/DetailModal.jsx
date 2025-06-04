@@ -408,7 +408,7 @@ const DetailModal = ({
               <Button 
                 variant="outline"
                 onClick={() => {
-                  onRegenerate(selectedContent.sourceArticle?.article_id || selectedContent.gen_article_id);
+                  onRegenerate(selectedContent);
                   onClose();
                 }}
                 className="flex items-center gap-2"
@@ -436,7 +436,7 @@ const DetailModal = ({
               <Button 
                 variant="outline"
                 onClick={() => {
-                  onRegenerate(selectedContent.sourceArticle?.article_id || selectedContent.gen_article_id);
+                  onRegenerate(selectedContent);
                   onClose();
                 }}
                 className="flex items-center gap-2"

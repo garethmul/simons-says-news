@@ -714,6 +714,15 @@ class DatabaseService {
     return this.findOne('ssnews_prompt_configuration', whereClause, whereParams);
   }
 
+  async getActiveContentConfigurations(accountId = null) {
+    const whereClause = accountId
+      ? 'account_id = ? AND is_active = ?'
+      : 'is_active = ?';
+    const whereParams = accountId ? [accountId, true] : [true];
+    
+    return this.findMany('ssnews_prompt_configuration', whereClause, whereParams, 'ui_config->"$.order" ASC, prompt_category ASC');
+  }
+
   async getGenericContent(articleId, category, accountId = null) {
     const whereClause = accountId
       ? 'based_on_gen_article_id = ? AND prompt_category = ? AND account_id = ?'

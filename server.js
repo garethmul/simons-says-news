@@ -1568,61 +1568,62 @@ app.post('/api/eden/jobs/cleanup-stale', accountContext, async (req, res) => {
 
 // ===== CONTENT GENERATION API ENDPOINTS =====
 
-// Content types endpoint
-app.get('/api/eden/content/types', async (req, res) => {
+// Content types endpoint - Dynamic discovery from database
+app.get('/api/eden/content/types', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    // Return available content types based on prompt templates
-    // These are static and don't require account context
-    const contentTypes = [
-      {
-        id: 'article',
-        name: 'Blog Article',
-        icon: 'FileText',
-        category: 'blog',
-        description: 'Generates engaging blog posts and articles',
-        template: 'Blog Post Generator'
-      },
-      {
-        id: 'social_post',
-        name: 'Social Media Post',
-        icon: 'Share2',
-        category: 'social',
-        description: 'Creates social media content for various platforms',
-        template: 'Social Media Generator'
-      },
-      {
-        id: 'video_script',
-        name: 'Video Script',
-        icon: 'Video',
-        category: 'video',
-        description: 'Generates scripts for video content',
-        template: 'Video Script Generator'
-      },
-      {
-        id: 'prayer_points',
-        name: 'Prayer Points',
-        icon: 'Heart',
-        category: 'prayer',
-        description: 'Creates prayer points from news content',
-        template: 'Prayer Points Generator'
-      },
-      {
-        id: 'sermon_outline',
-        name: 'Sermon Outline',
-        icon: 'BookOpen',
-        category: 'sermon',
-        description: 'Generates sermon outlines and talking points',
-        template: 'Sermon Outline Generator'
-      }
-    ];
+    const { accountId } = req.accountContext;
+
+    // Get active content configurations for this account
+    const configurations = await db.getActiveContentConfigurations(accountId);
+    
+    // Transform configurations into content types format
+    const contentTypes = configurations.map(config => {
+      const uiConfig = config.ui_config || {};
+      const generationConfig = config.generation_config || {};
+      
+      return {
+        id: config.prompt_category,
+        name: config.display_name,
+        icon: uiConfig.icon || 'FileText',
+        category: config.prompt_category,
+        description: `Generates ${config.display_name.toLowerCase()}`,
+        template: generationConfig.prompt_template || config.prompt_category,
+        order: uiConfig.order || 999,
+        displayType: uiConfig.display_type || 'text',
+        emptyMessage: uiConfig.empty_message || `No ${config.display_name.toLowerCase()} generated`,
+        countInTab: uiConfig.count_in_tab !== false
+      };
+    });
+
+    // Sort by order
+    contentTypes.sort((a, b) => a.order - b.order);
+
+    // Add the main article type (always present)
+    const articleType = {
+      id: 'article',
+      name: 'Blog Article',
+      icon: 'FileText',
+      category: 'blog',
+      description: 'Main blog article content',
+      template: 'Blog Post Generator',
+      order: 0,
+      displayType: 'article',
+      emptyMessage: 'No article content',
+      countInTab: false
+    };
+
+    const allContentTypes = [articleType, ...contentTypes];
+
+    console.log(`📋 Discovered ${contentTypes.length} content types for account ${accountId}`);
 
     res.json({
       success: true,
-      contentTypes
+      contentTypes: allContentTypes,
+      accountId
     });
   } catch (error) {
     console.error('❌ Error fetching content types:', error.message);
@@ -1758,499 +1759,55 @@ app.get('/api/eden/content/review', accountContext, async (req, res) => {
   }
 });
 
-// ===== END CONTENT GENERATION API ENDPOINTS =====
-
-// ===== IMAGE GENERATION API ENDPOINTS =====
-
-// Database schema for detailed image generation tracking
-const createImageGenerationTableSQL = `
-  CREATE TABLE IF NOT EXISTS ssnews_image_generations (
-    generation_id INT AUTO_INCREMENT PRIMARY KEY,
-    account_id VARCHAR(64) NOT NULL,
-    content_id INT NOT NULL,
-    image_asset_id INT NULL,
-    
-    -- Prompt Details
-    user_prompt TEXT NULL,
-    auto_generated_prompt TEXT NULL,
-    final_prompt TEXT NULL,
-    negative_prompt TEXT NULL,
-    
-    -- Generation Parameters  
-    style_type VARCHAR(50) NULL,
-    aspect_ratio VARCHAR(10) NULL,
-    magic_prompt_mode VARCHAR(20) NULL,
-    rendering_speed VARCHAR(20) NULL,
-    
-    -- AI Provider Details
-    provider VARCHAR(50) DEFAULT 'ideogram',
-    provider_image_id VARCHAR(255) NULL,
-    provider_request_id VARCHAR(255) NULL,
-    
-    -- Generation Results
-    generated_image_url TEXT NULL,
-    resolution VARCHAR(20) NULL,
-    seed BIGINT NULL,
-    is_image_safe BOOLEAN DEFAULT true,
-    
-    -- Cost & Usage Tracking
-    tokens_used INT NULL,
-    credits_consumed DECIMAL(10,4) NULL,
-    estimated_cost_usd DECIMAL(10,4) NULL,
-    
-    -- Generation Metadata
-    generation_time_seconds DECIMAL(8,2) NULL,
-    content_title TEXT NULL,
-    content_summary TEXT NULL,
-    
-    -- Timestamps
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP NULL,
-    
-    -- Status
-    status ENUM('queued', 'processing', 'completed', 'failed') DEFAULT 'queued',
-    error_message TEXT NULL,
-    
-    -- Indexes
-    INDEX idx_account_content (account_id, content_id),
-    INDEX idx_account_created (account_id, created_at DESC),
-    INDEX idx_status (status),
-    
-    -- Foreign Key Constraints
-    FOREIGN KEY (image_asset_id) REFERENCES ssnews_image_assets(image_asset_id) ON DELETE SET NULL
-  ) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`;
-
-// Initialize image generation tracking table
-async function ensureImageGenerationTable() {
-  try {
-    await db.query(createImageGenerationTableSQL);
-    console.log('✅ Image generation tracking table ready');
-  } catch (error) {
-    console.warn('⚠️ Could not create image generation table:', error.message);
-  }
-}
-
-// Account Image Settings Table Schema
-const createAccountImageSettingsTableSQL = `
-  CREATE TABLE IF NOT EXISTS ssnews_account_image_settings (
-    settings_id INT AUTO_INCREMENT PRIMARY KEY,
-    account_id VARCHAR(64) NOT NULL UNIQUE,
-    
-    -- Prompt Customization
-    prompt_prefix TEXT NULL,
-    prompt_suffix TEXT NULL,
-    
-    -- Brand Colors (JSON array of color sets)
-    brand_colors JSON NULL COMMENT 'Array of {name, colors[]} objects',
-    
-    -- Preferred Style Codes (JSON array of preferred styles)
-    preferred_style_codes JSON NULL COMMENT 'Array of preferred style codes and seeds',
-    
-    -- Default Ideogram Settings (JSON)
-    default_settings JSON NULL COMMENT 'Default parameters for image generation',
-    
-    -- Timestamps
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
-    -- Indexes
-    INDEX idx_account_id (account_id)
-  ) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`;
-
-// Initialize account image settings table
-async function ensureAccountImageSettingsTable() {
-  try {
-    await db.query(createAccountImageSettingsTableSQL);
-    console.log('✅ Account image settings table ready');
-  } catch (error) {
-    console.warn('⚠️ Could not create account image settings table:', error.message);
-  }
-}
-
-// Generate AI image for specific content  
-app.post('/api/eden/images/generate-for-content/:contentId', accountContext, async (req, res) => {
+// Update content status endpoint - for approving/rejecting/regenerating content
+app.put('/api/eden/content/:contentType/:contentId/status', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
 
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { contentId } = req.params;
+    const { contentType, contentId } = req.params;
+    const { status, finalContent } = req.body;
+    const accountId = req.accountContext.accountId;
     
-    // Handle both JSON and multipart form data (for v3 reference images)
-    let bodyData = {};
-    let referenceImageFiles = [];
-    
-    if (req.headers['content-type']?.includes('multipart/form-data')) {
-      // Handle multipart form data with multer
-      const multer = require('multer');
-      const upload = multer({ 
-        storage: multer.memoryStorage(),
-        limits: {
-          fileSize: 10 * 1024 * 1024, // 10MB limit per file
-          files: 3 // Max 3 reference images
-        },
-        fileFilter: (req, file, cb) => {
-          if (file.mimetype.startsWith('image/')) {
-            cb(null, true);
-          } else {
-            cb(new Error('Only image files are allowed for reference images'));
-          }
-        }
-      });
-
-      await new Promise((resolve, reject) => {
-        upload.any()(req, res, (err) => {
-          if (err) {
-            console.error('Multer error:', err);
-            reject(err);
-          } else {
-            // Parse form fields
-            Object.keys(req.body).forEach(key => {
-              try {
-                // Try to parse JSON fields
-                if (req.body[key].startsWith('[') || req.body[key].startsWith('{')) {
-                  bodyData[key] = JSON.parse(req.body[key]);
-                } else {
-                  bodyData[key] = req.body[key];
-                }
-              } catch (e) {
-                bodyData[key] = req.body[key];
-              }
-            });
-            
-            // Extract reference image files
-            referenceImageFiles = req.files.filter(file => 
-              file.fieldname.startsWith('referenceImage_')
-            );
-            
-            resolve();
-          }
-        });
-      });
-    } else {
-      // Standard JSON body
-      bodyData = req.body;
-    }
-
-    const { 
-      prompt: userPrompt,
-      seed,
-      resolution,
-      aspectRatio = '16:9',
-      renderingSpeed = 'DEFAULT',
-      magicPrompt = 'AUTO',
-      negativePrompt,
-      numImages = 1,
-      styleType = 'GENERAL',
-      styleCodes,
-      useAccountColors = false,
-      selectedColorTemplate = null,
-      modelVersion = 'v2'
-    } = bodyData;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    if (!userPrompt || !userPrompt.trim()) {
-      return res.status(400).json({ error: 'Prompt is required' });
-    }
-
-    console.log(`🎨 Generating AI image for content ${contentId} in account ${accountId}`);
-    console.log(`📝 Base prompt: "${userPrompt.substring(0, 100)}..."`);
-
-    const startTime = Date.now();
-
-    // Get the content details
-    const content = await db.findOneByAccount(
-      'ssnews_generated_articles', 
-      accountId,
-      'gen_article_id = ?', 
-      [parseInt(contentId)]
-    );
-
-    if (!content) {
-      return res.status(404).json({ error: 'Content not found' });
-    }
-
-    // Get account image generation settings
-    let accountSettings = null;
-    try {
-      const settingsData = await db.query(`
-        SELECT prompt_prefix, prompt_suffix, default_settings, brand_colors
-        FROM ssnews_account_image_settings 
-        WHERE account_id = ?
-      `, [accountId]);
-      
-      if (settingsData.length > 0) {
-        accountSettings = {
-          promptPrefix: settingsData[0].prompt_prefix,
-          promptSuffix: settingsData[0].prompt_suffix,
-          defaults: settingsData[0].default_settings ? JSON.parse(settingsData[0].default_settings) : {},
-          brandColors: settingsData[0].brand_colors ? JSON.parse(settingsData[0].brand_colors) : []
-        };
-      }
-    } catch (settingsError) {
-      console.warn('⚠️ Could not load account settings:', settingsError.message);
-    }
-
-    // Build final prompt with prefix/suffix
-    let finalPrompt = userPrompt.trim();
-    if (accountSettings?.promptPrefix) {
-      finalPrompt = `${accountSettings.promptPrefix} ${finalPrompt}`;
-    }
-    if (accountSettings?.promptSuffix) {
-      finalPrompt = `${finalPrompt} ${accountSettings.promptSuffix}`;
-    }
-    finalPrompt = finalPrompt.trim();
-
-    console.log(`🎯 Final prompt: "${finalPrompt.substring(0, 150)}..."`);
-
-    // Create generation tracking record
-    const generationData = {
-      account_id: accountId,
-      content_id: parseInt(contentId),
-      user_prompt: userPrompt,
-      final_prompt: finalPrompt,
-      negative_prompt: negativePrompt || null,
-      style_type: styleType,
-      aspect_ratio: aspectRatio,
-      magic_prompt_mode: magicPrompt,
-      rendering_speed: renderingSpeed,
-      provider: 'ideogram',
-      content_title: content.title,
-      content_summary: (content.body_draft || content.body_final || '').substring(0, 500),
-      status: 'processing'
+    // Map frontend content types to backend content types
+    const contentTypeMapping = {
+      'blog': 'article',
+      'article': 'article',
+      'social': 'social',
+      'video': 'video'
     };
-
-    const generationId = await db.insert('ssnews_image_generations', generationData);
-    console.log(`📊 Created generation tracking record: ${generationId}`);
-
-    try {
-      // Prepare Ideogram generation options
-      const generationOptions = {
-        prompt: finalPrompt,
-        aspectRatio: aspectRatio,
-        styleType: styleType,
-        magicPrompt: magicPrompt,
-        renderingSpeed: renderingSpeed,
-        numImages: parseInt(numImages),
-        modelVersion: modelVersion
-      };
-
-      // Add optional parameters
-      if (seed && !isNaN(parseInt(seed))) {
-        generationOptions.seed = parseInt(seed);
-      }
-      
-      if (resolution) {
-        generationOptions.resolution = resolution;
-        // Remove aspectRatio if resolution is specified (Ideogram API requirement)
-        delete generationOptions.aspectRatio;
-      }
-
-      if (negativePrompt && negativePrompt.trim()) {
-        generationOptions.negativePrompt = negativePrompt.trim();
-      }
-
-      if (styleCodes && styleCodes.length > 0) {
-        generationOptions.styleCodes = styleCodes;
-      }
-
-      // Handle v3 reference images
-      if (modelVersion === 'v3' && referenceImageFiles.length > 0) {
-        console.log(`🖼️ Processing ${referenceImageFiles.length} reference images for v3 generation`);
-        generationOptions.referenceImages = referenceImageFiles.map(file => ({
-          buffer: file.buffer,
-          mimetype: file.mimetype,
-          originalname: file.originalname,
-          size: file.size
-        }));
-      }
-
-      // Handle brand colors if requested
-      if (useAccountColors && accountSettings?.brandColors?.length > 0) {
-        // Convert specific selected color template to Ideogram color palette format
-        const colorPalette = {
-          members: []
-        };
-        
-        // If a specific template was selected, use only that template
-        if (selectedColorTemplate && selectedColorTemplate.name) {
-          console.log(`🎨 Using specific color template: ${selectedColorTemplate.name}`);
-          selectedColorTemplate.colors.forEach(color => {
-            colorPalette.members.push({
-              color: color.startsWith('#') ? color : `#${color}`,
-              weight: 1.0
-            });
-          });
-        } else {
-          // Fallback: use all brand colors (legacy behavior)
-          console.log(`🎨 Using all available brand colors as fallback`);
-          accountSettings.brandColors.forEach(colorSet => {
-            colorSet.colors.forEach(color => {
-              colorPalette.members.push({
-                color: color.startsWith('#') ? color : `#${color}`,
-                weight: 1.0
-              });
-            });
-          });
-        }
-
-        if (colorPalette.members.length > 0) {
-          generationOptions.colorPalette = colorPalette;
-          console.log(`🎨 Applied ${colorPalette.members.length} colors to generation`);
-        }
-      }
-
-      console.log(`🚀 Sending to Ideogram API with ${Object.keys(generationOptions).length} parameters`);
-      const generationResult = await imageService.generateIdeogramImage(generationOptions);
-
-      // Handle new response format with adjustments
-      const generatedImages = generationResult.images || generationResult; // Backward compatibility
-      const adjustments = generationResult.adjustments || [];
-      const finalParameters = generationResult.finalParameters || {};
-
-      if (!generatedImages || generatedImages.length === 0) {
-        throw new Error('No images generated by Ideogram API');
-      }
-
-      // Log any automatic adjustments made
-      if (adjustments.length > 0) {
-        console.log(`📝 Automatic adjustments made during generation:`);
-        adjustments.forEach(adj => {
-          console.log(`   • ${adj.message}`);
-        });
-      }
-
-      // Process all generated images
-      const processedImages = [];
-      for (let i = 0; i < generatedImages.length; i++) {
-        const image = generatedImages[i];
-        const processedImage = await imageService.processIdeogramImageForContent(
-          image,
-          parseInt(contentId),
-          accountId
-        );
-        processedImages.push(processedImage);
-      }
-
-      const generationTime = (Date.now() - startTime) / 1000;
-      console.log(`✅ Ideogram generation complete in ${generationTime}s`);
-
-      // Calculate estimated cost (Ideogram pricing: varies by model/speed)
-      const baseCost = renderingSpeed === 'TURBO' ? 0.06 : 
-                      renderingSpeed === 'QUALITY' ? 0.12 : 0.08;
-      const estimatedCost = baseCost * numImages;
-
-      // Update generation tracking with results
-      await db.query(`
-        UPDATE ssnews_image_generations 
-        SET 
-          image_asset_id = ?,
-          provider_image_id = ?,
-          generated_image_url = ?,
-          resolution = ?,
-          seed = ?,
-          is_image_safe = ?,
-          estimated_cost_usd = ?,
-          generation_time_seconds = ?,
-          status = 'completed',
-          completed_at = NOW()
-        WHERE generation_id = ?
-      `, [
-        processedImages[0].id, // Primary image ID
-        generatedImages[0].id,
-        generatedImages[0].url,
-        generatedImages[0].resolution,
-        generatedImages[0].seed,
-        generatedImages[0].isImageSafe !== false,
-        estimatedCost,
-        generationTime,
-        generationId
-      ]);
-
-      console.log(`✅ AI image(s) generated and saved for content ${contentId}`);
-
-      // Prepare user-friendly success message
-      let successMessage = `${numImages > 1 ? `${numImages} images` : 'Image'} generated successfully`;
-      if (adjustments.length > 0) {
-        successMessage += ` (with automatic adjustments for compatibility)`;
-      }
-
-      // Return comprehensive response
-      res.json({
-        success: true,
-        message: successMessage,
-        image: processedImages[0], // Primary image for backward compatibility
-        images: processedImages,    // All generated images
-        adjustments: adjustments,   // Any automatic adjustments made
-        generation: {
-          id: generationId,
-          userPrompt: userPrompt,
-          finalPrompt: finalPrompt,
-          parameters: {
-            styleType: styleType,
-            aspectRatio: finalParameters.aspectRatio || aspectRatio, // Use final adjusted ratio
-            renderingSpeed: renderingSpeed,
-            magicPrompt: magicPrompt,
-            numImages: numImages,
-            seed: seed || null,
-            resolution: resolution || null,
-            negativePrompt: negativePrompt || null,
-            useAccountColors: useAccountColors,
-            styleCodes: styleCodes || null,
-            selectedColorTemplate: selectedColorTemplate ? selectedColorTemplate.name : null
-          },
-          metadata: {
-            ideogramId: generatedImages[0].id,
-            resolution: generatedImages[0].resolution,
-            seed: generatedImages[0].seed,
-            isImageSafe: generatedImages[0].isImageSafe,
-            generationTimeSeconds: generationTime,
-            estimatedCostUSD: estimatedCost,
-            adjustmentsMade: adjustments.length > 0,
-            accountSettings: accountSettings ? {
-              prefixUsed: !!accountSettings.promptPrefix,
-              suffixUsed: !!accountSettings.promptSuffix,
-              brandColorsUsed: useAccountColors && accountSettings.brandColors?.length > 0,
-              selectedColorTemplate: selectedColorTemplate ? selectedColorTemplate.name : null
-            } : null
-          }
-        },
-        contentId: parseInt(contentId),
-        accountId
+    
+    const mappedContentType = contentTypeMapping[contentType];
+    
+    if (!mappedContentType) {
+      return res.status(400).json({ 
+        error: `Invalid content type: ${contentType}. Valid types are: blog, article, social, video` 
       });
-
-    } catch (generationError) {
-      // Update tracking record with error
-      await db.query(`
-        UPDATE ssnews_image_generations 
-        SET 
-          status = 'failed',
-          error_message = ?,
-          completed_at = NOW()
-        WHERE generation_id = ?
-      `, [generationError.message, generationId]);
-
-      throw generationError;
     }
 
-  } catch (error) {
-    console.error('❌ AI image generation failed:', error.message);
-    res.status(500).json({ 
-      error: `Image generation failed: ${error.message}`,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    await contentGenerator.updateContentStatus(
+      parseInt(contentId), 
+      mappedContentType, 
+      status, 
+      finalContent,
+      accountId
+    );
+    
+    console.log(`📝 Updated ${contentType} ${contentId} status to ${status} for account ${accountId}`);
+    
+    res.json({
+      success: true,
+      message: `${contentType} ${contentId} status updated to ${status}`
     });
+  } catch (error) {
+    console.error('❌ Error updating content status:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Magic Fill - Edit images with Ideogram v3 (inpainting)
-app.post('/api/eden/images/magic-fill', accountContext, async (req, res) => {
+// Refresh articles from a single source
+app.post('/api/eden/news/sources/:sourceId/refresh', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
@@ -2258,546 +1815,65 @@ app.post('/api/eden/images/magic-fill', accountContext, async (req, res) => {
 
     const { currentUserId } = req;
     const { accountId } = req.accountContext;
+    const { sourceId } = req.params;
     
     if (!currentUserId) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    console.log(`🎨 Processing Magic Fill request for account ${accountId}`);
+    // Verify source exists and belongs to this account
+    const source = await db.findOne(
+      'ssnews_news_sources', 
+      'source_id = ? AND account_id = ?', 
+      [sourceId, accountId]
+    );
 
-    // Handle multipart form data with multer
-    const multer = require('multer');
-    const upload = multer({ 
-      storage: multer.memoryStorage(),
-      limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB limit per file
-        files: 5 // Max: base image + mask + 3 style references
+    if (!source) {
+      return res.status(404).json({ error: 'Source not found in this account' });
+    }
+
+    console.log(`🔄 Creating source refresh job for "${source.name}" (ID: ${sourceId}) for account ${accountId}`);
+    
+    // Create dedicated source refresh job using existing news_aggregation type
+    const jobId = await jobManager.createJob(
+      'news_aggregation',
+      { 
+        sourceId: parseInt(sourceId), 
+        sourceName: source.name,
+        singleSource: true // Flag to indicate this is a single source refresh
       },
-      fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith('image/')) {
-          cb(null, true);
-        } else {
-          cb(new Error('Only image files are allowed'));
-        }
-      }
-    });
-
-    // Process the multipart form data
-    await new Promise((resolve, reject) => {
-      upload.any()(req, res, (err) => {
-        if (err) {
-          console.error('Multer error:', err);
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-    });
-
-    // Parse form fields and extract files
-    const bodyData = {};
-    Object.keys(req.body).forEach(key => {
-      try {
-        // Try to parse JSON fields
-        if (req.body[key] && (req.body[key].startsWith('[') || req.body[key].startsWith('{'))) {
-          bodyData[key] = JSON.parse(req.body[key]);
-        } else {
-          bodyData[key] = req.body[key];
-        }
-      } catch (e) {
-        bodyData[key] = req.body[key];
-      }
-    });
-
-    // Extract required files
-    const baseImageFile = req.files.find(file => file.fieldname === 'baseImage');
-    const maskFile = req.files.find(file => file.fieldname === 'mask');
-    const styleReferenceFiles = req.files.filter(file => 
-      file.fieldname.startsWith('styleReference_')
+      4, // high priority for individual source refresh
+      'user',
+      accountId
     );
-
-    const { 
-      prompt,
-      magicPrompt = 'AUTO',
-      numImages = 1,
-      seed,
-      renderingSpeed = 'DEFAULT',
-      colorPalette,
-      styleCodes
-    } = bodyData;
-
-    // Validate required fields
-    if (!baseImageFile) {
-      return res.status(400).json({ error: 'Base image file is required' });
-    }
-
-    if (!maskFile) {
-      return res.status(400).json({ error: 'Mask file is required' });
-    }
-
-    if (!prompt || !prompt.trim()) {
-      return res.status(400).json({ error: 'Prompt is required' });
-    }
-
-    console.log(`🎯 Magic Fill prompt: "${prompt.substring(0, 100)}..."`);
-    console.log(`📁 Files received: base image (${baseImageFile.size} bytes), mask (${maskFile.size} bytes), style refs: ${styleReferenceFiles.length}`);
-
-    const startTime = Date.now();
-
-    // Get account image generation settings for prefix/suffix
-    let accountSettings = null;
-    try {
-      const settingsData = await db.query(`
-        SELECT prompt_prefix, prompt_suffix
-        FROM ssnews_account_image_settings 
-        WHERE account_id = ?
-      `, [accountId]);
-      
-      if (settingsData.length > 0) {
-        accountSettings = {
-          promptPrefix: settingsData[0].prompt_prefix,
-          promptSuffix: settingsData[0].prompt_suffix
-        };
-      }
-    } catch (settingsError) {
-      console.warn('⚠️ Could not load account settings:', settingsError.message);
-    }
-
-    // Build final prompt with prefix/suffix
-    let finalPrompt = prompt.trim();
-    if (accountSettings?.promptPrefix) {
-      finalPrompt = `${accountSettings.promptPrefix} ${finalPrompt}`;
-    }
-    if (accountSettings?.promptSuffix) {
-      finalPrompt = `${finalPrompt} ${accountSettings.promptSuffix}`;
-    }
-    finalPrompt = finalPrompt.trim();
-
-    console.log(`🎯 Final Magic Fill prompt: "${finalPrompt.substring(0, 150)}..."`);
-
-    // Prepare Magic Fill options
-    const magicFillOptions = {
-      imageFile: baseImageFile,
-      maskFile: maskFile,
-      prompt: finalPrompt,
-      magicPrompt: magicPrompt,
-      numImages: parseInt(numImages),
-      renderingSpeed: renderingSpeed
-    };
-
-    // Add optional parameters
-    if (seed && !isNaN(parseInt(seed))) {
-      magicFillOptions.seed = parseInt(seed);
-    }
-
-    if (colorPalette && colorPalette.members && colorPalette.members.length > 0) {
-      magicFillOptions.colorPalette = colorPalette;
-    }
-
-    if (styleCodes && styleCodes.length > 0) {
-      magicFillOptions.styleCodes = styleCodes;
-    }
-
-    if (styleReferenceFiles.length > 0) {
-      console.log(`🖼️ Processing ${styleReferenceFiles.length} style reference images`);
-      magicFillOptions.styleReferenceImages = styleReferenceFiles.map(file => ({
-        buffer: file.buffer,
-        mimetype: file.mimetype,
-        originalname: file.originalname,
-        size: file.size
-      }));
-    }
-
-    console.log(`🚀 Sending to Ideogram Magic Fill API with ${Object.keys(magicFillOptions).length} parameters`);
-    const editResult = await imageService.editIdeogramImage(magicFillOptions);
-
-    const editedImages = editResult.images || [];
-    const finalParameters = editResult.finalParameters || {};
-
-    if (!editedImages || editedImages.length === 0) {
-      throw new Error('No images returned from Magic Fill API');
-    }
-
-    // Process all edited images and upload to CDN
-    const processedImages = [];
-    for (let i = 0; i < editedImages.length; i++) {
-      const image = editedImages[i];
-      
-      // Generate filename for the edited image
-      const filename = `magic-fill-${Date.now()}-${i}.jpg`;
-      
-      // Upload to Sirv CDN
-      const sirvUrl = await imageService.uploadToSirv(image.url, filename);
-      
-      // Store in database
-      const imageData = {
-        account_id: accountId,
-        associated_content_type: 'magic_fill',
-        associated_content_id: null,
-        sirv_cdn_url: sirvUrl,
-        source_image_url: image.url,
-        source_api: 'ideogram',
-        source_image_id_external: image.id,
-        alt_text_suggestion_ai: `Magic Fill result: ${finalPrompt.substring(0, 100)}...`,
-        status: 'approved', // Magic Fill results are typically ready to use
-        created_at: new Date(),
-        updated_at: new Date()
-      };
-
-      const imageId = await db.insert('ssnews_image_assets', imageData);
-      console.log(`✅ Magic Fill image saved with ID: ${imageId}`);
-
-      const processedImage = {
-        id: imageId,
-        sirvUrl: sirvUrl,
-        altText: imageData.alt_text_suggestion_ai,
-        source: 'ideogram',
-        editType: 'magic_fill',
-        originalUrl: image.url,
-        resolution: image.resolution,
-        seed: image.seed,
-        isImageSafe: image.isImageSafe,
-        created: new Date().toISOString()
-      };
-
-      processedImages.push(processedImage);
-    }
-
-    const processingTime = (Date.now() - startTime) / 1000;
-    console.log(`✅ Magic Fill complete in ${processingTime}s - generated ${processedImages.length} image(s)`);
-
-    // Calculate estimated cost (Magic Fill typically costs more than generation)
-    const baseCost = renderingSpeed === 'TURBO' ? 0.08 : 
-                    renderingSpeed === 'QUALITY' ? 0.16 : 0.12;
-    const estimatedCost = baseCost * numImages;
-
-    res.json({
-      success: true,
-      message: `Magic Fill completed successfully - ${numImages > 1 ? `${numImages} images` : 'image'} generated`,
-      image: processedImages[0], // Primary image for compatibility
-      images: processedImages,    // All generated images
-      generation: {
-        userPrompt: prompt,
-        finalPrompt: finalPrompt,
-        parameters: {
-          magicPrompt: magicPrompt,
-          numImages: numImages,
-          renderingSpeed: renderingSpeed,
-          seed: seed || null,
-          colorPalette: colorPalette || null,
-          styleCodes: styleCodes || null,
-          styleReferences: styleReferenceFiles.length
-        },
-        metadata: {
-          processingTimeSeconds: processingTime,
-          estimatedCostUSD: estimatedCost,
-          baseImageSize: baseImageFile.size,
-          maskSize: maskFile.size,
-          styleReferencesCount: styleReferenceFiles.length
-        }
-      },
-      accountId
-    });
-
-  } catch (error) {
-    console.error('❌ Magic Fill failed:', error.message);
-    res.status(500).json({ 
-      error: `Magic Fill failed: ${error.message}`,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
-});
-
-// Search images for content
-app.get('/api/eden/images/search', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { query, count = 5 } = req.query;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    
-    if (!query) {
-      return res.status(400).json({ error: 'Query is required' });
-    }
-
-    const images = await imageService.searchAndValidateImages(query, parseInt(count));
     
     res.json({
       success: true,
-      images,
-      count: images.length,
+      message: `Refresh job created for source "${source.name}" (ID: ${jobId})`,
+      jobId,
+      status: 'queued',
+      sourceId: parseInt(sourceId),
+      sourceName: source.name,
       accountId
     });
   } catch (error) {
-    console.error('❌ Image search failed:', error.message);
+    console.error('❌ Source refresh job creation failed:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get image statistics
-app.get('/api/eden/stats/images', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    const stats = await imageService.getImageStats(accountId);
-    
-    res.json({
-      success: true,
-      stats,
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Error getting image stats:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get Ideogram generation options and styles
-app.get('/api/eden/images/ideogram/options', async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { modelVersion = 'v2' } = req.query;
-
-    // Return comprehensive Ideogram options based on API reference and model version
-    const options = {
-      modelVersion,
-      styles: imageService.getIdeogramStyles(modelVersion),
-      aspectRatios: imageService.getAspectRatios(modelVersion),
-      resolutions: imageService.getResolutions(),
-      renderingSpeeds: [
-        { value: 'TURBO', label: 'Turbo (Fastest)', description: 'Quick generation, lower cost' },
-        { value: 'DEFAULT', label: 'Default', description: 'Balanced speed and quality' },
-        { value: 'QUALITY', label: 'Quality (Slowest, Best)', description: 'Highest quality, higher cost' }
-      ],
-      magicPromptOptions: [
-        { value: 'AUTO', label: 'Auto', description: 'Let Ideogram decide when to enhance prompts' },
-        { value: 'ON', label: 'On', description: 'Always enhance prompts for better results' },
-        { value: 'OFF', label: 'Off', description: 'Use prompts exactly as written' }
-      ],
-      numImagesOptions: [1, 2, 3, 4, 5, 6, 7, 8],
-      styleCodeInfo: {
-        description: 'Use 8-character hexadecimal codes for precise style control',
-        example: '1A2B3C4D',
-        maxCodes: 10
-      }
-    };
-    
-    res.json({
-      success: true,
-      options
-    });
-  } catch (error) {
-    console.error('❌ Error getting Ideogram options:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get images for specific content
-app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { contentId } = req.params;
-    const { include_archived, status: queryStatus } = req.query;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    console.log(`🖼️ Fetching images for content ${contentId} in account ${accountId} (include_archived: ${include_archived}, status: ${queryStatus})`);
-
-    const content = await db.findOneByAccount(
-      'ssnews_generated_articles', 
-      accountId,
-      'gen_article_id = ?', 
-      [parseInt(contentId)]
-    );
-
-    if (!content) {
-      return res.status(404).json({ error: 'Content not found' });
-    }
-
-    let query = `
-      SELECT 
-        image_id as id,
-        sirv_cdn_url as sirvUrl,
-        alt_text_suggestion_ai as altText,
-        source_api as source,
-        status, -- Select the new status column
-        source_image_id_external,
-        generation_metadata, -- Include generation metadata with style codes
-        created_at
-      FROM ssnews_image_assets
-      WHERE associated_content_type = 'gen_article' 
-        AND associated_content_id = ?
-        AND account_id = ?
-    `;
-    const queryParams = [parseInt(contentId), accountId];
-
-    if (queryStatus) {
-      query += ' AND status = ?';
-      queryParams.push(queryStatus);
-    } else if (include_archived !== 'true') {
-      query += ' AND status != ?';
-      queryParams.push('archived');
-    }
-
-    query += ' ORDER BY created_at DESC';
-
-    const images = await db.query(query, queryParams);
-
-    const formattedImages = images.map(image => {
-      // Parse generation metadata if available
-      let generationMetadata = null;
-      if (image.generation_metadata) {
-        try {
-          generationMetadata = JSON.parse(image.generation_metadata);
-        } catch (error) {
-          console.warn('Failed to parse generation metadata for image', image.id, error.message);
-        }
-      }
-
-      return {
-        id: image.id,
-        sirvUrl: image.sirvUrl,
-        altText: image.altText || 'Generated image',
-        source: image.source || 'ideogram',
-        query: image.source === 'ideogram' ? 'AI Generated' : 'Stock Photo',
-        created: image.created_at,
-        status: image.status, // Include status in formatted response
-        generationMetadata: generationMetadata // Include parsed generation metadata with style codes
-      };
-    });
-
-    console.log(`✅ Found ${formattedImages.length} images for content ${contentId}`);
-
-    res.json({
-      success: true,
-      images: formattedImages,
-      count: formattedImages.length,
-      contentId: parseInt(contentId),
-      accountId
-    });
-  } catch (error) {
-    console.error('❌ Error fetching content images:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update image status (approve, reject, archive)
-app.put('/api/eden/images/:imageId/status', accountContext, async (req, res) => {
-  try {
-    if (!isSystemReady) {
-      return res.status(503).json({ error: 'System not ready' });
-    }
-
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { imageId } = req.params;
-    const { status } = req.body;
-
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    if (!imageId || !status) {
-      return res.status(400).json({ error: 'Image ID and status are required' });
-    }
-
-    const validStatuses = ['pending_review', 'approved', 'rejected', 'archived'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
-    }
-
-    console.log(`🖼️ Updating status of image ${imageId} to "${status}" for account ${accountId}`);
-
-    const result = await db.query(`
-      UPDATE ssnews_image_assets
-      SET status = ?
-      WHERE image_id = ? AND account_id = ?
-    `, [status, parseInt(imageId), accountId]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Image not found or not owned by this account' });
-    }
-
-    // Fetch the updated image to return it
-    const updatedImage = await db.query(`
-      SELECT 
-        image_id as id,
-        sirv_cdn_url as sirvUrl,
-        alt_text_suggestion_ai as altText,
-        source_api as source,
-        status, -- Include new status field
-        created_at
-      FROM ssnews_image_assets
-      WHERE image_id = ? AND account_id = ?
-    `, [parseInt(imageId), accountId]);
-
-    res.json({
-      success: true,
-      message: `Image ${imageId} status updated to ${status}`,
-      image: updatedImage[0],
-      accountId
-    });
-
-  } catch (error) {
-    console.error('❌ Error updating image status:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ===== END IMAGE GENERATION API ENDPOINTS =====
-
-// Test URL submission without middleware
-app.post('/api/test/submit-urls', async (req, res) => {
-  try {
-    res.json({
-      success: true,
-      message: 'Test endpoint working',
-      body: req.body
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Submit URLs for analysis endpoint - WORKING VERSION
+// Submit URLs for analysis endpoint
 app.post('/api/eden/sources/submit-urls', accountContext, async (req, res) => {
   try {
-    const { currentUserId } = req;
-    const { accountId } = req.accountContext;
-    const { urls } = req.body;
-    
-    if (!currentUserId) {
-      return res.status(401).json({ error: 'Authentication required' });
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
     }
 
+    const { urls } = req.body;
+    const { accountId } = req.accountContext;
+    
     if (!urls || !Array.isArray(urls) || urls.length === 0) {
-      return res.status(400).json({
+      return res.status(400).json({ 
         success: false,
         error: 'URLs array is required'
       });
@@ -3008,6 +2084,78 @@ if (process.env.NODE_ENV === 'production') {
     });
   });
 }
+
+// ===== IMAGE GENERATION API ENDPOINTS (STUBS) =====
+
+// Get images for content (stub to prevent 404)
+app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      images: [],
+      message: 'Image generation feature not yet implemented'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get Ideogram options (stub to prevent 404)
+app.get('/api/eden/images/ideogram/options', accountContext, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      options: {
+        styles: [
+          { value: 'GENERAL', label: 'General' },
+          { value: 'REALISTIC', label: 'Realistic' },
+          { value: 'DESIGN', label: 'Design' },
+          { value: 'RENDER_3D', label: '3D Render' },
+          { value: 'ANIME', label: 'Anime' }
+        ],
+        aspectRatios: [
+          { value: '1:1', label: '1:1 (Square)' },
+          { value: '16:9', label: '16:9 (Landscape)' },
+          { value: '9:16', label: '9:16 (Portrait)' },
+          { value: '4:3', label: '4:3 (Standard)' },
+          { value: '3:4', label: '3:4 (Portrait)' }
+        ],
+        resolutions: [
+          { value: '1024x1024', label: '1024×1024 (1:1)' },
+          { value: '1024x768', label: '1024×768 (4:3)' },
+          { value: '768x1024', label: '768×1024 (3:4)' }
+        ],
+        renderingSpeeds: [
+          { value: 'FAST', label: 'Fast' },
+          { value: 'DEFAULT', label: 'Default' },
+          { value: 'SLOW', label: 'Slow (Best Quality)' }
+        ],
+        magicPromptOptions: [
+          { value: 'AUTO', label: 'Auto' },
+          { value: 'ON', label: 'On' },
+          { value: 'OFF', label: 'Off' }
+        ],
+        numImagesOptions: [1, 2, 3, 4]
+      },
+      message: 'Image generation feature not yet implemented'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generate images for content (stub to prevent 404)
+app.post('/api/eden/images/generate-for-content/:contentId', accountContext, async (req, res) => {
+  try {
+    res.json({
+      success: false,
+      error: 'Image generation feature not yet implemented',
+      message: 'This feature will be available in a future update'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ===== ACCOUNT IMAGE SETTINGS API ENDPOINTS =====
 
@@ -4201,6 +3349,362 @@ app.post('/api/debug/clean-image-settings-json', accountContext, async (req, res
   } catch (error) {
     console.error('❌ Error cleaning image settings JSON:', error.message);
     console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint to fix prayer points configuration
+app.post('/api/debug/fix-prayer-config', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { accountId } = req.accountContext;
+    
+    console.log(`🔧 Checking prayer points configuration for account ${accountId}`);
+    
+    // Check if this account has prayer points configuration
+    const existingConfig = await db.query(`
+      SELECT config_id, display_name 
+      FROM ssnews_prompt_configuration 
+      WHERE account_id = ? AND prompt_category = 'prayer_points'
+    `, [accountId]);
+    
+    let configStatus = 'existing';
+    
+    if (existingConfig.length === 0) {
+      console.log(`⚠️ Account ${accountId} missing prayer points configuration, adding it...`);
+      
+      // Add prayer points configuration for this account
+      await db.query(`
+        INSERT INTO ssnews_prompt_configuration 
+        (account_id, prompt_category, display_name, storage_schema, ui_config, generation_config, is_active) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [
+        accountId,
+        'prayer_points',
+        'Prayer Points',
+        JSON.stringify({
+          type: 'array',
+          max_items: 5,
+          items: {
+            order_number: { type: 'integer', required: true },
+            prayer_text: { type: 'string', max_length: 200, required: true },
+            theme: { type: 'string', max_length: 50 }
+          }
+        }),
+        JSON.stringify({
+          tab_name: 'Prayer Points',
+          icon: 'Heart',
+          display_type: 'numbered_list',
+          empty_message: 'No prayer points generated',
+          count_in_tab: true,
+          order: 4
+        }),
+        JSON.stringify({
+          model: 'gemini',
+          max_tokens: 1000,
+          temperature: 0.7,
+          prompt_template: 'prayer',
+          fallback_template: 'prayer',
+          custom_instructions: 'Create 5 prayer points, 15-25 words each, covering different aspects: people affected, healing, guidance, hope, and justice.'
+        }),
+        true
+      ]);
+      
+      configStatus = 'added';
+      console.log(`✅ Added prayer points configuration for account ${accountId}`);
+    } else {
+      console.log(`✅ Account ${accountId} already has prayer points configuration`);
+    }
+    
+    // Check for duplicate content
+    const duplicates = await db.query(`
+      SELECT 
+        based_on_scraped_article_id,
+        COUNT(*) as count,
+        GROUP_CONCAT(gen_article_id) as article_ids,
+        GROUP_CONCAT(status) as statuses
+      FROM ssnews_generated_articles 
+      WHERE account_id = ? AND status IN ('draft', 'review_pending')
+      GROUP BY based_on_scraped_article_id
+      HAVING COUNT(*) > 1
+      ORDER BY count DESC
+    `, [accountId]);
+    
+    // Check recent prayer points generation
+    const recentContent = await db.query(`
+      SELECT 
+        ga.gen_article_id,
+        ga.title,
+        ga.created_at,
+        COUNT(gc.content_id) as prayer_count
+      FROM ssnews_generated_articles ga
+      LEFT JOIN ssnews_generated_content gc ON ga.gen_article_id = gc.based_on_gen_article_id 
+        AND gc.prompt_category = 'prayer_points'
+      WHERE ga.account_id = ? AND ga.status = 'draft' 
+        AND ga.created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+      GROUP BY ga.gen_article_id
+      ORDER BY ga.created_at DESC
+      LIMIT 5
+    `, [accountId]);
+    
+    res.json({
+      success: true,
+      configStatus,
+      duplicates: {
+        count: duplicates.length,
+        items: duplicates.map(d => ({
+          sourceArticleId: d.based_on_scraped_article_id,
+          duplicateCount: d.count,
+          articleIds: d.article_ids.split(','),
+          statuses: d.statuses.split(',')
+        }))
+      },
+      recentContent: recentContent.map(c => ({
+        articleId: c.gen_article_id,
+        title: c.title,
+        createdAt: c.created_at,
+        hasPrayerPoints: c.prayer_count > 0
+      })),
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error fixing prayer configuration:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint to sync prompt templates with prompt configurations
+app.post('/api/debug/sync-template-configs', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { accountId } = req.accountContext;
+    
+    console.log(`🔄 Syncing prompt templates to configurations for account ${accountId}`);
+    
+    // Get all active prompt templates for this account
+    const templates = await db.query(`
+      SELECT template_id, name, description, category, execution_order
+      FROM ssnews_prompt_templates 
+      WHERE account_id = ? AND is_active = 1
+      ORDER BY execution_order ASC, name ASC
+    `, [accountId]);
+    
+    console.log(`📋 Found ${templates.length} prompt templates to sync`);
+    
+    // Get existing configurations to avoid duplicates
+    const existingConfigs = await db.query(`
+      SELECT prompt_category 
+      FROM ssnews_prompt_configuration 
+      WHERE account_id = ?
+    `, [accountId]);
+    
+    const existingCategories = new Set(existingConfigs.map(c => c.prompt_category));
+    
+    // Template configuration mappings
+    const templateConfigs = {
+      'prayer': {
+        category: 'prayer_points',
+        displayName: 'Prayer Points',
+        schema: {
+          type: 'array',
+          max_items: 5,
+          items: {
+            order_number: { type: 'integer', required: true },
+            prayer_text: { type: 'string', max_length: 200, required: true },
+            theme: { type: 'string', max_length: 50 }
+          }
+        },
+        uiConfig: {
+          tab_name: 'Prayer Points',
+          icon: 'Heart',
+          display_type: 'numbered_list',
+          empty_message: 'No prayer points generated',
+          count_in_tab: true,
+          order: 4
+        }
+      },
+      'social_media': {
+        category: 'social_media',
+        displayName: 'Social Media',
+        schema: {
+          type: 'array',
+          max_items: 3,
+          items: {
+            platform: { type: 'string', required: true },
+            text: { type: 'string', max_length: 280, required: true },
+            hashtags: { type: 'array', items: { type: 'string' } }
+          }
+        },
+        uiConfig: {
+          tab_name: 'Social Media',
+          icon: 'Share2',
+          display_type: 'platform_cards',
+          empty_message: 'No social media posts generated',
+          count_in_tab: true,
+          order: 2
+        }
+      },
+      'video_script': {
+        category: 'video_scripts',
+        displayName: 'Video Scripts',
+        schema: {
+          type: 'array',
+          max_items: 3,
+          items: {
+            title: { type: 'string', max_length: 100, required: true },
+            script: { type: 'string', required: true },
+            duration: { type: 'integer' },
+            visual_suggestions: { type: 'array', items: { type: 'string' } }
+          }
+        },
+        uiConfig: {
+          tab_name: 'Video Scripts',
+          icon: 'Video',
+          display_type: 'script_cards',
+          empty_message: 'No video scripts generated',
+          count_in_tab: true,
+          order: 3
+        }
+      }
+    };
+    
+    const syncResults = [];
+    
+    for (const template of templates) {
+      const config = templateConfigs[template.category];
+      if (!config) {
+        console.log(`⚠️ No configuration mapping for category: ${template.category}`);
+        continue;
+      }
+      
+      const configCategory = config.category;
+      
+      if (existingCategories.has(configCategory)) {
+        console.log(`✅ Configuration already exists for: ${configCategory}`);
+        syncResults.push({ template: template.name, status: 'exists', category: configCategory });
+        continue;
+      }
+      
+      try {
+        // Create the configuration
+        await db.query(`
+          INSERT INTO ssnews_prompt_configuration 
+          (account_id, prompt_category, display_name, storage_schema, ui_config, generation_config, is_active) 
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [
+          accountId,
+          configCategory,
+          config.displayName,
+          JSON.stringify(config.schema),
+          JSON.stringify(config.uiConfig),
+          JSON.stringify({
+            model: 'gemini',
+            max_tokens: 1000,
+            temperature: 0.7,
+            prompt_template: template.category,
+            custom_instructions: `Generate ${config.displayName.toLowerCase()} based on the news article content.`
+          }),
+          true
+        ]);
+        
+        console.log(`✅ Created configuration for: ${config.displayName} (${configCategory})`);
+        syncResults.push({ template: template.name, status: 'created', category: configCategory });
+      } catch (error) {
+        console.error(`❌ Failed to create configuration for ${template.name}:`, error.message);
+        syncResults.push({ template: template.name, status: 'error', error: error.message });
+      }
+    }
+    
+    // Test the discovery after sync
+    const discoveredTypes = await db.getActiveContentConfigurations(accountId);
+    
+    res.json({
+      success: true,
+      templatesFound: templates.length,
+      syncResults,
+      discoveredAfterSync: discoveredTypes.length,
+      discoveredTypes: discoveredTypes.map(t => ({
+        category: t.prompt_category,
+        displayName: t.display_name
+      })),
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error syncing templates:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint to switch UCB source from RSS to web scraping
+app.post('/api/debug/fix-ucb-source', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { accountId } = req.accountContext;
+    
+    console.log(`🔧 Switching UCB source from RSS to web scraping for account ${accountId}`);
+    
+    // Find UCB source
+    const ucbSource = await db.findOne(
+      'ssnews_news_sources', 
+      'name LIKE ? AND account_id = ?', 
+      ['%UCB%', accountId]
+    );
+    
+    if (!ucbSource) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'UCB source not found for this account' 
+      });
+    }
+    
+    console.log(`📰 Found UCB source: ${ucbSource.name} (ID: ${ucbSource.source_id})`);
+    console.log(`   Current RSS URL: ${ucbSource.rss_feed_url}`);
+    console.log(`   Current Website URL: ${ucbSource.url}`);
+    
+    // Update source to use web scraping instead of RSS
+    await db.update(
+      'ssnews_news_sources',
+      {
+        rss_feed_url: null, // Remove RSS URL
+        url: 'https://www.ucb.co.uk/word-for-today', // Set main website URL
+        updated_at: new Date()
+      },
+      'source_id = ? AND account_id = ?',
+      [ucbSource.source_id, accountId]
+    );
+    
+    console.log(`✅ UCB source updated to use web scraping`);
+    
+    res.json({
+      success: true,
+      message: 'UCB source switched from RSS to web scraping',
+      changes: {
+        before: {
+          rss_feed_url: ucbSource.rss_feed_url,
+          url: ucbSource.url
+        },
+        after: {
+          rss_feed_url: null,
+          url: 'https://www.ucb.co.uk/word-for-today'
+        }
+      },
+      source: {
+        id: ucbSource.source_id,
+        name: ucbSource.name
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error switching UCB source:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

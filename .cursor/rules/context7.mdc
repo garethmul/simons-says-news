@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+When using external libraries always reference the [context7.mdc](mdc:.cursor/rules/context7.mdc) mdc for the latest verison. Take into account upgrading packages and use it to get latest functionality.

@@ -116,14 +116,8 @@ class ContentGenerator {
 
       console.log(`📝 Blog post created (ID: ${blogId})`);
 
-      // Generate social media posts with account context
-      const socialPosts = await this.generateSocialPostsWithAccount(articleForAI, blogId, accountId);
-      
-      // Generate video scripts with account context
-      const videoScripts = await this.generateVideoScriptsWithAccount(articleForAI, blogId, accountId);
-
-      // Generate prayer points with account context
-      const prayerPoints = await this.generatePrayerPointsWithAccount(articleForAI, blogId, accountId);
+      // Generate all configured content types dynamically
+      const additionalContent = await this.generateAllConfiguredContent(articleForAI, blogId, accountId);
 
       // Generate and associate images with account context
       const images = await this.generateImagesWithAccount(blogPost, blogId, accountId);
@@ -138,9 +132,7 @@ class ContentGenerator {
       return {
         blogId,
         blogPost,
-        socialPosts,
-        videoScripts,
-        prayerPoints,
+        ...additionalContent, // Spread the dynamic content
         images,
         originalStory: story
       };
@@ -364,15 +356,13 @@ class ContentGenerator {
           }
 
           // Generate associated content with account context
-          const socialPosts = await this.generateSocialPostsWithAccount(mockArticle, blogId, accountId);
-          const videoScripts = await this.generateVideoScriptsWithAccount(mockArticle, blogId, accountId);
+          const additionalContent = await this.generateAllConfiguredContent(mockArticle, blogId, accountId);
           const images = await this.generateImagesWithAccount(blogPost, blogId, accountId);
 
           generatedContent.push({
             blogId,
             blogPost,
-            socialPosts,
-            videoScripts,
+            ...additionalContent,
             images,
             evergreenIdea: idea
           });
@@ -685,6 +675,448 @@ class ContentGenerator {
     if (text.includes('justice') || text.includes('truth')) return 'justice';
     if (text.includes('hope') || text.includes('future')) return 'hope';
     return 'general';
+  }
+
+  // ==============================================
+  // GENERIC TEMPLATE-DRIVEN CONTENT GENERATION
+  // ==============================================
+
+  /**
+   * Generate all configured content types for an article using workflow chaining
+   * This replaces the hardcoded social/video/prayer methods
+   */
+  async generateAllConfiguredContent(article, blogId, accountId = null) {
+    console.log('🎨 Generating all configured content types with workflow chaining...');
+    
+    try {
+      // Get workflow prompts in execution order
+      const promptManager = await this.ensurePromptManager();
+      const workflowSteps = await promptManager.getWorkflowPrompts(accountId, {
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
+      });
+      
+      const results = {};
+      const contentTypeMap = {};
+      const stepOutputs = {
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
+      };
+      
+      // Execute workflow steps in order
+      for (const step of workflowSteps) {
+        try {
+          console.log(`📋 Executing workflow step ${step.executionOrder}: ${step.name} (${step.category})`);
+          
+          // Get the current prompt configuration to understand storage schema
+          const config = await db.getContentConfiguration(step.category, accountId);
+          if (!config) {
+            console.log(`⚠️ No configuration found for ${step.category}, skipping...`);
+            continue;
+          }
+          
+          // Generate content using AI with current step outputs as variables
+          const aiContent = await this.generateAIContentFromTemplateWithWorkflow(
+            step, 
+            stepOutputs, 
+            blogId
+          );
+          
+          // Parse and structure the content according to the storage schema
+          const structuredData = this.parseContentToSchema(aiContent, config.storage_schema, step.category);
+          
+          // Store in generic content table
+          const contentId = await this.storeGenericContent(
+            blogId,
+            step.category,
+            structuredData,
+            config.generation_config,
+            accountId
+          );
+          
+          // Format for frontend and store in results
+          const generatedItems = this.formatContentForFrontend(structuredData, contentId, config.ui_config);
+          
+          // Store results using the category name
+          const categoryKey = step.category;
+          results[categoryKey] = generatedItems;
+          
+          // Also store in plural form for backwards compatibility
+          const pluralKey = this.getPluralForm(categoryKey);
+          results[pluralKey] = generatedItems;
+          
+          // Add this step's output to available variables for next steps
+          const outputContent = this.extractOutputForChaining(structuredData, step.category);
+          stepOutputs[`${step.category}_output`] = outputContent;
+          
+          // Keep track of content type metadata
+          contentTypeMap[categoryKey] = {
+            displayName: step.name,
+            icon: config.ui_config?.icon || 'FileText',
+            count: generatedItems.length
+          };
+          
+          console.log(`✅ Generated ${generatedItems.length} ${step.name} items`);
+          
+        } catch (error) {
+          console.error(`❌ Error in workflow step ${step.category}:`, error.message);
+          results[step.category] = [];
+        }
+      }
+      
+      // Add metadata about generated content types
+      results._contentTypeMap = contentTypeMap;
+      results._generatedTypes = Object.keys(contentTypeMap);
+      results._workflowExecuted = true;
+      
+      console.log(`🎉 Executed ${workflowSteps.length} workflow steps for ${Object.keys(contentTypeMap).length} content types`);
+      return results;
+      
+    } catch (error) {
+      console.error('❌ Error in generateAllConfiguredContent:', error.message);
+      return {};
+    }
+  }
+
+  /**
+   * Generate content from a specific template configuration
+   */
+  async generateContentFromTemplate(config, article, blogId, accountId = null) {
+    const { prompt_category, generation_config, storage_schema, ui_config } = config;
+    
+    try {
+      // Generate content using AI
+      const aiContent = await this.generateAIContentFromTemplate(
+        prompt_category,
+        article,
+        generation_config,
+        blogId
+      );
+      
+      // Parse and structure the content according to the storage schema
+      const structuredData = this.parseContentToSchema(aiContent, storage_schema, prompt_category);
+      
+      // Store in generic content table
+      const contentId = await this.storeGenericContent(
+        blogId,
+        prompt_category,
+        structuredData,
+        generation_config,
+        accountId
+      );
+      
+      // Return in format expected by frontend
+      return this.formatContentForFrontend(structuredData, contentId, ui_config);
+      
+    } catch (error) {
+      console.error(`❌ Error generating ${prompt_category} content:`, error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Generate AI content using the appropriate prompt template
+   */
+  async generateAIContentFromTemplate(category, article, generationConfig, blogId) {
+    const promptTemplate = generationConfig?.prompt_template || category;
+    
+    // Route to appropriate AI service method based on category
+    switch (category) {
+      case 'social_media':
+      case 'social_posts':
+        return await aiService.generateSocialMediaPosts(article, blogId);
+      
+      case 'video_script':
+      case 'video_scripts':
+        const duration = generationConfig?.default_duration || 60;
+        return await aiService.generateVideoScript(article, duration, blogId);
+      
+      case 'prayer_points':
+      case 'prayer':
+        return await aiService.generatePrayerPoints(article, blogId);
+      
+      default:
+        // For any new template types, use a generic generation method
+        return await aiService.generateGenericContent(category, article, generationConfig, blogId);
+    }
+  }
+
+  /**
+   * Parse AI content according to storage schema
+   */
+  parseContentToSchema(content, storageSchema, category) {
+    try {
+      // Handle different content types
+      switch (category) {
+        case 'prayer_points':
+        case 'prayer':
+          return this.parsePrayerPointsContent(content);
+        
+        case 'social_media':
+        case 'social_posts':
+          return this.parseSocialMediaContent(content);
+        
+        case 'video_script':
+        case 'video_scripts':
+          return this.parseVideoScriptContent(content);
+        
+        default:
+          // For new types, try to parse as JSON first, then as text
+          return this.parseGenericContent(content, storageSchema);
+      }
+    } catch (error) {
+      console.error(`Error parsing ${category} content:`, error.message);
+      // Fallback to simple text structure
+      return [{
+        text: content,
+        order: 1,
+        created_at: new Date().toISOString()
+      }];
+    }
+  }
+
+  /**
+   * Parse prayer points content
+   */
+  parsePrayerPointsContent(content) {
+    const prayerPoints = [];
+    
+    if (typeof content === 'string') {
+      const lines = content.split('\n\n').filter(line => line.trim().length > 0);
+      
+      lines.forEach((line, index) => {
+        const cleanLine = line.trim();
+        if (cleanLine.length > 10) {
+          prayerPoints.push({
+            order_number: index + 1,
+            prayer_text: cleanLine,
+            theme: this.extractThemeFromPrayer(cleanLine)
+          });
+        }
+      });
+    }
+    
+    return prayerPoints;
+  }
+
+  /**
+   * Parse social media content
+   */
+  parseSocialMediaContent(content) {
+    try {
+      const parsed = JSON.parse(content);
+      const platforms = ['facebook', 'instagram', 'linkedin', 'twitter'];
+      const socialPosts = [];
+      
+      platforms.forEach((platform, index) => {
+        if (parsed[platform]) {
+          socialPosts.push({
+            platform,
+            text: parsed[platform].text || parsed[platform],
+            hashtags: parsed[platform].hashtags || [],
+            order_number: index + 1
+          });
+        }
+      });
+      
+      return socialPosts;
+    } catch (error) {
+      // Fallback: create generic posts
+      return [{
+        platform: 'general',
+        text: content.substring(0, 300),
+        hashtags: [],
+        order_number: 1
+      }];
+    }
+  }
+
+  /**
+   * Parse video script content
+   */
+  parseVideoScriptContent(content) {
+    try {
+      const parsed = JSON.parse(content);
+      return [{
+        title: parsed.title || 'Video Script',
+        script: parsed.script || content,
+        duration: parsed.duration || 60,
+        visual_suggestions: parsed.visualSuggestions || [],
+        order_number: 1
+      }];
+    } catch (error) {
+      return [{
+        title: 'Generated Video Script',
+        script: content,
+        duration: 60,
+        visual_suggestions: [],
+        order_number: 1
+      }];
+    }
+  }
+
+  /**
+   * Parse generic content based on schema
+   */
+  parseGenericContent(content, schema) {
+    // Try JSON first
+    try {
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item, index) => ({
+          ...item,
+          order_number: item.order_number || index + 1
+        }));
+      }
+      return [{ ...parsed, order_number: 1 }];
+    } catch (error) {
+      // Fallback to text
+      return [{
+        text: content,
+        order_number: 1
+      }];
+    }
+  }
+
+  /**
+   * Store content in generic content table
+   */
+  async storeGenericContent(blogId, category, contentData, metadata, accountId) {
+    const storageData = {
+      based_on_gen_article_id: blogId,
+      prompt_category: category,
+      content_data: JSON.stringify(contentData),
+      metadata: JSON.stringify({
+        ...metadata,
+        generated_at: new Date().toISOString(),
+        item_count: Array.isArray(contentData) ? contentData.length : 1
+      }),
+      status: 'draft'
+    };
+
+    if (accountId) {
+      return await db.insertWithAccount('ssnews_generated_content', storageData, accountId);
+    }
+    return await db.insert('ssnews_generated_content', storageData);
+  }
+
+  /**
+   * Format content for frontend consumption
+   */
+  formatContentForFrontend(contentData, contentId, uiConfig) {
+    if (!Array.isArray(contentData)) {
+      contentData = [contentData];
+    }
+
+    return contentData.map((item, index) => ({
+      id: `${contentId}_${index}`,
+      order: item.order_number || index + 1,
+      content: item.prayer_text || item.text || item.script || JSON.stringify(item),
+      ...item, // Include all original fields
+      _contentId: contentId,
+      _displayType: uiConfig?.display_type || 'text'
+    }));
+  }
+
+  /**
+   * Get plural form of category name for backwards compatibility
+   */
+  getPluralForm(category) {
+    const pluralMap = {
+      'prayer_points': 'prayerPoints',
+      'social_media': 'socialPosts',
+      'social_posts': 'socialPosts',
+      'video_script': 'videoScripts',
+      'video_scripts': 'videoScripts'
+    };
+    
+    return pluralMap[category] || `${category}s`;
+  }
+
+  /**
+   * Ensure prompt manager is available for workflow execution
+   */
+  async ensurePromptManager() {
+    if (!global.promptManager) {
+      const PromptManager = (await import('./promptManager.js')).default;
+      global.promptManager = new PromptManager();
+    }
+    return global.promptManager;
+  }
+
+  /**
+   * Generate AI content for workflow step with variable substitution
+   */
+  async generateAIContentFromTemplateWithWorkflow(step, variables, blogId) {
+    try {
+      // Substitute all available variables in the prompt
+      let prompt = step.prompt;
+      let systemMessage = step.systemMessage;
+
+      for (const [key, value] of Object.entries(variables)) {
+        const placeholder = `{${key}}`;
+        if (prompt) {
+          prompt = prompt.replace(new RegExp(placeholder, 'g'), value || '');
+        }
+        if (systemMessage) {
+          systemMessage = systemMessage.replace(new RegExp(placeholder, 'g'), value || '');
+        }
+      }
+
+      // Route to appropriate AI service method based on category
+      switch (step.category) {
+        case 'social_media':
+        case 'social_posts':
+          return await aiService.generateSocialMediaPostsWithPrompt(prompt, systemMessage, blogId);
+        
+        case 'video_script':
+        case 'video_scripts':
+          return await aiService.generateVideoScriptWithPrompt(prompt, systemMessage, blogId);
+        
+        case 'prayer_points':
+        case 'prayer':
+          return await aiService.generatePrayerPointsWithPrompt(prompt, systemMessage, blogId);
+        
+        default:
+          // For any new template types, use the generic generation method
+          return await aiService.generateGenericContentWithPrompt(prompt, systemMessage, step.category, blogId);
+      }
+    } catch (error) {
+      console.error(`❌ Error generating AI content for ${step.category}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Extract output content for chaining to next steps
+   */
+  extractOutputForChaining(structuredData, category) {
+    try {
+      if (!Array.isArray(structuredData) || structuredData.length === 0) {
+        return '';
+      }
+
+      switch (category) {
+        case 'prayer_points':
+        case 'prayer':
+          return structuredData.map(item => item.prayer_text || item.text || '').join('\n\n');
+        
+        case 'social_media':
+        case 'social_posts':
+          return structuredData.map(item => `${item.platform || 'Social'}: ${item.text || ''}`).join('\n\n');
+        
+        case 'video_script':
+        case 'video_scripts':
+          return structuredData.map(item => item.script || item.text || '').join('\n\n');
+        
+        default:
+          // Generic extraction - try common field names
+          return structuredData.map(item => 
+            item.text || item.content || item.script || item.prayer_text || JSON.stringify(item)
+          ).join('\n\n');
+      }
+    } catch (error) {
+      console.error(`❌ Error extracting output for chaining from ${category}:`, error.message);
+      return '';
+    }
   }
 
   async getContentForReview(status = 'draft', limit = 10, accountId = null) {
