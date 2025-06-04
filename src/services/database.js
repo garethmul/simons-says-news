@@ -87,7 +87,9 @@ class DatabaseService {
       for (const statement of statements) {
         if (statement.trim()) {
           try {
-            await this.pool.execute(statement);
+            // Use query() instead of execute() for DDL statements
+            // execute() uses prepared statements which don't support DDL commands
+            await this.pool.query(statement);
           } catch (error) {
             // Ignore duplicate key errors for INSERT IGNORE statements
             if (error.code === 'ER_DUP_ENTRY' && statement.includes('INSERT IGNORE')) {
@@ -369,18 +371,18 @@ class DatabaseService {
               [article.gen_article_id]
             );
 
-        // Get images
+        // Get images (exclude archived images from content card display)
         article.images = accountId
           ? await this.findManyByAccount(
               'ssnews_image_assets',
               accountId,
-              'associated_content_type = ? AND associated_content_id = ?',
-              ['gen_article', article.gen_article_id]
+              'associated_content_type = ? AND associated_content_id = ? AND status != ?',
+              ['gen_article', article.gen_article_id, 'archived']
             )
           : await this.findMany(
               'ssnews_image_assets',
-              'associated_content_type = ? AND associated_content_id = ?',
-              ['gen_article', article.gen_article_id]
+              'associated_content_type = ? AND associated_content_id = ? AND status != ?',
+              ['gen_article', article.gen_article_id, 'archived']
             );
 
         // Map image field names to camelCase for frontend compatibility

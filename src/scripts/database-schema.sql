@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS ssnews_image_assets (
     account_id VARCHAR(64) NOT NULL,
     associated_content_type ENUM('gen_article', 'gen_social_post') NOT NULL,
     associated_content_id INT NOT NULL,
-    source_api ENUM('pexels', 'sirv_upload', 'eden_library', 'ideogram') NOT NULL,
+    source_api ENUM('pexels', 'sirv_upload', 'eden_library', 'ideogram') NOT NULL, -- 'pexels' deprecated but kept for existing data compatibility
     source_image_id_external VARCHAR(255) NULL,
     sirv_cdn_url VARCHAR(512) NOT NULL,
     alt_text_suggestion_ai VARCHAR(255) NULL,
@@ -309,4 +309,5 @@ INSERT IGNORE INTO ssnews_news_sources (name, url, rss_feed_url, is_active) VALU
 ('UCB', 'https://ucb.co.uk/news', 'https://ucb.co.uk/rss', TRUE);
 
 -- Update existing table to include ideogram in source_api enum
-ALTER TABLE ssnews_image_assets MODIFY COLUMN source_api ENUM('pexels', 'sirv_upload', 'eden_library', 'ideogram') NOT NULL; 
+ALTER TABLE ssnews_image_assets MODIFY COLUMN source_api ENUM('pexels', 'sirv_upload', 'eden_library', 'ideogram') NOT NULL; -- 'pexels' deprecated but kept for existing data compatibility
+

@@ -31,14 +31,20 @@ const envVars = {
   MAX_OUTPUT_TOKENS: process.env.MAX_OUTPUT_TOKENS || '32000',
   
   // Image Services
-  PEXELS_API_KEY: process.env.PEXELS_API_KEY,
   IDEOGRAM_API_KEY: process.env.IDEOGRAM_API_KEY,
   SIRV_CLIENT_ID: process.env.SIRV_CLIENT_ID,
   SIRV_CLIENT_SECRET: process.env.SIRV_CLIENT_SECRET,
   SIRV_PUBLIC_URL: process.env.SIRV_PUBLIC_URL,
   
+  // Email
+  MAILGUN_API_KEY: process.env.MAILGUN_API_KEY,
+  MAILGUN_DOMAIN: process.env.MAILGUN_DOMAIN,
+  
   // Security
   SESSION_SECRET: 'heroku-production-secret-' + Math.random().toString(36).substring(7),
+  JWT_SECRET: process.env.JWT_SECRET,
+  OPENSSL_CONF: '/dev/null',
+  NODE_TLS_REJECT_UNAUTHORIZED: '0',
   
   // Other APIs
   GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY,

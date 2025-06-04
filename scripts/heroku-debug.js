@@ -23,6 +23,7 @@ console.log('MYSQL_SSL_CA:', process.env.MYSQL_SSL_CA ? '✅ Set' : '❌ Missing
 console.log('\n🤖 AI Services:');
 console.log('OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? '✅ Set' : '❌ Missing');
 console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✅ Set' : '❌ Missing');
+console.log('IDEOGRAM_API_KEY:', process.env.IDEOGRAM_API_KEY ? '✅ Set' : '❌ Missing');
 
 console.log('\n🖼️ Image Services:');
 console.log('PEXELS_API_KEY:', process.env.PEXELS_API_KEY ? '✅ Set' : '❌ Missing');

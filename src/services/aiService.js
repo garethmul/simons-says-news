@@ -814,67 +814,24 @@ class AIService {
     return themes.slice(0, 5); // Return up to 5 themes
   }
 
-  async generateImageSearchQueries(articleContent, count = 3) {
-    if (!this.hasGemini) {
-      // Fallback to simple keyword-based queries if no AI available
-      return ["christian faith", "bible study", "prayer hands"];
-    }
+  async generateImageSearchQueries(content, count = 3) {
+    const prompt = `For an article about "${content.title}", suggest ${count} AI image generation prompts suitable for creating custom images with Ideogram.
+    
+    Each prompt should:
+    - Be descriptive and specific for AI image generation
+    - Focus on Christian themes without literal religious symbols
+    - Emphasize natural lighting, hope, and warmth
+    - Include diverse people in natural expressions
+    - Avoid children, explicit religious iconography
+    
+    Return as a simple array: ["prompt 1", "prompt 2", "prompt 3"]`;
 
     try {
-      const prompt = `
-        For an article about "${articleContent.title}", suggest ${count} Pexels search queries to find royalty-free images.
-        
-        Article content: ${articleContent.body.substring(0, 500)}...
-        
-        Generate SPECIFIC search queries that relate directly to the article's topic, people, or events.
-        
-        Image Guidelines to follow:
-        - Warm, welcoming, hopeful, natural light preferred
-        - AVOID: Jesus' face, crucifix, mystical symbols, overly Catholic iconography
-        - OKAY: Hope, community, nature, light, Bible, prayer hands, diverse people
-        
-        BE SPECIFIC about:
-        - Named people in the article (e.g., "Franklin Graham speaking")
-        - Specific events or places mentioned
-        - The actual topic being discussed
-        
-        Don't be overly generic - relate queries to the article content!
-        
-        Return only the search queries as a JSON array:
-        ["specific query 1", "specific query 2", "specific query 3"]
-      `;
-
-      const response = await this.geminiModel.generateContent(prompt);
-      const text = response.response.text().trim();
-      
-      try {
-        // Handle markdown code blocks that Gemini sometimes adds
-        let cleanedText = text;
-        if (text.includes('```json')) {
-          cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        } else if (text.includes('```')) {
-          cleanedText = text.replace(/```\n?/g, '').trim();
-        }
-        
-        // Try to parse the cleaned text
-        const queries = JSON.parse(cleanedText);
-        
-        // Validate it's an array
-        if (!Array.isArray(queries)) {
-          throw new Error('Response is not an array');
-        }
-        
-        console.log(`✅ Generated unique image queries for "${articleContent.title.substring(0, 50)}...":`, queries);
-        return queries;
-      } catch (parseError) {
-        console.error('❌ Failed to parse AI response:', text);
-        console.error('Parse error:', parseError.message);
-        // Fallback queries
-        return ["open bible natural light", "diverse people praying", "sunrise hope nature"];
-      }
+      const response = await this.generateStructuredResponse(prompt, 'array');
+      return Array.isArray(response) ? response : [];
     } catch (error) {
-      console.error('❌ AI image query generation failed:', error.message);
-      return ["christian faith", "bible study", "prayer hands"];
+      console.error('❌ Error generating AI image prompts:', error.message);
+      return [];
     }
   }
 

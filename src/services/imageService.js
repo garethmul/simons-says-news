@@ -3,7 +3,6 @@ import db from './database.js'; // Import database service
 
 class ImageService {
   constructor() {
-    this.pexelsApiKey = process.env.PEXELS_API_KEY;
     this.ideogramApiKey = process.env.IDEOGRAM_API_KEY;
     this.sirvClientId = process.env.SIRV_CLIENT_ID;
     this.sirvClientSecret = process.env.SIRV_CLIENT_SECRET;
@@ -18,52 +17,6 @@ class ImageService {
         'User-Agent': 'Eden Content Bot 1.0 (https://eden.co.uk)'
       }
     };
-  }
-
-  async searchPexelsImages(query, perPage = 5) {
-    console.log(`🔍 Searching Pexels for: "${query}"`);
-    
-    try {
-      if (!this.pexelsApiKey) {
-        throw new Error('Pexels API key not configured');
-      }
-
-      const response = await axios.get('https://api.pexels.com/v1/search', {
-        ...this.axiosConfig,
-        headers: {
-          ...this.axiosConfig.headers,
-          'Authorization': this.pexelsApiKey
-        },
-        params: {
-          query,
-          per_page: perPage,
-          orientation: 'landscape',
-          size: 'large'
-        }
-      });
-
-      const images = response.data.photos.map(photo => ({
-        id: photo.id,
-        url: photo.url,
-        photographer: photo.photographer,
-        photographer_url: photo.photographer_url,
-        src: {
-          original: photo.src.original,
-          large: photo.src.large,
-          medium: photo.src.medium,
-          small: photo.src.small
-        },
-        alt: photo.alt || query,
-        width: photo.width,
-        height: photo.height
-      }));
-
-      console.log(`✅ Found ${images.length} images for "${query}"`);
-      return images;
-    } catch (error) {
-      console.error(`❌ Pexels search failed for "${query}":`, error.message);
-      return [];
-    }
   }
 
   async getSirvToken() {
@@ -180,93 +133,10 @@ class ImageService {
     }
   }
 
-  async validateImageContent(imageUrl, description = '') {
-    console.log(`🔍 Validating image content: ${description}`);
-
-    try {
-      // Basic validation based on description and filename
-      const lowercaseDesc = description.toLowerCase();
-      
-      // Check for forbidden content
-      const forbiddenTerms = [
-        'jesus face', 'christ face', 'crucifix', 'cross prominent',
-        'catholic', 'mystical', 'occult', 'abstract religious'
-      ];
-
-      const hasForbiddenContent = forbiddenTerms.some(term => 
-        lowercaseDesc.includes(term)
-      );
-
-      if (hasForbiddenContent) {
-        console.log(`⚠️ Image may contain forbidden content: ${description}`);
-        return {
-          approved: false,
-          reason: 'Contains potentially inappropriate religious imagery',
-          confidence: 0.8
-        };
-      }
-
-      // Check for preferred content
-      const preferredTerms = [
-        'bible', 'prayer', 'hands', 'nature', 'light', 'hope',
-        'community', 'family', 'study', 'reading', 'peaceful'
-      ];
-
-      const hasPreferredContent = preferredTerms.some(term => 
-        lowercaseDesc.includes(term)
-      );
-
-      console.log(`✅ Image validation complete: ${hasPreferredContent ? 'Preferred' : 'Acceptable'} content`);
-      
-      return {
-        approved: true,
-        reason: hasPreferredContent ? 'Contains preferred Christian imagery' : 'Acceptable content',
-        confidence: hasPreferredContent ? 0.9 : 0.7
-      };
-    } catch (error) {
-      console.error('❌ Image validation failed:', error.message);
-      return {
-        approved: true, // Default to approved if validation fails
-        reason: 'Validation failed, manual review recommended',
-        confidence: 0.5
-      };
-    }
-  }
-
   async searchAndValidateImages(query, count = 3) {
-    console.log(`🔍 Searching and validating images for: "${query}"`);
-
-    try {
-      // Search for more images than needed to allow for filtering
-      const searchResults = await this.searchPexelsImages(query, count * 2);
-      
-      if (searchResults.length === 0) {
-        return [];
-      }
-
-      const validatedImages = [];
-
-      for (const image of searchResults) {
-        if (validatedImages.length >= count) break;
-
-        const validation = await this.validateImageContent(image.alt, query);
-        
-        if (validation.approved) {
-          validatedImages.push({
-            ...image,
-            validation
-          });
-        } else {
-          console.log(`❌ Image rejected: ${validation.reason}`);
-        }
-      }
-
-      console.log(`✅ Found ${validatedImages.length} validated images for "${query}"`);
-      return validatedImages;
-    } catch (error) {
-      console.error(`❌ Image search and validation failed for "${query}":`, error.message);
-      return [];
-    }
+    console.log(`🔍 Image search disabled - Pexels integration removed`);
+    console.log(`⚠️ Use AI image generation with Ideogram instead`);
+    return [];
   }
 
   async processImageForContent(imageUrl, filename, contentId) {

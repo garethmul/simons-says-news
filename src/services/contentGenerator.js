@@ -277,50 +277,13 @@ class ContentGenerator {
     console.log('🖼️ Generating and sourcing images...');
     
     try {
-      // Generate image search queries
-      const searchQueries = await aiService.generateImageSearchQueries(blogPost, 3);
-      console.log(`🔍 Image search queries: ${searchQueries.join(', ')}`);
+      // Images - AI Image Generation with Ideogram (replaces Pexels)
+      console.log('🎨 AI image generation available via custom image generator');
+      
+      // Note: Images are now generated on-demand via the custom image generator UI
+      // rather than automatically during content generation
 
-      const images = [];
-
-      for (const query of searchQueries) {
-        try {
-          const imageResults = await imageService.searchPexelsImages(query, 2);
-          
-          for (const image of imageResults) {
-            // Upload to Sirv CDN
-            const sirvUrl = await imageService.uploadToSirv(image.src.large, `eden-content-${blogId}-${Date.now()}.jpg`);
-            
-            // Generate alt text
-            const altText = await aiService.generateAltText(image.alt || query);
-
-            // Store image asset
-            const imageId = await db.insertImageAsset({
-              associated_content_type: 'gen_article',
-              associated_content_id: blogId,
-              source_api: 'pexels',
-              source_image_id_external: image.id.toString(),
-              sirv_cdn_url: sirvUrl,
-              alt_text_suggestion_ai: altText,
-              is_approved_human: false
-            });
-
-            images.push({
-              id: imageId,
-              sirvUrl,
-              altText,
-              pexelsId: image.id,
-              query
-            });
-
-            console.log(`🖼️ Image stored (ID: ${imageId})`);
-          }
-        } catch (error) {
-          console.error(`❌ Error processing image query "${query}":`, error.message);
-        }
-      }
-
-      return images;
+      return [];
     } catch (error) {
       console.error('❌ Error generating images:', error.message);
       return [];
@@ -551,49 +514,13 @@ class ContentGenerator {
     console.log('🖼️ Generating and sourcing images with account context...');
     
     try {
-      const searchQueries = await aiService.generateImageSearchQueries(blogPost, 3);
-      console.log(`🔍 Image search queries: ${searchQueries.join(', ')}`);
+      // Images - AI Image Generation with Ideogram (replaces Pexels)
+      console.log('🎨 AI image generation available via custom image generator');
+      
+      // Note: Images are now generated on-demand via the custom image generator UI
+      // rather than automatically during content generation
 
-      const images = [];
-
-      for (const query of searchQueries) {
-        try {
-          const imageResults = await imageService.searchPexelsImages(query, 2);
-          
-          for (const image of imageResults) {
-            const sirvUrl = await imageService.uploadToSirv(image.src.large, `eden-content-${blogId}-${Date.now()}.jpg`);
-            const altText = await aiService.generateAltText(image.alt || query);
-
-            const imageData = {
-              associated_content_type: 'gen_article',
-              associated_content_id: blogId,
-              source_api: 'pexels',
-              source_image_id_external: image.id.toString(),
-              sirv_cdn_url: sirvUrl,
-              alt_text_suggestion_ai: altText,
-              is_approved_human: false
-            };
-
-            const imageId = accountId 
-              ? await db.insertWithAccount('ssnews_image_assets', imageData, accountId)
-              : await db.insert('ssnews_image_assets', imageData);
-
-            images.push({
-              id: imageId,
-              sirvUrl,
-              altText,
-              pexelsId: image.id,
-              query
-            });
-
-            console.log(`🖼️ Image stored (ID: ${imageId})`);
-          }
-        } catch (error) {
-          console.error(`❌ Error processing image query "${query}":`, error.message);
-        }
-      }
-
-      return images;
+      return [];
     } catch (error) {
       console.error('❌ Error generating images:', error.message);
       return [];

@@ -1273,8 +1273,8 @@ const ImagesTab = ({ images, contentId, onImageGenerated, onImageClick, onUpdate
           <CardTitle className="flex items-center gap-2">
             <Image className="w-5 h-5" />
             Generated Images ({images.length})
-            <Badge variant="secondary" className="text-xs ml-2">
-              Sirv CDN + Pexels + Ideogram.ai
+            <Badge variant="outline" className="text-xs font-mono">
+              Sirv CDN + Ideogram.ai
             </Badge>
           </CardTitle>
         </CardHeader>

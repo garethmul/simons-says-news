@@ -219,10 +219,12 @@ app.get('/api/health', (req, res) => {
     initializationError: initializationError,
     services: {
       database: isSystemReady,
-      ai: !!process.env.OPENAI_API_KEY && !!process.env.GEMINI_API_KEY,
-      images: !!process.env.PEXELS_API_KEY && !!process.env.SIRV_CLIENT_ID,
-      ideogram: !!process.env.IDEOGRAM_API_KEY,
-      newsAggregation: true
+      ai: {
+        openai: !!process.env.OPENAI_API_KEY,
+        gemini: !!process.env.GEMINI_API_KEY
+      },
+      images: !!process.env.SIRV_CLIENT_ID && !!process.env.IDEOGRAM_API_KEY,
+      email: !!process.env.MAILGUN_API_KEY
     }
   });
 });
@@ -2165,7 +2167,7 @@ app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) 
       id: image.id,
       sirvUrl: image.sirvUrl,
       altText: image.altText || 'Generated image',
-      source: image.source || 'pexels',
+      source: image.source || 'ideogram',
       query: image.source === 'ideogram' ? 'AI Generated' : 'Stock Photo',
       created: image.created_at,
       status: image.status // Include status in formatted response

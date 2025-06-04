@@ -316,7 +316,7 @@ const ImageGallery = ({ images, contentId }) => {
       <div className="flex items-center gap-2 mb-3">
         <Image className="w-4 h-4 text-gray-600" />
         <span className="text-sm font-medium text-gray-700">Generated Images ({sortedImages.length})</span>
-        <Badge variant="secondary" className="text-xs">Sirv CDN + Pexels</Badge>
+        <Badge variant="secondary" className="text-xs">Sirv CDN + Ideogram.ai</Badge>
       </div>
       
       {/* Horizontal scrolling carousel */}
@@ -331,7 +331,7 @@ const ImageGallery = ({ images, contentId }) => {
       </div>
       
       <div className="mt-2 text-xs text-gray-500">
-        Images sourced from Pexels and optimised via Sirv CDN • AI-generated alt text and search queries
+        AI-generated images via Ideogram.ai • Optimised and served via Sirv CDN
       </div>
     </div>
   );
