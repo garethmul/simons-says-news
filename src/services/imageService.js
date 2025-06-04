@@ -287,14 +287,6 @@ class ImageService {
         throw new Error('Prompt is required for image generation');
       }
 
-      // Prepare form data for the API request
-      const formData = new FormData();
-      formData.append('prompt', prompt);
-      formData.append('style_type', styleType);
-      formData.append('magic_prompt', magicPrompt);
-      formData.append('num_images', numImages.toString());
-      formData.append('rendering_speed', renderingSpeed);
-
       // Add model version parameter - map to API format
       let apiModel;
       switch (modelVersion) {
@@ -315,30 +307,11 @@ class ImageService {
           apiModel = 'V_3'; // Default to latest
           break;
       }
-      formData.append('model', apiModel);
-
-      // Use either resolution or aspect ratio, not both
-      if (resolution) {
-        formData.append('resolution', resolution);
-      } else {
-        // Convert aspect ratio format from 16:9 to 16x9 for Ideogram API
-        const ideogramAspectRatio = aspectRatio.replace(':', 'x');
-        formData.append('aspect_ratio', ideogramAspectRatio);
-      }
-
-      if (negativePrompt) {
-        formData.append('negative_prompt', negativePrompt);
-      }
-
-      if (seed) {
-        formData.append('seed', seed.toString());
-      }
-
-      console.log(`🔍 Ideogram prompt: "${prompt.substring(0, 100)}..."`);
-      console.log(`🎯 Model: ${apiModel} (${modelVersion}), Style: ${styleType}, Aspect: ${aspectRatio}, Magic: ${magicPrompt}`);
 
       // Determine the correct API endpoint based on model version
       let apiEndpoint;
+      let isLegacyEndpoint = false;
+      
       switch (modelVersion) {
         case 'v1':
         case 'v1.0':
@@ -347,27 +320,92 @@ class ImageService {
         case 'v2a':
           // Legacy endpoint for v1 and v2 models
           apiEndpoint = 'https://api.ideogram.ai/generate';
+          isLegacyEndpoint = true;
           break;
         case 'v3':
         case 'v3.0':
         default:
           // New endpoint for v3 models
           apiEndpoint = 'https://api.ideogram.ai/v1/ideogram-v3/generate';
+          isLegacyEndpoint = false;
           break;
       }
 
-      console.log(`🔗 Using API endpoint: ${apiEndpoint}`);
+      console.log(`🔍 Ideogram prompt: "${prompt.substring(0, 100)}..."`);
+      console.log(`🎯 Model: ${apiModel} (${modelVersion}), Style: ${styleType}, Aspect: ${aspectRatio}, Magic: ${magicPrompt}`);
+      console.log(`🔗 Using API endpoint: ${apiEndpoint} (Legacy: ${isLegacyEndpoint})`);
+
+      let requestData;
+      let headers = {
+        ...this.axiosConfig.headers,
+        'Api-Key': this.ideogramApiKey
+      };
+
+      if (isLegacyEndpoint) {
+        // Legacy endpoints (v1, v2) expect JSON
+        requestData = {
+          prompt: prompt,
+          style_type: styleType,
+          magic_prompt: magicPrompt,
+          num_images: numImages,
+          rendering_speed: renderingSpeed,
+          model: apiModel
+        };
+
+        // Use either resolution or aspect ratio, not both
+        if (resolution) {
+          requestData.resolution = resolution;
+        } else {
+          // Convert aspect ratio format from 16:9 to 16x9 for Ideogram API
+          requestData.aspect_ratio = aspectRatio.replace(':', 'x');
+        }
+
+        if (negativePrompt) {
+          requestData.negative_prompt = negativePrompt;
+        }
+
+        if (seed) {
+          requestData.seed = parseInt(seed);
+        }
+
+        headers['Content-Type'] = 'application/json';
+        
+      } else {
+        // New endpoints (v3) expect FormData
+        requestData = new FormData();
+        requestData.append('prompt', prompt);
+        requestData.append('style_type', styleType);
+        requestData.append('magic_prompt', magicPrompt);
+        requestData.append('num_images', numImages.toString());
+        requestData.append('rendering_speed', renderingSpeed);
+        requestData.append('model', apiModel);
+
+        // Use either resolution or aspect ratio, not both
+        if (resolution) {
+          requestData.append('resolution', resolution);
+        } else {
+          // Convert aspect ratio format from 16:9 to 16x9 for Ideogram API
+          const ideogramAspectRatio = aspectRatio.replace(':', 'x');
+          requestData.append('aspect_ratio', ideogramAspectRatio);
+        }
+
+        if (negativePrompt) {
+          requestData.append('negative_prompt', negativePrompt);
+        }
+
+        if (seed) {
+          requestData.append('seed', seed.toString());
+        }
+
+        headers['Content-Type'] = 'multipart/form-data';
+      }
 
       const response = await axios.post(
         apiEndpoint,
-        formData,
+        requestData,
         {
           ...this.axiosConfig,
-          headers: {
-            ...this.axiosConfig.headers,
-            'Api-Key': this.ideogramApiKey,
-            'Content-Type': 'multipart/form-data'
-          },
+          headers,
           timeout: 60000 // Longer timeout for image generation
         }
       );
