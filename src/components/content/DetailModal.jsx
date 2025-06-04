@@ -954,12 +954,23 @@ const ImageViewerModal = ({ images, selectedIndex, metadata, onClose, onIndexCha
             </div>
 
             {/* AI Generation Metadata */}
-            {currentMetadata && (
+            {(currentMetadata || currentImage.generationMetadata) && (
               <>
                 <div className="border-t pt-4">
                   <h4 className="font-medium text-gray-900 mb-2">Generation Details</h4>
                   <div className="space-y-2 text-sm">
-                    {currentMetadata.prompts?.userPrompt && (
+                    {/* Primary metadata source: generationMetadata from image */}
+                    {currentImage.generationMetadata?.prompt && (
+                      <div>
+                        <span className="text-gray-600 block mb-1">AI Prompt:</span>
+                        <p className="bg-gray-50 p-3 rounded text-sm mt-1 break-words leading-relaxed">
+                          {currentImage.generationMetadata.prompt}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* Fallback to detailed metadata if available */}
+                    {!currentImage.generationMetadata?.prompt && currentMetadata?.prompts?.userPrompt && (
                       <div>
                         <span className="text-gray-600 block mb-1">User Prompt:</span>
                         <p className="bg-gray-50 p-3 rounded text-sm mt-1 break-words leading-relaxed">
@@ -967,12 +978,38 @@ const ImageViewerModal = ({ images, selectedIndex, metadata, onClose, onIndexCha
                         </p>
                       </div>
                     )}
-                    {currentMetadata.prompts?.finalPrompt && (
+                    {!currentImage.generationMetadata?.prompt && currentMetadata?.prompts?.finalPrompt && (
                       <div>
                         <span className="text-gray-600 block mb-1">Final Prompt:</span>
                         <p className="bg-gray-50 p-3 rounded text-sm mt-1 break-words leading-relaxed">
                           {currentMetadata.prompts.finalPrompt}
                         </p>
+                      </div>
+                    )}
+
+                    {/* Style Codes Display */}
+                    {currentImage.generationMetadata?.styleCodes && (
+                      <div>
+                        <span className="text-gray-600 block mb-1">🎨 Style Codes (Reusable):</span>
+                        <div className="bg-blue-50 p-3 rounded">
+                          <div className="flex flex-wrap gap-2">
+                            {Array.isArray(currentImage.generationMetadata.styleCodes) 
+                              ? currentImage.generationMetadata.styleCodes.map((code, index) => (
+                                  <code key={index} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-mono">
+                                    {code}
+                                  </code>
+                                ))
+                              : (
+                                <code className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-mono">
+                                  {currentImage.generationMetadata.styleCodes}
+                                </code>
+                              )
+                            }
+                          </div>
+                          <p className="text-xs text-blue-600 mt-2">
+                            💡 Copy these codes to reuse this exact style in future generations
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -981,34 +1018,59 @@ const ImageViewerModal = ({ images, selectedIndex, metadata, onClose, onIndexCha
                 <div className="border-t pt-4">
                   <h4 className="font-medium text-gray-900 mb-2">AI Parameters</h4>
                   <div className="space-y-2 text-sm">
-                    {currentMetadata.parameters?.styleType && (
+                    {/* Model Version from generationMetadata */}
+                    {currentImage.generationMetadata?.modelVersion && (
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Style:</span>
-                        <span className="capitalize">{currentMetadata.parameters.styleType.toLowerCase()}</span>
+                        <span className="text-gray-600">Model Version:</span>
+                        <span className="font-semibold">Ideogram {currentImage.generationMetadata.modelVersion}</span>
                       </div>
                     )}
-                    {currentMetadata.parameters?.aspectRatio && (
+                    
+                    {/* Style Type from generationMetadata or fallback */}
+                    {(currentImage.generationMetadata?.styleType || currentMetadata?.parameters?.styleType) && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Style:</span>
+                        <span className="capitalize">
+                          {(currentImage.generationMetadata?.styleType || currentMetadata.parameters.styleType).toLowerCase()}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* Resolution from generationMetadata or fallback */}
+                    {(currentImage.generationMetadata?.resolution || currentMetadata?.result?.resolution) && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Resolution:</span>
+                        <span>{currentImage.generationMetadata?.resolution || currentMetadata.result.resolution}</span>
+                      </div>
+                    )}
+                    
+                    {/* Seed from generationMetadata or fallback */}
+                    {(currentImage.generationMetadata?.seed || currentMetadata?.result?.seed) && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Seed (Reusable):</span>
+                        <span className="font-mono text-xs bg-green-50 px-2 py-1 rounded">
+                          {currentImage.generationMetadata?.seed || currentMetadata.result.seed}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* Fallback parameters if generationMetadata doesn't have them */}
+                    {!currentImage.generationMetadata && currentMetadata?.parameters?.aspectRatio && (
                       <div className="flex justify-between">
                         <span className="text-gray-600">Aspect Ratio:</span>
                         <span>{currentMetadata.parameters.aspectRatio}</span>
                       </div>
                     )}
-                    {currentMetadata.parameters?.renderingSpeed && (
+                    {!currentImage.generationMetadata && currentMetadata?.parameters?.renderingSpeed && (
                       <div className="flex justify-between">
                         <span className="text-gray-600">Speed:</span>
                         <span className="capitalize">{currentMetadata.parameters.renderingSpeed.toLowerCase()}</span>
                       </div>
                     )}
-                    {currentMetadata.parameters?.magicPrompt && (
+                    {!currentImage.generationMetadata && currentMetadata?.parameters?.magicPrompt && (
                       <div className="flex justify-between">
                         <span className="text-gray-600">Magic Prompt:</span>
                         <span>{currentMetadata.parameters.magicPrompt}</span>
-                      </div>
-                    )}
-                    {currentMetadata.result?.seed && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Seed:</span>
-                        <span className="font-mono text-xs">{currentMetadata.result.seed}</span>
                       </div>
                     )}
                   </div>
@@ -1245,11 +1307,17 @@ const CustomImageGenerationModal = ({
     numImages: 1,
     styleType: 'GENERAL',
     styleCodes: '',
+    referenceImages: [], // v3 Reference Style feature - up to 3 images
     selectedColorTemplate: '',
     modelVersion: 'v2' // Default to v2 to get ANIME and 3D styles
   });
   const [options, setOptions] = useState(null);
   const [accountSettings, setAccountSettings] = useState(null);
+  
+  // Reference images management
+  const [existingImages, setExistingImages] = useState([]);
+  const [loadingExistingImages, setLoadingExistingImages] = useState(false);
+  const [referenceImageMode, setReferenceImageMode] = useState('upload'); // 'upload' or 'existing'
 
   // Load Ideogram options and account settings when modal opens
   useEffect(() => {
@@ -1265,42 +1333,44 @@ const CustomImageGenerationModal = ({
           setOptions(optionsData.options);
         }
 
-        // Load account image generation settings
-        const settingsResponse = await fetch('/api/eden/settings/image-generation', withAccountContext());
-        if (settingsResponse.ok) {
-          const settingsData = await settingsResponse.json();
-          setAccountSettings(settingsData.settings);
-          
-          // Apply account defaults to form
-          if (settingsData.settings?.defaults) {
-            const defaults = settingsData.settings.defaults;
+        // Load account image generation settings (only on initial load, not when model version changes)
+        if (!accountSettings) {
+          const settingsResponse = await fetch('/api/eden/settings/image-generation', withAccountContext());
+          if (settingsResponse.ok) {
+            const settingsData = await settingsResponse.json();
+            setAccountSettings(settingsData.settings);
             
-            // Validate style type against allowed Ideogram styles for current model
-            const validStyleTypes = optionsData?.options?.styles?.map(s => s.value) || ['AUTO', 'GENERAL', 'REALISTIC', 'DESIGN'];
-            const validatedStyleType = validStyleTypes.includes(defaults.styleType) 
-              ? defaults.styleType 
-              : 'GENERAL';
+            // Apply account defaults to form (only on initial load)
+            if (settingsData.settings?.defaults) {
+              const defaults = settingsData.settings.defaults;
+              
+              // Validate style type against allowed Ideogram styles for current model
+              const validStyleTypes = optionsData?.options?.styles?.map(s => s.value) || ['AUTO', 'GENERAL', 'REALISTIC', 'DESIGN'];
+              const validatedStyleType = validStyleTypes.includes(defaults.styleType) 
+                ? defaults.styleType 
+                : 'GENERAL';
+              
+              setFormData(prev => ({
+                ...prev,
+                modelVersion: defaults.modelVersion || prev.modelVersion,
+                aspectRatio: defaults.aspectRatio || prev.aspectRatio,
+                resolution: defaults.resolution || prev.resolution,
+                renderingSpeed: defaults.renderingSpeed || prev.renderingSpeed,
+                magicPrompt: defaults.magicPrompt || prev.magicPrompt,
+                styleType: validatedStyleType,
+                negativePrompt: defaults.negativePrompt || prev.negativePrompt,
+                numImages: defaults.numImages || prev.numImages
+              }));
+            }
             
-            setFormData(prev => ({
-              ...prev,
-              modelVersion: defaults.modelVersion || prev.modelVersion,
-              aspectRatio: defaults.aspectRatio || prev.aspectRatio,
-              resolution: defaults.resolution || prev.resolution,
-              renderingSpeed: defaults.renderingSpeed || prev.renderingSpeed,
-              magicPrompt: defaults.magicPrompt || prev.magicPrompt,
-              styleType: validatedStyleType,
-              negativePrompt: defaults.negativePrompt || prev.negativePrompt,
-              numImages: defaults.numImages || prev.numImages
-            }));
-          }
-          
-          // Load last selected color template from localStorage
-          const lastSelectedTemplate = localStorage.getItem('ideogram-last-color-template') || '';
-          if (lastSelectedTemplate && settingsData.settings?.brandColors?.some(color => color.name === lastSelectedTemplate)) {
-            setFormData(prev => ({
-              ...prev,
-              selectedColorTemplate: lastSelectedTemplate
-            }));
+            // Load last selected color template from localStorage
+            const lastSelectedTemplate = localStorage.getItem('ideogram-last-color-template') || '';
+            if (lastSelectedTemplate && settingsData.settings?.brandColors?.some(color => color.name === lastSelectedTemplate)) {
+              setFormData(prev => ({
+                ...prev,
+                selectedColorTemplate: lastSelectedTemplate
+              }));
+            }
           }
         }
       } catch (error) {
@@ -1311,7 +1381,28 @@ const CustomImageGenerationModal = ({
     if (isOpen && (!options || options.modelVersion !== formData.modelVersion)) {
       loadData();
     }
-  }, [isOpen, formData.modelVersion, options, accountSettings, withAccountContext]);
+  }, [isOpen, formData.modelVersion, options, withAccountContext]);
+
+  // Separate effect to reload options when model version changes (without applying defaults again)
+  useEffect(() => {
+    const reloadOptions = async () => {
+      if (!isOpen || !accountSettings) return;
+      
+      try {
+        const optionsResponse = await fetch(`/api/eden/images/ideogram/options?modelVersion=${formData.modelVersion}`);
+        if (optionsResponse.ok) {
+          const optionsData = await optionsResponse.json(); 
+          setOptions(optionsData.options);
+        }
+      } catch (error) {
+        console.error('Failed to reload options:', error);
+      }
+    };
+
+    if (isOpen && accountSettings && options && options.modelVersion !== formData.modelVersion) {
+      reloadOptions();
+    }
+  }, [isOpen, formData.modelVersion, accountSettings, options]);
 
   // Handle escape key
   useEffect(() => {
@@ -1324,6 +1415,33 @@ const CustomImageGenerationModal = ({
     document.addEventListener('keydown', handleKeydown);
     return () => document.removeEventListener('keydown', handleKeydown);
   }, [isOpen, onClose]);
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setOptions(null);
+      setAccountSettings(null);
+      setExistingImages([]);
+      setLoadingExistingImages(false);
+      setReferenceImageMode('upload');
+      // Reset formData to defaults when modal closes
+      setFormData({
+        prompt: '',
+        seed: '',
+        resolution: '',
+        aspectRatio: '16:9',
+        renderingSpeed: 'DEFAULT',
+        magicPrompt: 'AUTO',
+        negativePrompt: '',
+        numImages: 1,
+        styleType: 'GENERAL',
+        styleCodes: '',
+        referenceImages: [],
+        selectedColorTemplate: '',
+        modelVersion: 'v2' // Default to v2
+      });
+    }
+  }, [isOpen]);
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -1345,6 +1463,11 @@ const CustomImageGenerationModal = ({
       if (formData.negativePrompt.trim()) payload.negativePrompt = formData.negativePrompt.trim();
       if (formData.styleCodes.trim()) payload.styleCodes = formData.styleCodes.trim().split(',').map(s => s.trim());
       
+      // v3 Reference Style feature
+      if (formData.modelVersion === 'v3' && formData.referenceImages.length > 0) {
+        payload.referenceImages = formData.referenceImages;
+      }
+      
       // Handle selected color template
       if (formData.selectedColorTemplate && accountSettings?.brandColors?.length > 0) {
         const selectedTemplate = accountSettings.brandColors.find(template => template.name === formData.selectedColorTemplate);
@@ -1362,13 +1485,49 @@ const CustomImageGenerationModal = ({
         payload.prompt = `${prefix} ${payload.prompt} ${suffix}`.trim();
       }
 
-      const response = await fetch(`/api/eden/images/generate-for-content/${contentId}`, withAccountContext({
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      }));
+      // Handle v3 reference images with multipart form data
+      let requestConfig;
+      if (formData.modelVersion === 'v3' && formData.referenceImages.length > 0) {
+        // Use FormData for v3 with reference images
+        const formDataPayload = new FormData();
+        
+        // Add all payload fields as form data
+        Object.keys(payload).forEach(key => {
+          if (key === 'referenceImages') {
+            // Add reference image files
+            payload.referenceImages.forEach((image, index) => {
+              if (image.file) {
+                formDataPayload.append(`referenceImage_${index}`, image.file);
+              }
+            });
+          } else if (Array.isArray(payload[key])) {
+            // Handle arrays (like styleCodes)
+            formDataPayload.append(key, JSON.stringify(payload[key]));
+          } else if (typeof payload[key] === 'object') {
+            // Handle objects (like selectedColorTemplate)
+            formDataPayload.append(key, JSON.stringify(payload[key]));
+          } else {
+            formDataPayload.append(key, payload[key]);
+          }
+        });
+        
+        requestConfig = withAccountContext({
+          method: 'POST',
+          body: formDataPayload
+          // Don't set Content-Type header - let browser set it with boundary
+        });
+      } else {
+        // Use JSON for all other cases
+        requestConfig = withAccountContext({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload)
+        });
+      }
+
+      const response = await fetch(`/api/eden/images/generate-for-content/${contentId}`, requestConfig);
 
       if (response.ok) {
         const result = await response.json();
@@ -1425,6 +1584,7 @@ const CustomImageGenerationModal = ({
             return validStyleTypes.includes(defaultStyle) ? defaultStyle : 'GENERAL';
           })(),
           styleCodes: '',
+          referenceImages: [], // Reset reference images
           selectedColorTemplate: '',
           modelVersion: accountSettings?.defaults?.modelVersion || 'v2'
         });
@@ -1444,10 +1604,21 @@ const CustomImageGenerationModal = ({
   };
 
   const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    setFormData(prev => {
+      // Clean up old reference image URLs to prevent memory leaks
+      if (field === 'referenceImages' && prev.referenceImages) {
+        prev.referenceImages.forEach(image => {
+          if (image.url && image.url.startsWith('blob:')) {
+            URL.revokeObjectURL(image.url);
+          }
+        });
+      }
+      
+      return {
+        ...prev,
+        [field]: value
+      };
+    });
     
     // Save color template selection to localStorage
     if (field === 'selectedColorTemplate') {
@@ -1464,6 +1635,51 @@ const CustomImageGenerationModal = ({
       ...prev,
       prompt: prev.prompt ? `${prev.prompt} ${text}` : text
     }));
+  };
+
+  // Load existing images from account
+  const loadExistingImages = async () => {
+    if (loadingExistingImages || existingImages.length > 0) return;
+    
+    setLoadingExistingImages(true);
+    try {
+      const response = await fetch('/api/eden/images/generation-history', withAccountContext());
+      if (response.ok) {
+        const data = await response.json();
+        // Filter and format images for reference selection
+        const validImages = data.history
+          .filter(item => item.result?.imageUrl && item.result?.status !== 'archived')
+          .slice(0, 50) // Limit to recent 50 images for performance
+          .map(item => ({
+            id: item.id,
+            url: item.result.imageUrl,
+            altText: item.result.imageAltText || 'Generated Image',
+            prompt: item.parameters?.prompt || '',
+            created: item.createdAt,
+            type: 'existing'
+          }));
+        setExistingImages(validImages);
+      }
+    } catch (error) {
+      console.error('Failed to load existing images:', error);
+    } finally {
+      setLoadingExistingImages(false);
+    }
+  };
+
+  // Handle selecting an existing image as reference
+  const selectExistingImage = (image) => {
+    if (formData.referenceImages.length >= 3) return;
+    
+    const newReferenceImage = {
+      id: image.id,
+      url: image.url,
+      altText: image.altText,
+      type: 'existing'
+    };
+    
+    const newImages = [...formData.referenceImages, newReferenceImage];
+    handleInputChange('referenceImages', newImages);
   };
 
   if (!isOpen) return null;
@@ -1786,6 +2002,195 @@ const CustomImageGenerationModal = ({
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   />
           </div>
+
+                {/* Reference Style - v3 Feature */}
+                {formData.modelVersion === 'v3' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Reference Style Images (v3 Feature)
+                    </label>
+                    <p className="text-xs text-gray-500 mb-3">
+                      Upload up to 3 images that Ideogram will use as visual style inspiration. Only available in v3.
+                    </p>
+                    
+                    {/* Selected Reference Images */}
+                    {formData.referenceImages.length > 0 && (
+                      <div className="space-y-3 mb-4">
+                        {formData.referenceImages.map((image, index) => (
+                          <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border">
+                            <img 
+                              src={image.url} 
+                              alt={`Reference ${index + 1}`}
+                              className="w-16 h-16 object-cover rounded border"
+                            />
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-700">Reference Image {index + 1}</div>
+                              <div className="text-xs text-gray-500">
+                                {image.type === 'existing' ? 'From image bank' : (image.file?.name || 'Uploaded image')}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Clean up blob URL if it's an uploaded file
+                                if (image.url && image.url.startsWith('blob:')) {
+                                  URL.revokeObjectURL(image.url);
+                                }
+                                const newImages = formData.referenceImages.filter((_, i) => i !== index);
+                                handleInputChange('referenceImages', newImages);
+                              }}
+                              className="text-red-500 hover:text-red-700 transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Add Reference Images */}
+                    {formData.referenceImages.length < 3 && (
+                      <div className="space-y-3">
+                        {/* Mode Toggle */}
+                        <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
+                          <button
+                            type="button"
+                            onClick={() => setReferenceImageMode('upload')}
+                            className={`flex-1 px-3 py-2 text-sm rounded-md transition-colors ${
+                              referenceImageMode === 'upload'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            📤 Upload New
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReferenceImageMode('existing');
+                              loadExistingImages();
+                            }}
+                            className={`flex-1 px-3 py-2 text-sm rounded-md transition-colors ${
+                              referenceImageMode === 'existing'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            🖼️ Choose Existing
+                          </button>
+                        </div>
+                        
+                        {/* Upload Mode */}
+                        {referenceImageMode === 'upload' && (
+                          <div className="border-2 border-dashed border-gray-300 hover:border-gray-400 transition-colors rounded-lg p-4">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const file = e.target.files[0];
+                                if (file) {
+                                  const url = URL.createObjectURL(file);
+                                  const newImages = [...formData.referenceImages, { file, url, type: 'upload' }];
+                                  handleInputChange('referenceImages', newImages);
+                                  e.target.value = '';
+                                }
+                              }}
+                              className="hidden"
+                              id={`reference-upload-${formData.referenceImages.length}`}
+                            />
+                            <label
+                              htmlFor={`reference-upload-${formData.referenceImages.length}`}
+                              className="cursor-pointer flex flex-col items-center gap-2 text-gray-500 hover:text-gray-700 transition-colors"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                                <span className="text-lg">+</span>
+                              </div>
+                              <span className="text-sm font-medium">
+                                Upload Reference Image ({formData.referenceImages.length}/3)
+                              </span>
+                              <span className="text-xs text-center">
+                                Choose an image from your device
+                              </span>
+                            </label>
+                          </div>
+                        )}
+                        
+                        {/* Existing Images Mode */}
+                        {referenceImageMode === 'existing' && (
+                          <div className="border border-gray-300 rounded-lg p-4">
+                            {loadingExistingImages ? (
+                              <div className="text-center py-8 text-gray-500">
+                                <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
+                                <p>Loading your images...</p>
+                              </div>
+                            ) : existingImages.length === 0 ? (
+                              <div className="text-center py-8 text-gray-500">
+                                <Image className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                                <p>No images found in your account</p>
+                                <p className="text-sm mt-2">Generate some images first to use as references</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="flex justify-between items-center mb-3">
+                                  <h4 className="text-sm font-medium text-gray-700">
+                                    Choose from {existingImages.length} images
+                                  </h4>
+                                  <span className="text-xs text-gray-500">
+                                    {formData.referenceImages.length}/3 selected
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto">
+                                  {existingImages.map((image) => {
+                                    const isSelected = formData.referenceImages.some(ref => ref.id === image.id);
+                                    const canSelect = formData.referenceImages.length < 3;
+                                    
+                                    return (
+                                      <div
+                                        key={image.id}
+                                        className={`relative group cursor-pointer rounded border-2 transition-all ${
+                                          isSelected
+                                            ? 'border-blue-500 ring-2 ring-blue-200'
+                                            : canSelect
+                                            ? 'border-gray-200 hover:border-gray-300'
+                                            : 'border-gray-200 opacity-50 cursor-not-allowed'
+                                        }`}
+                                        onClick={() => {
+                                          if (!isSelected && canSelect) {
+                                            selectExistingImage(image);
+                                          }
+                                        }}
+                                      >
+                                        <div className="aspect-square">
+                                          <img
+                                            src={image.url}
+                                            alt={image.altText}
+                                            className="w-full h-full object-cover rounded"
+                                          />
+                                        </div>
+                                        {isSelected && (
+                                          <div className="absolute top-1 right-1">
+                                            <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                                              <span className="text-white text-xs">✓</span>
+                                            </div>
+                                          </div>
+                                        )}
+                                        {!canSelect && !isSelected && (
+                                          <div className="absolute inset-0 bg-black bg-opacity-20 rounded flex items-center justify-center">
+                                            <span className="text-white text-xs">3 max</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Preferred Style Codes */}
                 {accountSettings?.preferredStyleCodes?.length > 0 && (

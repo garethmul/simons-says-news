@@ -262,12 +262,212 @@ class ImageService {
     }
   }
 
+  // Centralized version registry for future extensibility
+  getIdeogramVersionRegistry() {
+    return {
+      // Legacy API family (v1, v2, v2a)
+      'v1': {
+        family: 'legacy',
+        generation: 1,
+        endpoint: 'https://api.ideogram.ai/generate',
+        apiModel: 'V_1',
+        contentType: 'application/json',
+        requiresWrapper: true,
+        deprecated: false,
+        releaseDate: '2023',
+        capabilities: {
+          maxImages: 8,
+          colorPalette: true,
+          styleCodes: true,
+          negativePrompt: true,
+          seed: true,
+          resolution: true,
+          aspectRatio: 'limited', // Limited aspect ratios
+          referenceImages: true,
+          multipleStyles: true
+        },
+        behaviors: {
+          styleCodesBehavior: 'keyword_injection', // Adds keywords to prompt
+          aspectRatioFormat: 'ASPECT_X_Y'
+        }
+      },
+      
+      'v2': {
+        family: 'legacy',
+        generation: 2,
+        endpoint: 'https://api.ideogram.ai/generate',
+        apiModel: 'V_2',
+        contentType: 'application/json',
+        requiresWrapper: true,
+        deprecated: false,
+        releaseDate: '2024-Q1',
+        capabilities: {
+          maxImages: 8,
+          colorPalette: true,
+          styleCodes: true,
+          negativePrompt: true,
+          seed: true,
+          resolution: true,
+          aspectRatio: 'limited', // Limited aspect ratios
+          referenceImages: false,
+          multipleStyles: false,
+          specializedModels: true // 3D, Anime
+        },
+        behaviors: {
+          styleCodesBehavior: 'specialized_models', // Uses specialized AI models
+          aspectRatioFormat: 'ASPECT_X_Y'
+        }
+      },
+      
+      'v2a': {
+        family: 'legacy',
+        generation: 2,
+        variant: 'turbo',
+        endpoint: 'https://api.ideogram.ai/generate',
+        apiModel: 'V_2_TURBO',
+        contentType: 'application/json',
+        requiresWrapper: true,
+        deprecated: false,
+        releaseDate: '2024-Q2',
+        capabilities: {
+          maxImages: 8,
+          colorPalette: false, // Disabled for turbo mode
+          styleCodes: false,
+          negativePrompt: true,
+          seed: true,
+          resolution: true,
+          aspectRatio: 'limited',
+          referenceImages: false,
+          multipleStyles: false,
+          fastGeneration: true
+        },
+        behaviors: {
+          styleCodesBehavior: 'disabled',
+          aspectRatioFormat: 'ASPECT_X_Y',
+          optimizedForSpeed: true
+        }
+      },
+      
+      'v3': {
+        family: 'modern',
+        generation: 3,
+        endpoint: 'https://api.ideogram.ai/v1/ideogram-v3/generate',
+        apiModel: 'V_3',
+        contentType: 'multipart/form-data',
+        requiresWrapper: false,
+        deprecated: false,
+        releaseDate: '2024-Q3',
+        capabilities: {
+          maxImages: 8,
+          colorPalette: true,
+          styleCodes: true,
+          negativePrompt: true,
+          seed: true,
+          resolution: 'enhanced', // More resolution options
+          aspectRatio: 'enhanced', // More aspect ratios
+          referenceImages: true,
+          multipleStyles: false,
+          randomStyleCodes: true
+        },
+        behaviors: {
+          styleCodesBehavior: 'direct', // Direct style application
+          aspectRatioFormat: 'ASPECT_X_Y',
+          qualityFocus: true
+        }
+      },
+      
+      // Future v4 placeholder - easily extensible
+      'v4': {
+        family: 'next_gen',
+        generation: 4,
+        endpoint: 'https://api.ideogram.ai/v2/ideogram-v4/generate', // Future endpoint
+        apiModel: 'V_4',
+        contentType: 'multipart/form-data',
+        requiresWrapper: false,
+        deprecated: false,
+        releaseDate: 'TBD',
+        capabilities: {
+          maxImages: 16,
+          colorPalette: true,
+          styleCodes: true,
+          negativePrompt: true,
+          seed: true,
+          resolution: 'unlimited',
+          aspectRatio: 'unlimited',
+          referenceImages: true,
+          multipleStyles: true,
+          videoGeneration: true, // Future feature
+          enhancedControl: true
+        },
+        behaviors: {
+          styleCodesBehavior: 'neural_style_transfer',
+          aspectRatioFormat: 'flexible', // Could support any ratio
+          aiEnhanced: true
+        }
+      }
+    };
+  }
+
+  // Get version-specific configuration with future-proof design
+  getIdeogramVersionConfig(modelVersion) {
+    const registry = this.getIdeogramVersionRegistry();
+    
+    // Normalize version string with flexible parsing
+    const normalizedVersion = modelVersion.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const versionMap = {
+      'v1': 'v1', 'v10': 'v1', 'version1': 'v1',
+      'v2': 'v2', 'v20': 'v2', 'version2': 'v2',
+      'v2a': 'v2a', 'v2aturbo': 'v2a', 'v2turbo': 'v2a',
+      'v3': 'v3', 'v30': 'v3', 'version3': 'v3',
+      'v4': 'v4', 'v40': 'v4', 'version4': 'v4' // Future support
+    };
+
+    const configKey = versionMap[normalizedVersion] || 'v3'; // Default to latest stable
+    const versionData = registry[configKey];
+    
+    if (!versionData) {
+      console.warn(`⚠️ Unknown Ideogram version: ${modelVersion}, falling back to v3`);
+      return registry['v3'];
+    }
+    
+    // Transform registry data to expected format for backward compatibility
+    return {
+      endpoint: versionData.endpoint,
+      isLegacy: versionData.family === 'legacy',
+      apiModel: versionData.apiModel,
+      contentType: versionData.contentType,
+      requiresWrapper: versionData.requiresWrapper,
+      maxImages: versionData.capabilities.maxImages,
+      supportedFeatures: {
+        colorPalette: versionData.capabilities.colorPalette,
+        styleCodes: versionData.capabilities.styleCodes,
+        negativePrompt: versionData.capabilities.negativePrompt,
+        seed: versionData.capabilities.seed,
+        resolution: !!versionData.capabilities.resolution,
+        aspectRatio: !!versionData.capabilities.aspectRatio
+      },
+      // Additional metadata for future use
+      metadata: {
+        family: versionData.family,
+        generation: versionData.generation,
+        variant: versionData.variant,
+        deprecated: versionData.deprecated,
+        releaseDate: versionData.releaseDate,
+        behaviors: versionData.behaviors
+      }
+    };
+  }
+
   async generateIdeogramImage(options = {}) {
     console.log('🎨 Generating custom image with Ideogram.ai...');
     
     try {
       if (!this.ideogramApiKey) {
         throw new Error('Ideogram API key not configured');
+      }
+
+      if (!this.ideogramApiKey.startsWith('Bearer ') && !this.ideogramApiKey.match(/^[A-Za-z0-9_-]+$/)) {
+        console.warn('⚠️ Ideogram API key format may be incorrect');
       }
 
       const {
@@ -280,60 +480,76 @@ class ImageService {
         seed = null,
         numImages = 1,
         renderingSpeed = 'DEFAULT',
-        modelVersion = 'v2'
+        modelVersion = 'v2',
+        colorPalette = null,
+        styleCodes = null
       } = options;
 
       if (!prompt) {
         throw new Error('Prompt is required for image generation');
       }
 
-      // Add model version parameter - map to API format
-      let apiModel;
-      switch (modelVersion) {
-        case 'v1':
-        case 'v1.0':
-          apiModel = 'V_1';
-          break;
-        case 'v2':
-        case 'v2.0':
-          apiModel = 'V_2';
-          break;
-        case 'v2a':
-          apiModel = 'V_2_TURBO';
-          break;
-        case 'v3':
-        case 'v3.0':
-        default:
-          apiModel = 'V_3'; // Default to latest
-          break;
+      // Get version-specific configuration
+      const config = this.getIdeogramVersionConfig(modelVersion);
+
+      // Auto-fix aspect ratio if provided and unsupported
+      let finalAspectRatio = aspectRatio;
+      let aspectRatioChanged = false;
+      
+      if (aspectRatio && !resolution) {
+        const supportedRatios = this.getAspectRatios(modelVersion).map(r => r.value);
+        if (!supportedRatios.includes(aspectRatio)) {
+          console.warn(`⚠️ Aspect ratio ${aspectRatio} not supported by ${modelVersion}`);
+          
+          // Auto-fallback to closest alternative
+          const aspectMappings = {
+            '5:4': '4:3', // 1.25 -> 1.33 (closest landscape)
+            '4:5': '3:4', // 0.8 -> 0.75 (closest portrait)
+            '21:9': '16:9', // Ultra-wide -> standard wide
+            '9:21': '9:16', // Ultra-tall -> standard tall
+            '2:1': '3:1', // Banner -> wider banner
+            '1:2': '1:3' // Tall banner -> taller banner
+          };
+          
+          const fallback = aspectMappings[aspectRatio] || '16:9'; // Default to 16:9 if no mapping
+          finalAspectRatio = fallback;
+          aspectRatioChanged = true;
+          
+          console.log(`🔄 Automatically changed aspect ratio from ${aspectRatio} to ${finalAspectRatio} for ${modelVersion} compatibility`);
+        }
       }
 
-      // Determine the correct API endpoint based on model version
-      let apiEndpoint;
-      let isLegacyEndpoint = false;
-      
-      switch (modelVersion) {
-        case 'v1':
-        case 'v1.0':
-        case 'v2':
-        case 'v2.0':
-        case 'v2a':
-          // Legacy endpoint for v1 and v2 models
-          apiEndpoint = 'https://api.ideogram.ai/generate';
-          isLegacyEndpoint = true;
-          break;
-        case 'v3':
-        case 'v3.0':
-        default:
-          // New endpoint for v3 models
-          apiEndpoint = 'https://api.ideogram.ai/v1/ideogram-v3/generate';
-          isLegacyEndpoint = false;
-          break;
+      // Validate numImages
+      if (numImages < 1 || numImages > config.maxImages) {
+        throw new Error(`Invalid number of images: ${numImages}. Must be between 1 and ${config.maxImages}.`);
+      }
+
+      // Validate style for version
+      const availableStyles = this.getIdeogramStyles(modelVersion).map(s => s.value);
+      if (!availableStyles.includes(styleType)) {
+        console.warn(`⚠️ Style ${styleType} not available for ${modelVersion}, using GENERAL`);
+        // Don't throw error, just use GENERAL as fallback
       }
 
       console.log(`🔍 Ideogram prompt: "${prompt.substring(0, 100)}..."`);
-      console.log(`🎯 Model: ${apiModel} (${modelVersion}), Style: ${styleType}, Aspect: ${aspectRatio}, Magic: ${magicPrompt}`);
-      console.log(`🔗 Using API endpoint: ${apiEndpoint} (Legacy: ${isLegacyEndpoint})`);
+      console.log(`🎯 Model: ${config.apiModel} (${modelVersion}), Style: ${styleType}, Aspect: ${finalAspectRatio}, Magic: ${magicPrompt}`);
+      console.log(`🔗 Using API endpoint: ${config.endpoint} (Legacy: ${config.isLegacy})`);
+      
+      if (aspectRatioChanged) {
+        console.log(`📝 Note: Aspect ratio automatically adjusted from ${aspectRatio} to ${finalAspectRatio} for compatibility`);
+      }
+      
+      if (colorPalette && config.supportedFeatures.colorPalette) {
+        console.log(`🎨 Color palette: ${colorPalette.members?.length || 0} colors`);
+      } else if (colorPalette && !config.supportedFeatures.colorPalette) {
+        console.warn(`⚠️ Color palette not supported in ${modelVersion}, ignoring`);
+      }
+      
+      if (styleCodes && styleCodes.length > 0 && config.supportedFeatures.styleCodes) {
+        console.log(`🎭 Style codes: ${styleCodes.join(', ')}`);
+      } else if (styleCodes && styleCodes.length > 0 && !config.supportedFeatures.styleCodes) {
+        console.warn(`⚠️ Style codes not supported in ${modelVersion}, ignoring`);
+      }
 
       let requestData;
       let headers = {
@@ -341,34 +557,55 @@ class ImageService {
         'Api-Key': this.ideogramApiKey
       };
 
-      if (isLegacyEndpoint) {
-        // Legacy endpoints (v1, v2) expect JSON
-        requestData = {
+      // Convert aspect ratio to API format based on model version
+      const formatAspectRatio = (ratio, isLegacy) => {
+        if (isLegacy) {
+          // Legacy APIs (v1, v2, v2a) expect ASPECT_X_Y format
+          const [width, height] = ratio.split(':');
+          return `ASPECT_${width}_${height}`;
+        } else {
+          // Modern APIs (v3+) expect raw X:Y format
+          return ratio;
+        }
+      };
+
+      if (config.isLegacy) {
+        // Legacy endpoints (v1, v2, v2a) expect JSON wrapped in image_request
+        const imageRequest = {
           prompt: prompt,
           style_type: styleType,
           magic_prompt: magicPrompt,
           num_images: numImages,
           rendering_speed: renderingSpeed,
-          model: apiModel
+          model: config.apiModel
         };
 
         // Use either resolution or aspect ratio, not both
-        if (resolution) {
-          requestData.resolution = resolution;
-        } else {
-          // Convert aspect ratio format from 16:9 to 16x9 for Ideogram API
-          requestData.aspect_ratio = aspectRatio.replace(':', 'x');
+        if (resolution && config.supportedFeatures.resolution) {
+          imageRequest.resolution = resolution;
+        } else if (config.supportedFeatures.aspectRatio) {
+          imageRequest.aspect_ratio = formatAspectRatio(finalAspectRatio, true);
         }
 
-        if (negativePrompt) {
-          requestData.negative_prompt = negativePrompt;
+        if (negativePrompt && config.supportedFeatures.negativePrompt) {
+          imageRequest.negative_prompt = negativePrompt;
         }
 
-        if (seed) {
-          requestData.seed = parseInt(seed);
+        if (seed && config.supportedFeatures.seed) {
+          imageRequest.seed = parseInt(seed);
         }
 
-        headers['Content-Type'] = 'application/json';
+        if (colorPalette && colorPalette.members && colorPalette.members.length > 0 && config.supportedFeatures.colorPalette) {
+          imageRequest.color_palette = colorPalette;
+        }
+
+        if (styleCodes && styleCodes.length > 0 && config.supportedFeatures.styleCodes) {
+          imageRequest.style_codes = styleCodes;
+        }
+
+        // Wrap in image_request object as required by legacy API
+        requestData = config.requiresWrapper ? { image_request: imageRequest } : imageRequest;
+        headers['Content-Type'] = config.contentType;
         
       } else {
         // New endpoints (v3) expect FormData
@@ -378,57 +615,197 @@ class ImageService {
         requestData.append('magic_prompt', magicPrompt);
         requestData.append('num_images', numImages.toString());
         requestData.append('rendering_speed', renderingSpeed);
-        requestData.append('model', apiModel);
+        requestData.append('model', config.apiModel);
 
         // Use either resolution or aspect ratio, not both
-        if (resolution) {
+        if (resolution && config.supportedFeatures.resolution) {
           requestData.append('resolution', resolution);
-        } else {
-          // Convert aspect ratio format from 16:9 to 16x9 for Ideogram API
-          const ideogramAspectRatio = aspectRatio.replace(':', 'x');
-          requestData.append('aspect_ratio', ideogramAspectRatio);
+        } else if (config.supportedFeatures.aspectRatio) {
+          requestData.append('aspect_ratio', formatAspectRatio(finalAspectRatio, false));
         }
 
-        if (negativePrompt) {
+        if (negativePrompt && config.supportedFeatures.negativePrompt) {
           requestData.append('negative_prompt', negativePrompt);
         }
 
-        if (seed) {
+        if (seed && config.supportedFeatures.seed) {
           requestData.append('seed', seed.toString());
         }
 
-        headers['Content-Type'] = 'multipart/form-data';
+        if (colorPalette && colorPalette.members && colorPalette.members.length > 0 && config.supportedFeatures.colorPalette) {
+          requestData.append('color_palette', JSON.stringify(colorPalette));
+        }
+
+        if (styleCodes && styleCodes.length > 0 && config.supportedFeatures.styleCodes) {
+          requestData.append('style_codes', styleCodes.join(','));
+        }
+
+        // Handle v3 reference images
+        if (options.referenceImages && options.referenceImages.length > 0) {
+          console.log(`🖼️ Adding ${options.referenceImages.length} reference images to v3 request`);
+          options.referenceImages.forEach((image, index) => {
+            // Append buffer directly with filename and content type
+            requestData.append(`style_reference_${index}`, image.buffer, {
+              filename: image.originalname,
+              contentType: image.mimetype
+            });
+          });
+        }
+
+        headers['Content-Type'] = config.contentType;
       }
 
-      const response = await axios.post(
-        apiEndpoint,
-        requestData,
-        {
-          ...this.axiosConfig,
-          headers,
-          timeout: 60000 // Longer timeout for image generation
+      // Debug logging for request
+      console.log('🚀 Making Ideogram API request:');
+      console.log('Endpoint:', config.endpoint);
+      console.log('Headers:', JSON.stringify(headers, null, 2));
+      if (config.isLegacy) {
+        console.log('Request data (JSON):', JSON.stringify(requestData, null, 2));
+      } else {
+        console.log('Request data (FormData):');
+        for (let [key, value] of requestData.entries()) {
+          console.log(`  ${key}: ${value}`);
         }
-      );
+      }
+
+      // Retry logic for API calls
+      let response;
+      let lastError;
+      const maxRetries = 3;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`🚀 Making Ideogram API request (attempt ${attempt}/${maxRetries})`);
+          
+          response = await axios.post(
+            config.endpoint,
+            requestData,
+            {
+              ...this.axiosConfig,
+              headers,
+              timeout: 60000 // Longer timeout for image generation
+            }
+          );
+          
+          // Success! Break out of retry loop
+          break;
+          
+        } catch (error) {
+          lastError = error;
+          console.error(`❌ Attempt ${attempt}/${maxRetries} failed:`, error.response?.status, error.response?.data?.detail || error.message);
+          
+          // Don't retry on client errors (400-499)
+          if (error.response?.status >= 400 && error.response?.status < 500) {
+            console.error('🚫 Client error - not retrying');
+            throw error;
+          }
+          
+          // If this isn't the last attempt, wait before retrying
+          if (attempt < maxRetries) {
+            const waitTime = attempt * 2000; // Progressive backoff: 2s, 4s
+            console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+        }
+      }
+      
+      // If we exhausted all retries, throw the last error
+      if (!response) {
+        throw lastError;
+      }
 
       const generatedImages = response.data.data || [];
       
-      console.log(`✅ Generated ${generatedImages.length} image(s) with Ideogram`);
+      console.log(`✅ Generated ${generatedImages.length} image(s) with Ideogram ${modelVersion}`);
       
-      return generatedImages.map(image => ({
-        id: `ideogram_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        url: image.url,
-        prompt: image.prompt || prompt,
-        resolution: image.resolution,
-        seed: image.seed,
-        styleType: image.style_type || styleType,
-        isImageSafe: image.is_image_safe,
-        created: image.created || new Date().toISOString(),
-        source: 'ideogram'
-      }));
+      // Prepare user-friendly messages about any automatic adjustments
+      const adjustments = [];
+      if (aspectRatioChanged) {
+        adjustments.push({
+          type: 'aspect_ratio_adjusted',
+          message: `Aspect ratio automatically changed from ${aspectRatio} to ${finalAspectRatio} for ${modelVersion} compatibility`,
+          original: aspectRatio,
+          adjusted: finalAspectRatio,
+          reason: `${aspectRatio} is not supported by Ideogram ${modelVersion}`
+        });
+      }
+      
+      const result = {
+        images: generatedImages.map(image => ({
+          id: `ideogram_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          url: image.url,
+          prompt: image.prompt || prompt,
+          resolution: image.resolution,
+          seed: image.seed,
+          styleType: image.style_type || styleType,
+          styleCodes: image.style_codes || image.style_code || null, // Capture style codes from response
+          isImageSafe: image.is_image_safe,
+          created: image.created || new Date().toISOString(),
+          source: 'ideogram',
+          modelVersion: modelVersion // Track which model generated this
+        })),
+        adjustments: adjustments,
+        finalParameters: {
+          aspectRatio: finalAspectRatio,
+          styleType: styleType,
+          modelVersion: modelVersion,
+          numImages: numImages
+        }
+      };
+      
+      return result;
 
     } catch (error) {
-      console.error('❌ Ideogram image generation failed:', error.response?.data || error.message);
-      throw new Error(`Ideogram generation failed: ${error.response?.data?.message || error.message}`);
+      console.error('❌ Ideogram image generation failed:');
+      console.error('Error status:', error.response?.status);
+      console.error('Error data:', JSON.stringify(error.response?.data, null, 2));
+      console.error('Error message:', error.message);
+      console.error('Request config:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        headers: error.config?.headers
+      });
+      
+      // Create detailed, user-friendly error message
+      let userMessage = 'Image generation failed';
+      let technicalDetails = error.message;
+      
+      if (error.response?.data) {
+        const errorData = error.response.data;
+        
+        if (errorData.detail) {
+          // API validation error (like aspect ratio issues)
+          userMessage = `Generation failed: ${errorData.detail}`;
+          technicalDetails = JSON.stringify(errorData);
+        } else if (errorData.message) {
+          userMessage = `Generation failed: ${errorData.message}`;
+          technicalDetails = JSON.stringify(errorData);
+        } else if (typeof errorData === 'string') {
+          userMessage = `Generation failed: ${errorData}`;
+          technicalDetails = errorData;
+        } else {
+          userMessage = `Generation failed: API returned error ${error.response.status}`;
+          technicalDetails = JSON.stringify(errorData);
+        }
+      } else if (error.code === 'ECONNREFUSED') {
+        userMessage = 'Cannot connect to Ideogram API - service may be down';
+        technicalDetails = 'Connection refused to Ideogram API';
+      } else if (error.code === 'ENOTFOUND') {
+        userMessage = 'Cannot reach Ideogram API - check internet connection';
+        technicalDetails = 'DNS resolution failed for Ideogram API';
+      } else if (error.timeout) {
+        userMessage = 'Image generation timed out - please try again';
+        technicalDetails = 'Request timeout to Ideogram API';
+      }
+      
+      // Create structured error for better handling
+      const structuredError = new Error(userMessage);
+      structuredError.code = 'IDEOGRAM_GENERATION_FAILED';
+      structuredError.status = error.response?.status || 500;
+      structuredError.details = technicalDetails;
+      structuredError.originalError = error;
+      
+      throw structuredError;
     }
   }
 
@@ -450,10 +827,240 @@ class ImageService {
         renderingSpeed: 'DEFAULT'
       };
 
-      return await this.generateIdeogramImage(options);
+      const result = await this.generateIdeogramImage(options);
+      
+      // Return backward-compatible format for legacy code
+      return result.images || result;
     } catch (error) {
       console.error('❌ Custom image generation failed:', error.message);
       throw error;
+    }
+  }
+
+  async editIdeogramImage(options = {}) {
+    console.log('🎨 Editing image with Ideogram Magic Fill (v3)...');
+    
+    try {
+      if (!this.ideogramApiKey) {
+        throw new Error('Ideogram API key not configured');
+      }
+
+      const {
+        imageFile,      // File object or buffer for base image
+        maskFile,       // File object or buffer for mask (black/white)
+        prompt,         // Description of what to generate in masked areas
+        magicPrompt = 'AUTO',
+        numImages = 1,
+        seed = null,
+        renderingSpeed = 'DEFAULT',
+        colorPalette = null,
+        styleCodes = null,
+        styleReferenceImages = null
+      } = options;
+
+      if (!imageFile) {
+        throw new Error('Base image file is required for Magic Fill');
+      }
+
+      if (!maskFile) {
+        throw new Error('Mask file is required for Magic Fill');
+      }
+
+      if (!prompt) {
+        throw new Error('Prompt is required for Magic Fill');
+      }
+
+      const endpoint = 'https://api.ideogram.ai/v1/ideogram-v3/edit';
+      
+      console.log(`🔍 Magic Fill prompt: "${prompt.substring(0, 100)}..."`);
+      console.log(`🎯 Magic Prompt: ${magicPrompt}, Images: ${numImages}, Speed: ${renderingSpeed}`);
+      console.log(`🔗 Using Edit API endpoint: ${endpoint}`);
+
+      // Prepare FormData for multipart request
+      const requestData = new FormData();
+      
+      // Add required files
+      if (imageFile.buffer) {
+        // Handle multer file objects
+        requestData.append('image', imageFile.buffer, {
+          filename: imageFile.originalname || 'base-image.jpg',
+          contentType: imageFile.mimetype || 'image/jpeg'
+        });
+      } else {
+        // Handle File objects or other formats
+        requestData.append('image', imageFile);
+      }
+
+      if (maskFile.buffer) {
+        // Handle multer file objects  
+        requestData.append('mask', maskFile.buffer, {
+          filename: maskFile.originalname || 'mask.png',
+          contentType: maskFile.mimetype || 'image/png'
+        });
+      } else {
+        // Handle File objects or other formats
+        requestData.append('mask', maskFile);
+      }
+
+      // Add prompt and other parameters
+      requestData.append('prompt', prompt);
+      requestData.append('magic_prompt', magicPrompt);
+      requestData.append('num_images', numImages.toString());
+      requestData.append('rendering_speed', renderingSpeed);
+
+      if (seed) {
+        requestData.append('seed', seed.toString());
+      }
+
+      if (colorPalette && colorPalette.members && colorPalette.members.length > 0) {
+        requestData.append('color_palette', JSON.stringify(colorPalette));
+      }
+
+      if (styleCodes && styleCodes.length > 0) {
+        requestData.append('style_codes', styleCodes.join(','));
+      }
+
+      // Handle style reference images for v3
+      if (styleReferenceImages && styleReferenceImages.length > 0) {
+        console.log(`🖼️ Adding ${styleReferenceImages.length} style reference images`);
+        styleReferenceImages.forEach((image, index) => {
+          if (image.buffer) {
+            requestData.append(`style_reference_images`, image.buffer, {
+              filename: image.originalname || `style-ref-${index}.jpg`,
+              contentType: image.mimetype || 'image/jpeg'
+            });
+          } else {
+            requestData.append(`style_reference_images`, image);
+          }
+        });
+      }
+
+      const headers = {
+        ...this.axiosConfig.headers,
+        'Api-Key': this.ideogramApiKey,
+        'Content-Type': 'multipart/form-data'
+      };
+
+      // Debug logging
+      console.log('🚀 Making Ideogram Edit API request:');
+      console.log('Endpoint:', endpoint);
+      console.log('Form fields:');
+      for (let [key, value] of requestData.entries()) {
+        if (key === 'image' || key === 'mask' || key.includes('style_reference')) {
+          console.log(`  ${key}: [File object]`);
+        } else {
+          console.log(`  ${key}: ${value}`);
+        }
+      }
+
+      // Retry logic for API calls
+      let response;
+      let lastError;
+      const maxRetries = 3;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`🚀 Making Magic Fill API request (attempt ${attempt}/${maxRetries})`);
+          
+          response = await axios.post(
+            endpoint,
+            requestData,
+            {
+              ...this.axiosConfig,
+              headers,
+              timeout: 90000 // Longer timeout for image editing
+            }
+          );
+          
+          // Success! Break out of retry loop
+          break;
+          
+        } catch (error) {
+          lastError = error;
+          console.error(`❌ Attempt ${attempt}/${maxRetries} failed:`, error.response?.status, error.response?.data?.detail || error.message);
+          
+          // Don't retry on client errors (400-499)
+          if (error.response?.status >= 400 && error.response?.status < 500) {
+            console.error('🚫 Client error - not retrying');
+            throw error;
+          }
+          
+          // If this isn't the last attempt, wait before retrying
+          if (attempt < maxRetries) {
+            const waitTime = attempt * 2000; // Progressive backoff: 2s, 4s
+            console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+        }
+      }
+      
+      // If we exhausted all retries, throw the last error
+      if (!response) {
+        throw lastError;
+      }
+
+      const editedImages = response.data.data || [];
+      
+      console.log(`✅ Magic Fill completed: Generated ${editedImages.length} edited image(s)`);
+      
+      const result = {
+        images: editedImages.map(image => ({
+          id: `ideogram_edit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          url: image.url,
+          prompt: image.prompt || prompt,
+          resolution: image.resolution,
+          seed: image.seed,
+          styleType: image.style_type,
+          isImageSafe: image.is_image_safe,
+          created: image.created || new Date().toISOString(),
+          source: 'ideogram',
+          editType: 'magic_fill'
+        })),
+        finalParameters: {
+          prompt: prompt,
+          magicPrompt: magicPrompt,
+          numImages: numImages,
+          renderingSpeed: renderingSpeed
+        }
+      };
+      
+      return result;
+
+    } catch (error) {
+      console.error('❌ Ideogram Magic Fill failed:');
+      console.error('Error status:', error.response?.status);
+      console.error('Error data:', JSON.stringify(error.response?.data, null, 2));
+      console.error('Error message:', error.message);
+      
+      // Create detailed, user-friendly error message
+      let userMessage = 'Magic Fill failed';
+      let technicalDetails = error.message;
+      
+      if (error.response?.data) {
+        const errorData = error.response.data;
+        
+        if (errorData.detail) {
+          userMessage = `Magic Fill failed: ${errorData.detail}`;
+          technicalDetails = JSON.stringify(errorData);
+        } else if (errorData.message) {
+          userMessage = `Magic Fill failed: ${errorData.message}`;
+          technicalDetails = JSON.stringify(errorData);
+        } else if (typeof errorData === 'string') {
+          userMessage = `Magic Fill failed: ${errorData}`;
+          technicalDetails = errorData;
+        } else {
+          userMessage = `Magic Fill failed: API returned error ${error.response.status}`;
+          technicalDetails = JSON.stringify(errorData);
+        }
+      }
+      
+      const structuredError = new Error(userMessage);
+      structuredError.code = 'IDEOGRAM_MAGIC_FILL_FAILED';
+      structuredError.status = error.response?.status || 500;
+      structuredError.details = technicalDetails;
+      structuredError.originalError = error;
+      
+      throw structuredError;
     }
   }
 
@@ -473,7 +1080,7 @@ class ImageService {
       // Upload to Sirv CDN
       const sirvUrl = await this.uploadToSirv(ideogramImage.url, filename);
       
-      // Store in database
+      // Store in database with enhanced metadata
       const imageData = {
         associated_content_type: 'gen_article',
         associated_content_id: contentId,
@@ -482,7 +1089,17 @@ class ImageService {
         sirv_cdn_url: sirvUrl,
         alt_text_suggestion_ai: ideogramImage.prompt.substring(0, 250), // Use prompt as alt text
         status: 'pending_review', // Set default status to pending_review
-        created_at: new Date()
+        created_at: new Date(),
+        // Store generation metadata as JSON
+        generation_metadata: JSON.stringify({
+          prompt: ideogramImage.prompt,
+          seed: ideogramImage.seed,
+          styleType: ideogramImage.styleType,
+          styleCodes: ideogramImage.styleCodes, // Store style codes for reuse
+          resolution: ideogramImage.resolution,
+          modelVersion: ideogramImage.modelVersion,
+          isImageSafe: ideogramImage.isImageSafe
+        })
       };
 
       const imageId = accountId 
@@ -500,7 +1117,18 @@ class ImageService {
         source: 'ideogram',
         resolution: ideogramImage.resolution,
         styleType: ideogramImage.styleType,
-        seed: ideogramImage.seed
+        styleCodes: ideogramImage.styleCodes, // Include style codes in response
+        seed: ideogramImage.seed,
+        modelVersion: ideogramImage.modelVersion,
+        generationMetadata: {
+          prompt: ideogramImage.prompt,
+          seed: ideogramImage.seed,
+          styleType: ideogramImage.styleType,
+          styleCodes: ideogramImage.styleCodes,
+          resolution: ideogramImage.resolution,
+          modelVersion: ideogramImage.modelVersion,
+          isImageSafe: ideogramImage.isImageSafe
+        }
       };
 
     } catch (error) {
@@ -509,82 +1137,313 @@ class ImageService {
     }
   }
 
-  // Utility method to get available Ideogram styles by model version
+  // Comprehensive style system based on official Ideogram documentation
   getIdeogramStyles(modelVersion = 'v2') {
-    switch (modelVersion) {
-      case 'v3':
-      case 'v3.0':
-        return [
-          { value: 'AUTO', label: 'Auto (System Decides)', description: 'Let Ideogram choose the best style automatically' },
-          { value: 'GENERAL', label: 'General', description: 'Versatile style for artistic works, sketches, digital art' },
-          { value: 'REALISTIC', label: 'Realistic', description: 'Photorealistic images with natural lighting' },
-          { value: 'DESIGN', label: 'Design', description: 'Graphic design elements, logos, promotional materials' }
-        ];
+    const styleDefinitions = {
+      'v3': {
+        // v3.0 styles - 4 core styles + special features
+        coreStyles: [
+          { 
+            value: 'AUTO', 
+            label: 'Auto (AI Decides)', 
+            description: 'AI analyzes your prompt and chooses the most appropriate style (General, Realistic, or Design)',
+            category: 'intelligent'
+          },
+          { 
+            value: 'GENERAL', 
+            label: 'General', 
+            description: 'Versatile style for artistic works, abstract paintings, pencil sketches, digitally manipulated images',
+            category: 'artistic'
+          },
+          { 
+            value: 'REALISTIC', 
+            label: 'Realistic', 
+            description: 'Best for lifelike, photographic images with emphasis on realism and detail',
+            category: 'photographic'
+          },
+          { 
+            value: 'DESIGN', 
+            label: 'Design', 
+            description: 'Perfect for logos, print-on-demand products, promotional materials, flyers, menus, graphic design',
+            category: 'commercial'
+          }
+        ],
+        specialFeatures: [
+          {
+            type: 'reference_style',
+            name: 'Reference Style',
+            description: 'Use up to 3 images as visual style basis',
+            maxImages: 3,
+            supported: true
+          },
+          {
+            type: 'style_codes',
+            name: 'Style Codes',
+            description: '8-character codes from Random generations that can be reused',
+            format: '8-character hex',
+            supported: true
+          },
+          {
+            type: 'random_style',
+            name: 'Random Style',
+            description: 'AI randomly selects style and generates reusable style code',
+            supported: true
+          }
+        ]
+      },
       
-      case 'v2':
-      case 'v2.0':
-      case 'v2a':
-        return [
-          { value: 'AUTO', label: 'Auto (System Decides)', description: 'Let Ideogram choose the best style automatically' },
-          { value: 'GENERAL', label: 'General', description: 'Versatile style for artistic works, sketches, digital art' },
-          { value: 'REALISTIC', label: 'Realistic', description: 'Photorealistic images with natural lighting' },
-          { value: 'DESIGN', label: 'Design', description: 'Graphic design elements, logos, promotional materials' },
-          { value: '3D', label: '3D', description: 'Perfect for 3D characters, objects, and visual appeal' },
-          { value: 'ANIME', label: 'Anime', description: 'Ideal for anime-style images and characters' }
-        ];
+      'v2': {
+        // v2.0 and v2a styles - specialized AI models
+        coreStyles: [
+          { 
+            value: 'AUTO', 
+            label: 'Auto (AI Decides)', 
+            description: 'AI chooses the most appropriate specialized model for your prompt',
+            category: 'intelligent'
+          },
+          { 
+            value: 'GENERAL', 
+            label: 'General', 
+            description: 'Versatile style that can handle most content types',
+            category: 'artistic'
+          },
+          { 
+            value: 'REALISTIC', 
+            label: 'Realistic', 
+            description: 'Specialized model for photorealistic images',
+            category: 'photographic'
+          },
+          { 
+            value: 'DESIGN', 
+            label: 'Design', 
+            description: 'Specialized model for graphic design and commercial applications',
+            category: 'commercial'
+          },
+          { 
+            value: '3D', 
+            label: '3D', 
+            description: 'Specialized model for 3D characters, objects, and visual appeal',
+            category: 'dimensional'
+          },
+          { 
+            value: 'ANIME', 
+            label: 'Anime', 
+            description: 'Specialized model for anime-style images and characters',
+            category: 'stylized'
+          }
+        ],
+        specialFeatures: [
+          {
+            type: 'style_codes',
+            name: 'Style Codes',
+            description: 'Limited style code support',
+            supported: false // v2 has limited style code support
+          }
+        ]
+      },
       
-      case 'v1':
-      case 'v1.0':
-        return [
-          { value: 'RANDOM', label: 'Random', description: 'AI randomly selects from vast style database' },
-          { value: 'GENERAL', label: 'General', description: 'Versatile style for most content' },
-          { value: 'REALISTIC', label: 'Realistic', description: 'Photorealistic images' },
-          { value: 'DESIGN', label: 'Design', description: 'Graphic design and illustrations' },
-          { value: '3D_RENDER', label: '3D Render', description: '3D rendered style' },
-          { value: 'ANIME', label: 'Anime', description: 'Anime and manga style' },
-          { value: 'ARCHITECTURE', label: 'Architecture', description: 'Architectural visualization' },
-          { value: 'CINEMATIC', label: 'Cinematic', description: 'Movie-like dramatic lighting' },
-          { value: 'CONCEPTUAL_ART', label: 'Conceptual Art', description: 'Abstract conceptual artwork' },
-          { value: 'DARK_FANTASY', label: 'Dark Fantasy', description: 'Gothic and dark fantasy themes' },
-          { value: 'FASHION', label: 'Fashion', description: 'Fashion photography and styling' },
-          { value: 'GRAFFITI', label: 'Graffiti', description: 'Street art and graffiti style' },
-          { value: 'ILLUSTRATION', label: 'Illustration', description: 'Digital illustration style' },
-          { value: 'PAINTING', label: 'Painting', description: 'Traditional painting techniques' },
-          { value: 'PHOTO', label: 'Photo', description: 'Photographic style' },
-          { value: 'PORTRAIT_PHOTOGRAPHY', label: 'Portrait Photography', description: 'Professional portrait style' },
-          { value: 'POSTER', label: 'Poster', description: 'Poster and advertisement design' },
-          { value: 'PRODUCT', label: 'Product', description: 'Product photography style' },
-          { value: 'TYPOGRAPHY', label: 'Typography', description: 'Text and typography focus' },
-          { value: 'UKIYO_E', label: 'Ukiyo-e', description: 'Traditional Japanese art style' },
-          { value: 'VIBRANT', label: 'Vibrant', description: 'Bright and colorful style' },
-          { value: 'WILDLIFE_PHOTOGRAPHY', label: 'Wildlife Photography', description: 'Nature and wildlife photography' }
-        ];
+      'v2a': {
+        // v2a (turbo) - subset of v2 styles
+        coreStyles: [
+          { 
+            value: 'AUTO', 
+            label: 'Auto (AI Decides)', 
+            description: 'AI chooses the most appropriate style for faster generation',
+            category: 'intelligent'
+          },
+          { 
+            value: 'GENERAL', 
+            label: 'General', 
+            description: 'Fast versatile style',
+            category: 'artistic'
+          },
+          { 
+            value: 'REALISTIC', 
+            label: 'Realistic', 
+            description: 'Fast photorealistic generation',
+            category: 'photographic'
+          },
+          { 
+            value: '3D', 
+            label: '3D', 
+            description: 'Fast 3D style generation',
+            category: 'dimensional'
+          },
+          { 
+            value: 'ANIME', 
+            label: 'Anime', 
+            description: 'Fast anime style generation',
+            category: 'stylized'
+          }
+        ],
+        specialFeatures: []
+      },
       
-      default:
-        // Default to v3 styles
-        return this.getIdeogramStyles('v3');
+      'v1': {
+        // v1.0 styles - extensive style library with keyword injection
+        coreStyles: [
+          { 
+            value: 'RANDOM', 
+            label: 'Random', 
+            description: 'AI randomly selects from vast style database and generates style codes',
+            category: 'experimental'
+          },
+          { 
+            value: 'GENERAL', 
+            label: 'General', 
+            description: 'Versatile style for most content',
+            category: 'artistic'
+          },
+          { 
+            value: 'REALISTIC', 
+            label: 'Realistic', 
+            description: 'Photorealistic images',
+            category: 'photographic'
+          },
+          { 
+            value: 'DESIGN', 
+            label: 'Design', 
+            description: 'Graphic design and illustrations',
+            category: 'commercial'
+          }
+        ],
+        extendedStyles: [
+          { value: '3D_RENDER', label: '3D Render', description: '3D rendered style', category: 'dimensional' },
+          { value: 'ANIME', label: 'Anime', description: 'Anime and manga style', category: 'stylized' },
+          { value: 'ARCHITECTURE', label: 'Architecture', description: 'Architectural visualization', category: 'specialized' },
+          { value: 'CINEMATIC', label: 'Cinematic', description: 'Movie-like dramatic lighting', category: 'cinematic' },
+          { value: 'CONCEPTUAL_ART', label: 'Conceptual Art', description: 'Abstract conceptual artwork', category: 'artistic' },
+          { value: 'DARK_FANTASY', label: 'Dark Fantasy', description: 'Gothic and dark fantasy themes', category: 'stylized' },
+          { value: 'FASHION', label: 'Fashion', description: 'Fashion photography and styling', category: 'photographic' },
+          { value: 'GRAFFITI', label: 'Graffiti', description: 'Street art and graffiti style', category: 'artistic' },
+          { value: 'ILLUSTRATION', label: 'Illustration', description: 'Digital illustration style', category: 'artistic' },
+          { value: 'PAINTING', label: 'Painting', description: 'Traditional painting techniques', category: 'artistic' },
+          { value: 'PHOTO', label: 'Photo', description: 'Photographic style', category: 'photographic' },
+          { value: 'PORTRAIT_PHOTOGRAPHY', label: 'Portrait Photography', description: 'Professional portrait style', category: 'photographic' },
+          { value: 'POSTER', label: 'Poster', description: 'Poster and advertisement design', category: 'commercial' },
+          { value: 'PRODUCT', label: 'Product', description: 'Product photography style', category: 'commercial' },
+          { value: 'TYPOGRAPHY', label: 'Typography', description: 'Text and typography focus', category: 'commercial' },
+          { value: 'UKIYO_E', label: 'Ukiyo-e', description: 'Traditional Japanese art style', category: 'stylized' },
+          { value: 'VIBRANT', label: 'Vibrant', description: 'Bright and colorful style', category: 'artistic' },
+          { value: 'WILDLIFE_PHOTOGRAPHY', label: 'Wildlife Photography', description: 'Nature and wildlife photography', category: 'photographic' }
+        ],
+        specialFeatures: [
+          {
+            type: 'reference_style',
+            name: 'Reference Style',
+            description: 'Use up to 3 existing images as visual style basis',
+            maxImages: 3,
+            supported: true
+          },
+          {
+            type: 'style_codes',
+            name: 'Style Codes',
+            description: '8-character codes from Random generations, adds keywords to prompt',
+            format: '8-character hex',
+            supported: true,
+            behavior: 'keyword_injection'
+          },
+          {
+            type: 'multiple_selection',
+            name: 'Multiple Styles',
+            description: 'Can select and apply multiple styles simultaneously',
+            supported: true
+          }
+        ]
+      }
+    };
+
+    // Normalize version string
+    const config = this.getIdeogramVersionConfig(modelVersion);
+    const versionKey = config.isLegacy ? (modelVersion.includes('2a') ? 'v2a' : modelVersion.includes('1') ? 'v1' : 'v2') : 'v3';
+    
+    const versionData = styleDefinitions[versionKey] || styleDefinitions['v3'];
+    
+    // Combine core and extended styles
+    let allStyles = [...versionData.coreStyles];
+    if (versionData.extendedStyles) {
+      allStyles = allStyles.concat(versionData.extendedStyles);
     }
+    
+    return allStyles;
   }
 
-  // Utility method to get available aspect ratios
-  getAspectRatios() {
-    return [
-      { value: '1:1', label: 'Square (1:1)', description: 'Perfect for social media posts and profile images' },
-      { value: '16:9', label: 'Landscape (16:9)', description: 'Great for blog headers and wide displays' },
-      { value: '9:16', label: 'Portrait (9:16)', description: 'Mobile-friendly vertical format' },
-      { value: '4:3', label: 'Standard (4:3)', description: 'Classic photo format' },
-      { value: '3:2', label: 'Photo (3:2)', description: 'Traditional photography ratio' },
-      { value: '2:3', label: 'Tall Portrait (2:3)', description: 'Vertical content and posters' },
-      { value: '3:1', label: 'Wide Banner (3:1)', description: 'Banner and header images' },
-      { value: '1:3', label: 'Tall Banner (1:3)', description: 'Vertical banners and sidebars' },
-      { value: '4:5', label: 'Instagram Portrait (4:5)', description: 'Instagram portrait posts' },
-      { value: '5:4', label: 'Instagram Landscape (5:4)', description: 'Instagram landscape posts' },
-      { value: '9:21', label: 'Story Format (9:21)', description: 'Instagram/Facebook stories' },
-      { value: '21:9', label: 'Ultrawide (21:9)', description: 'Cinematic and ultrawide displays' },
-      { value: '2:1', label: 'Banner (2:1)', description: 'Web banners and covers' },
-      { value: '1:2', label: 'Vertical Banner (1:2)', description: 'Tall vertical content' },
-      { value: '3:4', label: 'Portrait Standard (3:4)', description: 'Standard portrait orientation' }
-    ];
+  // Get version-specific style features and capabilities
+  getIdeogramStyleFeatures(modelVersion = 'v2') {
+    const config = this.getIdeogramVersionConfig(modelVersion);
+    const versionKey = config.isLegacy ? (modelVersion.includes('2a') ? 'v2a' : modelVersion.includes('1') ? 'v1' : 'v2') : 'v3';
+    
+    const styleDefinitions = {
+      'v3': {
+        referenceStyle: { supported: true, maxImages: 3 },
+        styleCodes: { supported: true, format: '8-character', behavior: 'direct' },
+        randomStyle: { supported: true, generatesStyleCodes: true },
+        multipleSelection: { supported: false }
+      },
+      'v2': {
+        referenceStyle: { supported: false },
+        styleCodes: { supported: false },
+        randomStyle: { supported: false },
+        multipleSelection: { supported: false }
+      },
+      'v2a': {
+        referenceStyle: { supported: false },
+        styleCodes: { supported: false },
+        randomStyle: { supported: false },
+        multipleSelection: { supported: false }
+      },
+      'v1': {
+        referenceStyle: { supported: true, maxImages: 3 },
+        styleCodes: { supported: true, format: '8-character', behavior: 'keyword_injection' },
+        randomStyle: { supported: true, generatesStyleCodes: true },
+        multipleSelection: { supported: true }
+      }
+    };
+    
+    return styleDefinitions[versionKey] || styleDefinitions['v3'];
+  }
+
+  // Utility method to get available aspect ratios by version
+  getAspectRatios(modelVersion = 'v2') {
+    // Based on actual API responses and documentation
+    const commonRatios = {
+      // Legacy API (v1/v2) - From actual API error message
+      legacy: [
+        { value: '1:1', label: 'Square (1:1)', description: 'Perfect for social media posts and profile images' },
+        { value: '16:9', label: 'Landscape (16:9)', description: 'Great for blog headers and wide displays' },
+        { value: '9:16', label: 'Portrait (9:16)', description: 'Mobile-friendly vertical format' },
+        { value: '4:3', label: 'Standard (4:3)', description: 'Classic photo format' },
+        { value: '3:2', label: 'Photo (3:2)', description: 'Traditional photography ratio' },
+        { value: '2:3', label: 'Tall Portrait (2:3)', description: 'Vertical content and posters' },
+        { value: '3:1', label: 'Wide Banner (3:1)', description: 'Banner and header images' },
+        { value: '1:3', label: 'Tall Banner (1:3)', description: 'Vertical banners and sidebars' },
+        { value: '3:4', label: 'Portrait Standard (3:4)', description: 'Standard portrait orientation' },
+        { value: '10:16', label: 'Portrait (10:16)', description: 'Tall portrait format' },
+        { value: '16:10', label: 'Wide (16:10)', description: 'Wide landscape format' }
+      ],
+      // V3 API - From official documentation
+      v3: [
+        { value: '1:1', label: 'Square (1:1)', description: 'Perfect for social media posts and profile images' },
+        { value: '16:9', label: 'Landscape (16:9)', description: 'Great for blog headers and wide displays' },
+        { value: '9:16', label: 'Portrait (9:16)', description: 'Mobile-friendly vertical format' },
+        { value: '4:3', label: 'Standard (4:3)', description: 'Classic photo format' },
+        { value: '3:2', label: 'Photo (3:2)', description: 'Traditional photography ratio' },
+        { value: '2:3', label: 'Tall Portrait (2:3)', description: 'Vertical content and posters' },
+        { value: '3:1', label: 'Wide Banner (3:1)', description: 'Banner and header images' },
+        { value: '1:3', label: 'Tall Banner (1:3)', description: 'Vertical banners and sidebars' },
+        { value: '3:4', label: 'Portrait Standard (3:4)', description: 'Standard portrait orientation' },
+        { value: '4:5', label: 'Instagram Portrait (4:5)', description: 'Instagram portrait posts' },
+        { value: '5:4', label: 'Instagram Landscape (5:4)', description: 'Instagram landscape posts' },
+        { value: '10:16', label: 'Portrait (10:16)', description: 'Tall portrait format' },
+        { value: '16:10', label: 'Wide (16:10)', description: 'Wide landscape format' },
+        { value: '1:2', label: 'Vertical Banner (1:2)', description: 'Tall vertical content' },
+        { value: '2:1', label: 'Banner (2:1)', description: 'Web banners and covers' }
+      ]
+    };
+
+    // Determine which set to use based on version
+    const config = this.getIdeogramVersionConfig(modelVersion);
+    return config.isLegacy ? commonRatios.legacy : commonRatios.v3;
   }
 
   // Utility method to get available resolutions (based on Ideogram API)

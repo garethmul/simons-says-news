@@ -312,29 +312,29 @@ const ImageGallery = ({ images, contentId }) => {
   });
 
   return (
-    <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
-      <div className="flex items-center gap-2 mb-3">
-        <Image className="w-4 h-4 text-gray-600" />
+  <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
+    <div className="flex items-center gap-2 mb-3">
+      <Image className="w-4 h-4 text-gray-600" />
         <span className="text-sm font-medium text-gray-700">Generated Images ({sortedImages.length})</span>
         <Badge variant="secondary" className="text-xs">Sirv CDN + Ideogram.ai</Badge>
-      </div>
+    </div>
       
       {/* Horizontal scrolling carousel */}
       <div className="flex gap-2 overflow-x-auto pb-2">
         {sortedImages.map((image, imageIndex) => (
-          <ImageThumbnail 
-            key={`content-${contentId}-image-${image.id || imageIndex}`}
-            image={image} 
-            index={imageIndex} 
-          />
-        ))}
-      </div>
-      
-      <div className="mt-2 text-xs text-gray-500">
-        AI-generated images via Ideogram.ai • Optimised and served via Sirv CDN
-      </div>
+        <ImageThumbnail 
+          key={`content-${contentId}-image-${image.id || imageIndex}`}
+          image={image} 
+          index={imageIndex} 
+        />
+      ))}
     </div>
-  );
+      
+    <div className="mt-2 text-xs text-gray-500">
+        AI-generated images via Ideogram.ai • Optimised and served via Sirv CDN
+    </div>
+  </div>
+);
 };
 
 /**

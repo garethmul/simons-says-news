@@ -705,6 +705,15 @@ class DatabaseService {
   }
 
   // Generic Content System methods
+  async getContentConfiguration(category, accountId = null) {
+    const whereClause = accountId
+      ? 'prompt_category = ? AND account_id = ? AND is_active = ?'
+      : 'prompt_category = ? AND is_active = ?';
+    const whereParams = accountId ? [category, accountId, true] : [category, true];
+    
+    return this.findOne('ssnews_prompt_configuration', whereClause, whereParams);
+  }
+
   async getGenericContent(articleId, category, accountId = null) {
     const whereClause = accountId
       ? 'based_on_gen_article_id = ? AND prompt_category = ? AND account_id = ?'

@@ -463,6 +463,163 @@ app.get('/api/eden/news/sources/status', accountContext, async (req, res) => {
   }
 });
 
+// Add new news source
+app.post('/api/eden/news/sources', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { name, url, rss_feed_url, description } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Validate required fields
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Source name is required' });
+    }
+
+    if (!url || !url.trim()) {
+      return res.status(400).json({ error: 'Source URL is required' });
+    }
+
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch (urlError) {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    // Validate RSS URL format if provided
+    if (rss_feed_url && rss_feed_url.trim()) {
+      try {
+        new URL(rss_feed_url);
+      } catch (rssUrlError) {
+        return res.status(400).json({ error: 'Invalid RSS feed URL format' });
+      }
+    }
+
+    // Create new source
+    const sourceData = {
+      account_id: accountId,
+      name: name.trim(),
+      url: url.trim(),
+      rss_feed_url: rss_feed_url && rss_feed_url.trim() ? rss_feed_url.trim() : null,
+      description: description && description.trim() ? description.trim() : null,
+      is_active: true,
+      created_at: new Date(),
+      updated_at: new Date()
+    };
+
+    const result = await db.insert('ssnews_news_sources', sourceData);
+
+    console.log(`✅ New source created: ${name} (ID: ${result.insertId}) for account ${accountId}`);
+
+    // Return the created source with ID
+    const createdSource = {
+      source_id: result.insertId,
+      account_id: accountId,
+      name: sourceData.name,
+      url: sourceData.url,
+      rss_feed_url: sourceData.rss_feed_url,
+      description: sourceData.description,
+      is_active: sourceData.is_active,
+      created_at: sourceData.created_at,
+      updated_at: sourceData.updated_at,
+      articles_last_24h: 0,
+      total_articles: 0,
+      source_type: rss_feed_url ? 'RSS' : 'Web Scraping',
+      last_checked: null
+    };
+
+    res.status(201).json({
+      success: true,
+      message: `Source "${name}" added successfully`,
+      source: createdSource,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error adding new source:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Content generation endpoints
+app.post('/api/eden/content/generate', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const limit = parseInt(req.body.limit) || 5;
+    const specificStoryId = req.body.specificStoryId;
+    const accountId = req.accountContext.accountId;
+    
+    console.log(`🎨 Creating content generation job (limit: ${limit}${specificStoryId ? `, specific story: ${specificStoryId}` : ''}) for account ${accountId}`);
+    
+    // Create job instead of processing synchronously
+    const jobPayload = { limit };
+    if (specificStoryId) {
+      jobPayload.specificStoryId = specificStoryId;
+    }
+    
+    const jobId = await jobManager.createJob(
+      'content_generation',
+      jobPayload,
+      1, // priority
+      'user',
+      accountId // pass account ID
+    );
+    
+    res.json({
+      success: true,
+      message: `Content generation job created (ID: ${jobId})`,
+      jobId,
+      status: 'queued'
+    });
+  } catch (error) {
+    console.error('❌ Content generation failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/eden/content/generate-evergreen', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { category, count = 1 } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    if (!category) {
+      return res.status(400).json({ error: 'Category is required' });
+    }
+
+    console.log(`🌲 Evergreen content generation triggered (category: ${category}) for account ${accountId}`);
+    const generatedContent = await contentGenerator.generateEvergreenContent(category, count, accountId);
+    
+    res.json({
+      success: true,
+      message: `Generated ${generatedContent.length} evergreen content pieces for account ${accountId}`,
+      content: generatedContent,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Evergreen content generation failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Remove a bookmark
 app.delete('/api/eden/bookmarks', accountContext, async (req, res) => {
   try {
@@ -1712,7 +1869,7 @@ async function ensureAccountImageSettingsTable() {
   }
 }
 
-// Generate AI image for specific content
+// Generate AI image for specific content  
 app.post('/api/eden/images/generate-for-content/:contentId', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
@@ -1722,6 +1879,63 @@ app.post('/api/eden/images/generate-for-content/:contentId', accountContext, asy
     const { currentUserId } = req;
     const { accountId } = req.accountContext;
     const { contentId } = req.params;
+    
+    // Handle both JSON and multipart form data (for v3 reference images)
+    let bodyData = {};
+    let referenceImageFiles = [];
+    
+    if (req.headers['content-type']?.includes('multipart/form-data')) {
+      // Handle multipart form data with multer
+      const multer = require('multer');
+      const upload = multer({ 
+        storage: multer.memoryStorage(),
+        limits: {
+          fileSize: 10 * 1024 * 1024, // 10MB limit per file
+          files: 3 // Max 3 reference images
+        },
+        fileFilter: (req, file, cb) => {
+          if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+          } else {
+            cb(new Error('Only image files are allowed for reference images'));
+          }
+        }
+      });
+
+      await new Promise((resolve, reject) => {
+        upload.any()(req, res, (err) => {
+          if (err) {
+            console.error('Multer error:', err);
+            reject(err);
+          } else {
+            // Parse form fields
+            Object.keys(req.body).forEach(key => {
+              try {
+                // Try to parse JSON fields
+                if (req.body[key].startsWith('[') || req.body[key].startsWith('{')) {
+                  bodyData[key] = JSON.parse(req.body[key]);
+                } else {
+                  bodyData[key] = req.body[key];
+                }
+              } catch (e) {
+                bodyData[key] = req.body[key];
+              }
+            });
+            
+            // Extract reference image files
+            referenceImageFiles = req.files.filter(file => 
+              file.fieldname.startsWith('referenceImage_')
+            );
+            
+            resolve();
+          }
+        });
+      });
+    } else {
+      // Standard JSON body
+      bodyData = req.body;
+    }
+
     const { 
       prompt: userPrompt,
       seed,
@@ -1736,7 +1950,7 @@ app.post('/api/eden/images/generate-for-content/:contentId', accountContext, asy
       useAccountColors = false,
       selectedColorTemplate = null,
       modelVersion = 'v2'
-    } = req.body;
+    } = bodyData;
     
     if (!currentUserId) {
       return res.status(401).json({ error: 'Authentication required' });
@@ -1847,6 +2061,17 @@ app.post('/api/eden/images/generate-for-content/:contentId', accountContext, asy
         generationOptions.styleCodes = styleCodes;
       }
 
+      // Handle v3 reference images
+      if (modelVersion === 'v3' && referenceImageFiles.length > 0) {
+        console.log(`🖼️ Processing ${referenceImageFiles.length} reference images for v3 generation`);
+        generationOptions.referenceImages = referenceImageFiles.map(file => ({
+          buffer: file.buffer,
+          mimetype: file.mimetype,
+          originalname: file.originalname,
+          size: file.size
+        }));
+      }
+
       // Handle brand colors if requested
       if (useAccountColors && accountSettings?.brandColors?.length > 0) {
         // Convert specific selected color template to Ideogram color palette format
@@ -1883,10 +2108,23 @@ app.post('/api/eden/images/generate-for-content/:contentId', accountContext, asy
       }
 
       console.log(`🚀 Sending to Ideogram API with ${Object.keys(generationOptions).length} parameters`);
-      const generatedImages = await imageService.generateIdeogramImage(generationOptions);
+      const generationResult = await imageService.generateIdeogramImage(generationOptions);
+
+      // Handle new response format with adjustments
+      const generatedImages = generationResult.images || generationResult; // Backward compatibility
+      const adjustments = generationResult.adjustments || [];
+      const finalParameters = generationResult.finalParameters || {};
 
       if (!generatedImages || generatedImages.length === 0) {
         throw new Error('No images generated by Ideogram API');
+      }
+
+      // Log any automatic adjustments made
+      if (adjustments.length > 0) {
+        console.log(`📝 Automatic adjustments made during generation:`);
+        adjustments.forEach(adj => {
+          console.log(`   • ${adj.message}`);
+        });
       }
 
       // Process all generated images
@@ -1938,19 +2176,26 @@ app.post('/api/eden/images/generate-for-content/:contentId', accountContext, asy
 
       console.log(`✅ AI image(s) generated and saved for content ${contentId}`);
 
+      // Prepare user-friendly success message
+      let successMessage = `${numImages > 1 ? `${numImages} images` : 'Image'} generated successfully`;
+      if (adjustments.length > 0) {
+        successMessage += ` (with automatic adjustments for compatibility)`;
+      }
+
       // Return comprehensive response
       res.json({
         success: true,
-        message: `${numImages > 1 ? `${numImages} images` : 'Image'} generated successfully`,
+        message: successMessage,
         image: processedImages[0], // Primary image for backward compatibility
         images: processedImages,    // All generated images
+        adjustments: adjustments,   // Any automatic adjustments made
         generation: {
           id: generationId,
           userPrompt: userPrompt,
           finalPrompt: finalPrompt,
           parameters: {
             styleType: styleType,
-            aspectRatio: aspectRatio,
+            aspectRatio: finalParameters.aspectRatio || aspectRatio, // Use final adjusted ratio
             renderingSpeed: renderingSpeed,
             magicPrompt: magicPrompt,
             numImages: numImages,
@@ -1968,6 +2213,7 @@ app.post('/api/eden/images/generate-for-content/:contentId', accountContext, asy
             isImageSafe: generatedImages[0].isImageSafe,
             generationTimeSeconds: generationTime,
             estimatedCostUSD: estimatedCost,
+            adjustmentsMade: adjustments.length > 0,
             accountSettings: accountSettings ? {
               prefixUsed: !!accountSettings.promptPrefix,
               suffixUsed: !!accountSettings.promptSuffix,
@@ -1998,6 +2244,265 @@ app.post('/api/eden/images/generate-for-content/:contentId', accountContext, asy
     console.error('❌ AI image generation failed:', error.message);
     res.status(500).json({ 
       error: `Image generation failed: ${error.message}`,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Magic Fill - Edit images with Ideogram v3 (inpainting)
+app.post('/api/eden/images/magic-fill', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`🎨 Processing Magic Fill request for account ${accountId}`);
+
+    // Handle multipart form data with multer
+    const multer = require('multer');
+    const upload = multer({ 
+      storage: multer.memoryStorage(),
+      limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit per file
+        files: 5 // Max: base image + mask + 3 style references
+      },
+      fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+          cb(null, true);
+        } else {
+          cb(new Error('Only image files are allowed'));
+        }
+      }
+    });
+
+    // Process the multipart form data
+    await new Promise((resolve, reject) => {
+      upload.any()(req, res, (err) => {
+        if (err) {
+          console.error('Multer error:', err);
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    // Parse form fields and extract files
+    const bodyData = {};
+    Object.keys(req.body).forEach(key => {
+      try {
+        // Try to parse JSON fields
+        if (req.body[key] && (req.body[key].startsWith('[') || req.body[key].startsWith('{'))) {
+          bodyData[key] = JSON.parse(req.body[key]);
+        } else {
+          bodyData[key] = req.body[key];
+        }
+      } catch (e) {
+        bodyData[key] = req.body[key];
+      }
+    });
+
+    // Extract required files
+    const baseImageFile = req.files.find(file => file.fieldname === 'baseImage');
+    const maskFile = req.files.find(file => file.fieldname === 'mask');
+    const styleReferenceFiles = req.files.filter(file => 
+      file.fieldname.startsWith('styleReference_')
+    );
+
+    const { 
+      prompt,
+      magicPrompt = 'AUTO',
+      numImages = 1,
+      seed,
+      renderingSpeed = 'DEFAULT',
+      colorPalette,
+      styleCodes
+    } = bodyData;
+
+    // Validate required fields
+    if (!baseImageFile) {
+      return res.status(400).json({ error: 'Base image file is required' });
+    }
+
+    if (!maskFile) {
+      return res.status(400).json({ error: 'Mask file is required' });
+    }
+
+    if (!prompt || !prompt.trim()) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    console.log(`🎯 Magic Fill prompt: "${prompt.substring(0, 100)}..."`);
+    console.log(`📁 Files received: base image (${baseImageFile.size} bytes), mask (${maskFile.size} bytes), style refs: ${styleReferenceFiles.length}`);
+
+    const startTime = Date.now();
+
+    // Get account image generation settings for prefix/suffix
+    let accountSettings = null;
+    try {
+      const settingsData = await db.query(`
+        SELECT prompt_prefix, prompt_suffix
+        FROM ssnews_account_image_settings 
+        WHERE account_id = ?
+      `, [accountId]);
+      
+      if (settingsData.length > 0) {
+        accountSettings = {
+          promptPrefix: settingsData[0].prompt_prefix,
+          promptSuffix: settingsData[0].prompt_suffix
+        };
+      }
+    } catch (settingsError) {
+      console.warn('⚠️ Could not load account settings:', settingsError.message);
+    }
+
+    // Build final prompt with prefix/suffix
+    let finalPrompt = prompt.trim();
+    if (accountSettings?.promptPrefix) {
+      finalPrompt = `${accountSettings.promptPrefix} ${finalPrompt}`;
+    }
+    if (accountSettings?.promptSuffix) {
+      finalPrompt = `${finalPrompt} ${accountSettings.promptSuffix}`;
+    }
+    finalPrompt = finalPrompt.trim();
+
+    console.log(`🎯 Final Magic Fill prompt: "${finalPrompt.substring(0, 150)}..."`);
+
+    // Prepare Magic Fill options
+    const magicFillOptions = {
+      imageFile: baseImageFile,
+      maskFile: maskFile,
+      prompt: finalPrompt,
+      magicPrompt: magicPrompt,
+      numImages: parseInt(numImages),
+      renderingSpeed: renderingSpeed
+    };
+
+    // Add optional parameters
+    if (seed && !isNaN(parseInt(seed))) {
+      magicFillOptions.seed = parseInt(seed);
+    }
+
+    if (colorPalette && colorPalette.members && colorPalette.members.length > 0) {
+      magicFillOptions.colorPalette = colorPalette;
+    }
+
+    if (styleCodes && styleCodes.length > 0) {
+      magicFillOptions.styleCodes = styleCodes;
+    }
+
+    if (styleReferenceFiles.length > 0) {
+      console.log(`🖼️ Processing ${styleReferenceFiles.length} style reference images`);
+      magicFillOptions.styleReferenceImages = styleReferenceFiles.map(file => ({
+        buffer: file.buffer,
+        mimetype: file.mimetype,
+        originalname: file.originalname,
+        size: file.size
+      }));
+    }
+
+    console.log(`🚀 Sending to Ideogram Magic Fill API with ${Object.keys(magicFillOptions).length} parameters`);
+    const editResult = await imageService.editIdeogramImage(magicFillOptions);
+
+    const editedImages = editResult.images || [];
+    const finalParameters = editResult.finalParameters || {};
+
+    if (!editedImages || editedImages.length === 0) {
+      throw new Error('No images returned from Magic Fill API');
+    }
+
+    // Process all edited images and upload to CDN
+    const processedImages = [];
+    for (let i = 0; i < editedImages.length; i++) {
+      const image = editedImages[i];
+      
+      // Generate filename for the edited image
+      const filename = `magic-fill-${Date.now()}-${i}.jpg`;
+      
+      // Upload to Sirv CDN
+      const sirvUrl = await imageService.uploadToSirv(image.url, filename);
+      
+      // Store in database
+      const imageData = {
+        account_id: accountId,
+        associated_content_type: 'magic_fill',
+        associated_content_id: null,
+        sirv_cdn_url: sirvUrl,
+        source_image_url: image.url,
+        source_api: 'ideogram',
+        source_image_id_external: image.id,
+        alt_text_suggestion_ai: `Magic Fill result: ${finalPrompt.substring(0, 100)}...`,
+        status: 'approved', // Magic Fill results are typically ready to use
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+
+      const imageId = await db.insert('ssnews_image_assets', imageData);
+      console.log(`✅ Magic Fill image saved with ID: ${imageId}`);
+
+      const processedImage = {
+        id: imageId,
+        sirvUrl: sirvUrl,
+        altText: imageData.alt_text_suggestion_ai,
+        source: 'ideogram',
+        editType: 'magic_fill',
+        originalUrl: image.url,
+        resolution: image.resolution,
+        seed: image.seed,
+        isImageSafe: image.isImageSafe,
+        created: new Date().toISOString()
+      };
+
+      processedImages.push(processedImage);
+    }
+
+    const processingTime = (Date.now() - startTime) / 1000;
+    console.log(`✅ Magic Fill complete in ${processingTime}s - generated ${processedImages.length} image(s)`);
+
+    // Calculate estimated cost (Magic Fill typically costs more than generation)
+    const baseCost = renderingSpeed === 'TURBO' ? 0.08 : 
+                    renderingSpeed === 'QUALITY' ? 0.16 : 0.12;
+    const estimatedCost = baseCost * numImages;
+
+    res.json({
+      success: true,
+      message: `Magic Fill completed successfully - ${numImages > 1 ? `${numImages} images` : 'image'} generated`,
+      image: processedImages[0], // Primary image for compatibility
+      images: processedImages,    // All generated images
+      generation: {
+        userPrompt: prompt,
+        finalPrompt: finalPrompt,
+        parameters: {
+          magicPrompt: magicPrompt,
+          numImages: numImages,
+          renderingSpeed: renderingSpeed,
+          seed: seed || null,
+          colorPalette: colorPalette || null,
+          styleCodes: styleCodes || null,
+          styleReferences: styleReferenceFiles.length
+        },
+        metadata: {
+          processingTimeSeconds: processingTime,
+          estimatedCostUSD: estimatedCost,
+          baseImageSize: baseImageFile.size,
+          maskSize: maskFile.size,
+          styleReferencesCount: styleReferenceFiles.length
+        }
+      },
+      accountId
+    });
+
+  } catch (error) {
+    console.error('❌ Magic Fill failed:', error.message);
+    res.status(500).json({ 
+      error: `Magic Fill failed: ${error.message}`,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
@@ -2076,7 +2581,7 @@ app.get('/api/eden/images/ideogram/options', async (req, res) => {
     const options = {
       modelVersion,
       styles: imageService.getIdeogramStyles(modelVersion),
-      aspectRatios: imageService.getAspectRatios(),
+      aspectRatios: imageService.getAspectRatios(modelVersion),
       resolutions: imageService.getResolutions(),
       renderingSpeeds: [
         { value: 'TURBO', label: 'Turbo (Fastest)', description: 'Quick generation, lower cost' },
@@ -2143,6 +2648,7 @@ app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) 
         source_api as source,
         status, -- Select the new status column
         source_image_id_external,
+        generation_metadata, -- Include generation metadata with style codes
         created_at
       FROM ssnews_image_assets
       WHERE associated_content_type = 'gen_article' 
@@ -2163,15 +2669,28 @@ app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) 
 
     const images = await db.query(query, queryParams);
 
-    const formattedImages = images.map(image => ({
-      id: image.id,
-      sirvUrl: image.sirvUrl,
-      altText: image.altText || 'Generated image',
-      source: image.source || 'ideogram',
-      query: image.source === 'ideogram' ? 'AI Generated' : 'Stock Photo',
-      created: image.created_at,
-      status: image.status // Include status in formatted response
-    }));
+    const formattedImages = images.map(image => {
+      // Parse generation metadata if available
+      let generationMetadata = null;
+      if (image.generation_metadata) {
+        try {
+          generationMetadata = JSON.parse(image.generation_metadata);
+        } catch (error) {
+          console.warn('Failed to parse generation metadata for image', image.id, error.message);
+        }
+      }
+
+      return {
+        id: image.id,
+        sirvUrl: image.sirvUrl,
+        altText: image.altText || 'Generated image',
+        source: image.source || 'ideogram',
+        query: image.source === 'ideogram' ? 'AI Generated' : 'Stock Photo',
+        created: image.created_at,
+        status: image.status, // Include status in formatted response
+        generationMetadata: generationMetadata // Include parsed generation metadata with style codes
+      };
+    });
 
     console.log(`✅ Found ${formattedImages.length} images for content ${contentId}`);
 
@@ -2862,74 +3381,135 @@ app.post('/api/eden/settings/brand-colors', accountContext, async (req, res) => 
 
     console.log(`🎨 Adding brand color set "${name}" for account ${accountId}`);
 
-    // Get current settings
-    const currentSettings = await db.query(`
-      SELECT brand_colors FROM ssnews_account_image_settings 
-      WHERE account_id = ?
-    `, [accountId]);
-
-    let brandColors = [];
-    if (currentSettings.length > 0 && currentSettings[0].brand_colors) {
-      try {
-        brandColors = JSON.parse(currentSettings[0].brand_colors);
-      } catch (parseError) {
-        console.warn('⚠️ Invalid JSON in existing brand_colors, starting fresh:', parseError.message);
-        brandColors = [];
-      }
-    }
-
-    // Add new color set (normalize colors to include #)
-    const normalizedColors = colors.map(color => color.startsWith('#') ? color : `#${color}`);
-    const newColorSet = {
-      name: name.trim(),
-      colors: normalizedColors,
-      createdAt: new Date().toISOString()
-    };
-    
-    brandColors.push(newColorSet);
-
-    // Serialize with error handling
-    let brandColorsJson;
+    // Use database transaction to ensure atomic operation
+    const connection = await db.pool.getConnection();
     try {
-      brandColorsJson = JSON.stringify(brandColors);
-    } catch (serializeError) {
-      console.error('❌ Failed to serialize brand colors:', serializeError.message);
-      console.error('Data that failed to serialize:', brandColors);
-      console.error('Data type:', typeof brandColors);
-      console.error('Is Array:', Array.isArray(brandColors));
-      console.error('Length:', brandColors?.length);
-      console.error('First item:', brandColors?.[0]);
-      return res.status(500).json({ error: 'Failed to serialize brand colors data' });
-    }
+      await connection.beginTransaction();
+      
+      // Lock the row and get current settings
+      const [currentSettings] = await connection.execute(`
+        SELECT brand_colors FROM ssnews_account_image_settings 
+        WHERE account_id = ? FOR UPDATE
+      `, [accountId]);
 
-    // Update or create settings
-    if (currentSettings.length > 0) {
-      await db.query(`
-        UPDATE ssnews_account_image_settings 
-        SET brand_colors = ?, updated_at = NOW()
+      let brandColors = [];
+      if (currentSettings.length > 0 && currentSettings[0].brand_colors) {
+        try {
+          const rawData = currentSettings[0].brand_colors;
+          console.log(`🔍 Raw brand_colors data type: ${typeof rawData}`);
+          console.log(`🔍 Raw brand_colors data:`, rawData);
+          
+          if (typeof rawData === 'string') {
+            brandColors = JSON.parse(rawData);
+          } else if (Array.isArray(rawData)) {
+            brandColors = rawData;
+          } else {
+            console.warn('⚠️ Unexpected brand_colors format, starting fresh');
+            brandColors = [];
+          }
+          
+          console.log(`🔍 Parsed brand colors count: ${brandColors.length}`);
+          console.log(`🔍 Existing color sets:`, brandColors.map(set => set.name));
+        } catch (parseError) {
+          console.warn('⚠️ Invalid JSON in existing brand_colors, starting fresh:', parseError.message);
+          brandColors = [];
+        }
+      } else {
+        console.log(`🔍 No existing brand colors found for account ${accountId}`);
+      }
+
+      // Add new color set (normalize colors to include #)
+      const normalizedColors = colors.map(color => color.startsWith('#') ? color : `#${color}`);
+      const newColorSet = {
+        name: name.trim(),
+        colors: normalizedColors,
+        createdAt: new Date().toISOString()
+      };
+      
+      brandColors.push(newColorSet);
+      console.log(`🎨 After adding new set, total count: ${brandColors.length}`);
+      console.log(`🎨 All color sets:`, brandColors.map(set => set.name));
+
+      // Serialize with error handling
+      let brandColorsJson;
+      try {
+        brandColorsJson = JSON.stringify(brandColors);
+        console.log(`🔍 Serialized brand colors length: ${brandColorsJson.length}`);
+      } catch (serializeError) {
+        console.error('❌ Failed to serialize brand colors:', serializeError.message);
+        console.error('Data that failed to serialize:', brandColors);
+        await connection.rollback();
+        return res.status(500).json({ error: 'Failed to serialize brand colors data' });
+      }
+
+      // Update or create settings
+      if (currentSettings.length > 0) {
+        const [updateResult] = await connection.execute(`
+          UPDATE ssnews_account_image_settings 
+          SET brand_colors = ?, updated_at = NOW()
+          WHERE account_id = ?
+        `, [brandColorsJson, accountId]);
+        console.log(`🔍 Update result:`, updateResult);
+      } else {
+        const [insertResult] = await connection.execute(`
+          INSERT INTO ssnews_account_image_settings (account_id, brand_colors, default_settings)
+          VALUES (?, ?, ?)
+        `, [
+          accountId,
+          brandColorsJson,
+          JSON.stringify({
+            aspectRatio: '16:9',
+            styleType: 'GENERAL',
+            renderingSpeed: 'DEFAULT',
+            magicPrompt: 'AUTO',
+            negativePrompt: '',
+            numImages: 1
+          })
+        ]);
+        console.log(`🔍 Insert result:`, insertResult);
+      }
+
+      // Verify the update by reading back
+      const [verifySettings] = await connection.execute(`
+        SELECT brand_colors FROM ssnews_account_image_settings 
         WHERE account_id = ?
-      `, [brandColorsJson, accountId]);
-    } else {
-      await db.insert('ssnews_account_image_settings', {
-        account_id: accountId,
-        brand_colors: brandColorsJson,
-        default_settings: JSON.stringify({
-          aspectRatio: '16:9',
-          styleType: 'GENERAL',
-          renderingSpeed: 'DEFAULT',
-          magicPrompt: 'AUTO',
-          negativePrompt: '',
-          numImages: 1
-        })
-      });
-    }
+      `, [accountId]);
+      
+      let verifiedBrandColors = [];
+      if (verifySettings.length > 0 && verifySettings[0].brand_colors) {
+        try {
+          const rawData = verifySettings[0].brand_colors;
+          if (typeof rawData === 'string') {
+            verifiedBrandColors = JSON.parse(rawData);
+          } else if (Array.isArray(rawData)) {
+            verifiedBrandColors = rawData;
+          }
+          console.log(`✅ Verified brand colors count: ${verifiedBrandColors.length}`);
+          console.log(`✅ Verified color sets:`, verifiedBrandColors.map(set => set.name));
+        } catch (parseError) {
+          console.error('❌ Failed to parse verified data:', parseError.message);
+        }
+      }
 
-    res.json({
-      success: true,
-      message: `Brand color set "${name}" added successfully`,
-      brandColors,
-      accountId
-    });
+      await connection.commit();
+      
+      res.json({
+        success: true,
+        message: `Brand color set "${name}" added successfully`,
+        brandColors: verifiedBrandColors.length > 0 ? verifiedBrandColors : brandColors,
+        accountId,
+        debug: {
+          originalCount: brandColors.length - 1,
+          newCount: verifiedBrandColors.length || brandColors.length,
+          addedSet: newColorSet.name
+        }
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   } catch (error) {
     console.error('❌ Error adding brand color set:', error.message);
     console.error('❌ Error stack:', error.stack);
@@ -2959,51 +3539,115 @@ app.delete('/api/eden/settings/brand-colors/:colorSetIndex', accountContext, asy
 
     console.log(`🗑️ Removing brand color set at index ${index} for account ${accountId}`);
 
-    // Get current settings
-    const currentSettings = await db.query(`
-      SELECT brand_colors FROM ssnews_account_image_settings 
-      WHERE account_id = ?
-    `, [accountId]);
-
-    if (currentSettings.length === 0 || !currentSettings[0].brand_colors) {
-      return res.status(404).json({ error: 'No brand colors found' });
-    }
-
-    let brandColors;
+    // Use database transaction to ensure atomic operation
+    const connection = await db.pool.getConnection();
     try {
-      brandColors = JSON.parse(currentSettings[0].brand_colors);
-    } catch (parseError) {
-      console.error('❌ Invalid JSON in brand_colors field:', parseError.message);
-      return res.status(500).json({ error: 'Invalid brand colors data in database' });
+      await connection.beginTransaction();
+      
+      // Lock the row and get current settings
+      const [currentSettings] = await connection.execute(`
+        SELECT brand_colors FROM ssnews_account_image_settings 
+        WHERE account_id = ? FOR UPDATE
+      `, [accountId]);
+
+      if (currentSettings.length === 0 || !currentSettings[0].brand_colors) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'No brand colors found' });
+      }
+
+      let brandColors = [];
+      try {
+        const rawData = currentSettings[0].brand_colors;
+        console.log(`🔍 Raw brand_colors data type: ${typeof rawData}`);
+        console.log(`🔍 Raw brand_colors data:`, rawData);
+        
+        if (typeof rawData === 'string') {
+          brandColors = JSON.parse(rawData);
+        } else if (Array.isArray(rawData)) {
+          brandColors = rawData;
+        } else {
+          console.error('❌ Unexpected brand_colors format:', typeof rawData);
+          await connection.rollback();
+          return res.status(500).json({ error: 'Invalid brand colors data format in database' });
+        }
+        
+        console.log(`🔍 Parsed brand colors count: ${brandColors.length}`);
+        console.log(`🔍 Existing color sets:`, brandColors.map(set => set.name));
+      } catch (parseError) {
+        console.error('❌ Invalid JSON in brand_colors field:', parseError.message);
+        await connection.rollback();
+        return res.status(500).json({ error: 'Invalid brand colors data in database' });
+      }
+      
+      if (index >= brandColors.length) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Color set index not found' });
+      }
+
+      const removedColorSet = brandColors.splice(index, 1)[0];
+      console.log(`🗑️ Removing color set: ${removedColorSet.name}`);
+      console.log(`🗑️ Remaining color sets: ${brandColors.length}`);
+
+      // Serialize updated brand colors with error handling
+      let updatedBrandColorsJson;
+      try {
+        updatedBrandColorsJson = JSON.stringify(brandColors);
+        console.log(`🔍 Serialized updated brand colors length: ${updatedBrandColorsJson.length}`);
+      } catch (serializeError) {
+        console.error('❌ Failed to serialize updated brand colors:', serializeError.message);
+        await connection.rollback();
+        return res.status(500).json({ error: 'Failed to serialize brand colors data' });
+      }
+
+      // Update settings
+      const [updateResult] = await connection.execute(`
+        UPDATE ssnews_account_image_settings 
+        SET brand_colors = ?, updated_at = NOW()
+        WHERE account_id = ?
+      `, [updatedBrandColorsJson, accountId]);
+      console.log(`🔍 Update result:`, updateResult);
+
+      // Verify the update by reading back
+      const [verifySettings] = await connection.execute(`
+        SELECT brand_colors FROM ssnews_account_image_settings 
+        WHERE account_id = ?
+      `, [accountId]);
+      
+      let verifiedBrandColors = [];
+      if (verifySettings.length > 0 && verifySettings[0].brand_colors) {
+        try {
+          const rawData = verifySettings[0].brand_colors;
+          if (typeof rawData === 'string') {
+            verifiedBrandColors = JSON.parse(rawData);
+          } else if (Array.isArray(rawData)) {
+            verifiedBrandColors = rawData;
+          }
+          console.log(`✅ Verified brand colors count: ${verifiedBrandColors.length}`);
+          console.log(`✅ Verified remaining color sets:`, verifiedBrandColors.map(set => set.name));
+        } catch (parseError) {
+          console.error('❌ Failed to parse verified data:', parseError.message);
+        }
+      }
+
+      await connection.commit();
+
+      res.json({
+        success: true,
+        message: `Brand color set "${removedColorSet.name}" removed successfully`,
+        brandColors: verifiedBrandColors.length >= 0 ? verifiedBrandColors : brandColors,
+        accountId,
+        debug: {
+          originalCount: brandColors.length + 1,
+          newCount: verifiedBrandColors.length || brandColors.length,
+          removedSet: removedColorSet.name
+        }
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
-    
-    if (index >= brandColors.length) {
-      return res.status(404).json({ error: 'Color set index not found' });
-    }
-
-    const removedColorSet = brandColors.splice(index, 1)[0];
-
-    // Update settings with JSON serialization error handling
-    let updatedBrandColorsJson;
-    try {
-      updatedBrandColorsJson = JSON.stringify(brandColors);
-    } catch (serializeError) {
-      console.error('❌ Failed to serialize updated brand colors:', serializeError.message);
-      return res.status(500).json({ error: 'Failed to serialize brand colors data' });
-    }
-
-    await db.query(`
-      UPDATE ssnews_account_image_settings 
-      SET brand_colors = ?, updated_at = NOW()
-      WHERE account_id = ?
-    `, [updatedBrandColorsJson, accountId]);
-
-    res.json({
-      success: true,
-      message: `Brand color set "${removedColorSet.name}" removed successfully`,
-      brandColors,
-      accountId
-    });
   } catch (error) {
     console.error('❌ Error removing brand color set:', error.message);
     console.error('❌ Error stack:', error.stack);
@@ -3209,6 +3853,20 @@ app.post('/api/debug/optimize-database', async (req, res) => {
       }
     } else {
       results.push({ action: 'Modify ssnews_image_assets for status column', status: 'skipped', reason: 'status column already exists' });
+    }
+
+    // Add generation_metadata column to image assets if it doesn't exist
+    if (!(await columnExists('ssnews_image_assets', 'generation_metadata'))) {
+      try {
+        await db.query('ALTER TABLE ssnews_image_assets ADD COLUMN generation_metadata JSON NULL COMMENT \'Ideogram generation metadata including style codes\' AFTER alt_text_suggestion_ai');
+        results.push({ action: 'Add generation_metadata column to ssnews_image_assets', status: 'success' });
+        console.log('✅ Added generation_metadata column to ssnews_image_assets');
+      } catch (error) {
+        results.push({ action: 'Add generation_metadata column to ssnews_image_assets', status: 'error', error: error.message });
+        console.log('❌ Failed to add generation_metadata column:', error.message);
+      }
+    } else {
+      results.push({ action: 'Add generation_metadata column to ssnews_image_assets', status: 'skipped', reason: 'Column already exists' });
     }
 
     console.log(`🔧 Database optimization complete: ${created} created, ${existing} existing, ${errors} errors`);

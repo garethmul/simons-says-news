@@ -158,15 +158,36 @@ const ImageGenerationSettings = () => {
     setSaveStatus(null);
 
     try {
+      // First, fetch the latest brand colors from the database to ensure we don't overwrite recent changes
+      const currentSettingsResponse = await fetch('/api/eden/settings/image-generation', withAccountContext());
+      let latestBrandColors = settings.brandColors; // fallback to current state
+      
+      if (currentSettingsResponse.ok) {
+        const currentData = await currentSettingsResponse.json();
+        latestBrandColors = currentData.settings.brandColors || [];
+        console.log('💾 Fetched latest brand colors before save:', latestBrandColors);
+      }
+
+      // Prepare settings with latest brand colors to prevent overwrites
+      const settingsToSave = {
+        ...settings,
+        brandColors: latestBrandColors
+      };
+
       const response = await fetch('/api/eden/settings/image-generation', withAccountContext({
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(settings)
+        body: JSON.stringify(settingsToSave)
       }));
 
       if (response.ok) {
+        // Update local state with the latest brand colors to stay in sync
+        setSettings(prev => ({
+          ...prev,
+          brandColors: latestBrandColors
+        }));
         setSaveStatus({ type: 'success', message: 'Settings saved successfully!' });
         setTimeout(() => setSaveStatus(null), 3000);
       } else {
@@ -181,7 +202,7 @@ const ImageGenerationSettings = () => {
     }
   };
 
-  const handleAddColorSet = async () => {
+  const handleAddColorSet = async (retryCount = 0) => {
     if (!selectedAccount) {
       setSaveStatus({ type: 'error', message: 'No account selected' });
       return;
@@ -193,6 +214,8 @@ const ImageGenerationSettings = () => {
     }
 
     try {
+      console.log(`🎨 Adding color set "${newColorSet.name}" (attempt ${retryCount + 1})`);
+      
       const response = await fetch('/api/eden/settings/brand-colors', withAccountContext({
         method: 'POST',
         headers: {
@@ -203,12 +226,33 @@ const ImageGenerationSettings = () => {
 
       if (response.ok) {
         const result = await response.json();
-        setSettings(prev => ({
-          ...prev,
-          brandColors: result.brandColors
-        }));
+        console.log('🎨 Server response:', result);
+        
+        // Verify the result contains the expected number of color sets
+        const expectedCount = settings.brandColors.length + 1;
+        const actualCount = result.brandColors.length;
+        
+        if (actualCount < expectedCount && retryCount < 2) {
+          console.warn(`⚠️ Expected ${expectedCount} color sets but got ${actualCount}. Retrying...`);
+          setTimeout(() => handleAddColorSet(retryCount + 1), 500);
+          return;
+        }
+        
+        // Update settings state immediately and synchronously
+        setSettings(prev => {
+          const updatedSettings = {
+            ...prev,
+            brandColors: result.brandColors
+          };
+          console.log('🎨 Updated brand colors in state:', updatedSettings.brandColors);
+          console.log('🎨 Color set names:', updatedSettings.brandColors.map(set => set.name));
+          return updatedSettings;
+        });
         setNewColorSet({ name: '', colors: ['#000000'] });
-        setSaveStatus({ type: 'success', message: `Color set "${newColorSet.name}" added!` });
+        setSaveStatus({ 
+          type: 'success', 
+          message: `Color set "${newColorSet.name}" added! (${result.brandColors.length} total sets)` 
+        });
         setTimeout(() => setSaveStatus(null), 3000);
       } else {
         const error = await response.json();
@@ -216,35 +260,75 @@ const ImageGenerationSettings = () => {
       }
     } catch (error) {
       console.error('Add color set error:', error);
+      
+      // Retry on network errors up to 2 times
+      if (retryCount < 2 && (error.name === 'TypeError' || error.message.includes('fetch'))) {
+        console.log(`🔄 Retrying color set addition (attempt ${retryCount + 2})`);
+        setTimeout(() => handleAddColorSet(retryCount + 1), 1000);
+        return;
+      }
+      
       setSaveStatus({ type: 'error', message: 'Failed to add color set' });
     }
   };
 
-  const handleRemoveColorSet = async (index) => {
+  const handleRemoveColorSet = async (index, retryCount = 0) => {
     if (!selectedAccount) {
       setSaveStatus({ type: 'error', message: 'No account selected' });
       return;
     }
 
     try {
+      console.log(`🗑️ Removing color set at index ${index} (attempt ${retryCount + 1})`);
+      
       const response = await fetch(`/api/eden/settings/brand-colors/${index}`, withAccountContext({
         method: 'DELETE'
       }));
 
       if (response.ok) {
         const result = await response.json();
-        setSettings(prev => ({
-          ...prev,
-          brandColors: result.brandColors
-        }));
-        setSaveStatus({ type: 'success', message: 'Color set removed!' });
+        console.log('🗑️ Server response:', result);
+        
+        // Verify the result contains the expected number of color sets
+        const expectedCount = settings.brandColors.length - 1;
+        const actualCount = result.brandColors.length;
+        
+        if (actualCount > expectedCount && retryCount < 2) {
+          console.warn(`⚠️ Expected ${expectedCount} color sets but got ${actualCount}. Retrying...`);
+          setTimeout(() => handleRemoveColorSet(index, retryCount + 1), 500);
+          return;
+        }
+        
+        // Update settings state immediately and synchronously
+        setSettings(prev => {
+          const updatedSettings = {
+            ...prev,
+            brandColors: result.brandColors
+          };
+          console.log('🗑️ Updated brand colors in state after removal:', updatedSettings.brandColors);
+          console.log('🗑️ Remaining color set names:', updatedSettings.brandColors.map(set => set.name));
+          return updatedSettings;
+        });
+        setSaveStatus({ 
+          type: 'success', 
+          message: `Color set removed! (${result.brandColors.length} remaining sets)` 
+        });
         setTimeout(() => setSaveStatus(null), 3000);
       } else {
         const error = await response.json();
+        console.error('❌ Remove color set API error:', error);
         setSaveStatus({ type: 'error', message: error.error || 'Failed to remove color set' });
       }
     } catch (error) {
       console.error('Remove color set error:', error);
+      
+      // Retry on network errors up to 2 times
+      if (retryCount < 2 && (error.name === 'TypeError' || error.message.includes('fetch'))) {
+        console.log(`🔄 Retrying color set removal (attempt ${retryCount + 2})`);
+        setTimeout(() => handleRemoveColorSet(index, retryCount + 1), 1000);
+        return;
+      }
+      
       setSaveStatus({ type: 'error', message: 'Failed to remove color set' });
     }
   };
@@ -323,6 +407,35 @@ const ImageGenerationSettings = () => {
     return styleCodes;
   };
 
+  // Load generated images for style preferences
+  const loadGeneratedImages = async () => {
+    if (!selectedAccount) {
+      setSaveStatus({ type: 'error', message: 'No account selected' });
+      return;
+    }
+
+    setIsLoadingImages(true);
+    setSaveStatus(null);
+
+    try {
+      const historyResponse = await fetch('/api/eden/images/generation-history', withAccountContext());
+      if (historyResponse.ok) {
+        const historyData = await historyResponse.json();
+        setGeneratedImages(historyData.history.slice(0, 20)); // Show last 20 generations
+        setSaveStatus({ type: 'success', message: `Loaded ${historyData.history.length} generated images` });
+        setTimeout(() => setSaveStatus(null), 3000);
+      } else {
+        const errorData = await historyResponse.json();
+        setSaveStatus({ type: 'error', message: `Failed to load images: ${errorData.error}` });
+      }
+    } catch (error) {
+      console.error('Failed to load generation history:', error.message);
+      setSaveStatus({ type: 'error', message: `Failed to load images: ${error.message}` });
+    } finally {
+      setIsLoadingImages(false);
+    }
+  };
+
   // Save preferred style codes
   const savePreferredStyleCodes = async () => {
     if (!selectedAccount) {
@@ -331,12 +444,24 @@ const ImageGenerationSettings = () => {
     }
 
     const extractedCodes = extractStyleCodesFromSelection();
-    const updatedSettings = {
-      ...settings,
-      preferredStyleCodes: extractedCodes
-    };
 
     try {
+      // First, fetch the latest brand colors from the database to ensure we don't overwrite recent changes
+      const currentSettingsResponse = await fetch('/api/eden/settings/image-generation', withAccountContext());
+      let latestBrandColors = settings.brandColors; // fallback to current state
+      
+      if (currentSettingsResponse.ok) {
+        const currentData = await currentSettingsResponse.json();
+        latestBrandColors = currentData.settings.brandColors || [];
+        console.log('💾 Fetched latest brand colors before saving style codes:', latestBrandColors);
+      }
+
+      const updatedSettings = {
+        ...settings,
+        brandColors: latestBrandColors, // Use latest brand colors
+        preferredStyleCodes: extractedCodes
+      };
+
       const response = await fetch('/api/eden/settings/image-generation', withAccountContext({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -345,7 +470,11 @@ const ImageGenerationSettings = () => {
 
       if (response.ok) {
         setPreferredStyleCodes(extractedCodes);
-        setSettings(updatedSettings);
+        setSettings(prev => ({
+          ...prev,
+          brandColors: latestBrandColors, // Update with latest brand colors
+          preferredStyleCodes: extractedCodes
+        }));
         setSaveStatus({ type: 'success', message: `Saved ${extractedCodes.length} preferred style codes!` });
         setTimeout(() => setSaveStatus(null), 3000);
       }

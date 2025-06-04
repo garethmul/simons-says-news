@@ -61,6 +61,7 @@
     "firebase": "^11.8.1",
     "firebase-admin": "^13.4.0",
     "lucide-react": "^0.511.0",
+    "multer": "^2.0.1",
     "mysql2": "^3.14.1",
     "node-cron": "^4.0.7",
     "openai": "^4.103.0",
