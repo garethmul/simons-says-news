@@ -35,7 +35,8 @@ import {
   GripVertical,
   ArrowUp,
   ArrowDown,
-  Workflow
+  Workflow,
+  Wand2
 } from 'lucide-react';
 import HelpSection from './common/HelpSection';
 
@@ -287,15 +288,15 @@ const PromptManagement = () => {
     try {
       const response = await fetch('/api/prompts/templates', {
         ...withAccountContext({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newTemplateName,
-          category: newTemplateCategory.toLowerCase().replace(/\s+/g, '_'),
-          description: newTemplateDescription,
-          promptContent: newTemplatePrompt,
-          systemMessage: newTemplateSystemMessage,
-          createdBy: 'user'
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: newTemplateName,
+            category: newTemplateCategory.toLowerCase().replace(/\s+/g, '_'),
+            description: newTemplateDescription,
+            promptContent: newTemplatePrompt,
+            systemMessage: newTemplateSystemMessage,
+            createdBy: 'user'
           })
         })
       });
@@ -360,6 +361,199 @@ const PromptManagement = () => {
       }
     } catch (error) {
       console.error('Error creating sample template:', error);
+    }
+  };
+
+  const createDefaultTemplates = async () => {
+    if (!selectedAccount) return;
+    
+    try {
+      setLoading(true);
+      console.log(`🔧 Creating default templates for ${selectedAccount.name}`);
+      
+      const defaultTemplates = [
+        {
+          name: 'Article Analyzer',
+          category: 'analysis',
+          description: 'Analyzes articles for relevance and generates summaries',
+          promptContent: `Analyze this news article for relevance to Christian audiences and Eden.co.uk's mission. Provide a relevance score and detailed analysis.
+
+News Article:
+{article_content}
+
+Please provide:
+1. Relevance score (0.0 to 1.0)
+2. Summary (2-3 sentences)
+3. Key themes
+4. Potential Christian perspectives
+5. Recommended content approach
+
+Focus on stories that relate to faith, values, social issues, or topics that would interest Christian readers.`,
+          systemMessage: 'You are an AI analyst specializing in Christian content curation. Evaluate content for its relevance and potential impact on Christian audiences.'
+        },
+        {
+          name: 'Social Media Post',
+          category: 'social_media',
+          description: 'Creates social media content for various platforms',
+          promptContent: `Create social media content based on this news article. Generate posts for different platforms that are engaging and reflect Christian values.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Generate JSON with:
+{
+  "facebook": {
+    "text": "150-200 words Facebook post",
+    "hashtags": ["#Christian", "#Faith"]
+  },
+  "instagram": {
+    "text": "100-150 words Instagram caption", 
+    "hashtags": ["#Christian", "#Faith", "#Hope"]
+  },
+  "linkedin": {
+    "text": "Professional LinkedIn post",
+    "hashtags": ["#Christian", "#Leadership"]
+  }
+}
+
+Each post should be encouraging, include relevant scripture if appropriate, and maintain Eden.co.uk's hopeful tone.`,
+          systemMessage: 'You are a social media manager for Eden.co.uk. Create engaging, encouraging Christian content that inspires and uplifts followers.'
+        },
+        {
+          name: 'Blog Post Generator',
+          category: 'blog_post',
+          description: 'Generates engaging blog posts from news articles',
+          promptContent: `Create an engaging blog post based on this news article. The blog post should be warm, encouraging, and reflect Christian values.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Please write a blog post that:
+- Has an engaging title
+- Is 800-1200 words long
+- Includes 2-3 relevant Bible verses
+- Maintains Eden.co.uk's warm, encouraging tone
+- Ends with a call to action or reflection question`,
+          systemMessage: 'You are a Christian content writer for Eden.co.uk, a platform that shares encouraging Christian content. Your writing should be warm, hopeful, and biblically grounded.'
+        },
+        {
+          name: 'Video Script Creator',
+          category: 'video_script',
+          description: 'Generates video scripts for different durations',
+          promptContent: `Create a video script based on this news article. The script should be engaging, encouraging, and suitable for Christian audiences.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Social Media Output:
+{social_media_output}
+
+Script Requirements:
+- Duration: 60 seconds
+- Include introduction, main content, and conclusion
+- Maintain conversational, warm tone
+- Include relevant Bible verses where appropriate
+- End with encouragement or call to action
+
+Return JSON format:
+{
+  "title": "Video title",
+  "script": "Full script with scene directions in [brackets]",
+  "duration": 60,
+  "visualSuggestions": ["Visual suggestion 1", "Visual suggestion 2"]
+}`,
+          systemMessage: 'You are a video script writer for Eden.co.uk. Create engaging, biblically-grounded content that encourages and inspires viewers.'
+        },
+        {
+          name: 'Prayer Points Generator',
+          category: 'prayer',
+          description: 'Creates prayer points based on news articles and current events',
+          promptContent: `Create 5 prayer points based on this news article. Each prayer point should be 15-25 words and cover different aspects: people affected, healing, guidance, hope, and justice.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Format each prayer point as a separate paragraph. Make them specific to the article content while maintaining a hopeful, faith-filled tone.`,
+          systemMessage: 'You are a prayer coordinator for Eden.co.uk. Create thoughtful, biblically-grounded prayer points that help people pray meaningfully about current events.'
+        },
+        {
+          name: 'Image Generation Prompts',
+          category: 'image_generation',
+          description: 'Generates prompts for AI image creation',
+          promptContent: `Create detailed image generation prompts based on this content to accompany the article and social media posts.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Generate 3 different image prompts:
+1. Hero image for the article (inspirational, relevant to content)
+2. Social media image (engaging, shareable)
+3. Background/texture image (subtle, supportive)
+
+Each prompt should be detailed and specify style, mood, colors, and composition.`,
+          systemMessage: 'You are a visual content creator for Eden.co.uk. Create image prompts that are inspirational, relevant, and visually appealing for Christian audiences.'
+        }
+      ];
+
+      let successCount = 0;
+      
+      for (let i = 0; i < defaultTemplates.length; i++) {
+        const template = defaultTemplates[i];
+        try {
+          const response = await fetch('/api/prompts/templates', {
+            ...withAccountContext({
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: template.name,
+                category: template.category,
+                description: template.description,
+                promptContent: template.promptContent,
+                systemMessage: template.systemMessage,
+                createdBy: 'default-setup'
+              })
+            })
+          });
+
+          const data = await response.json();
+          if (data.success) {
+            successCount++;
+            console.log(`✅ Created template: ${template.name}`);
+          } else {
+            console.error(`❌ Failed to create ${template.name}:`, data.error);
+          }
+        } catch (error) {
+          console.error(`❌ Error creating ${template.name}:`, error);
+        }
+      }
+      
+      if (successCount > 0) {
+        alert(`✅ Successfully created ${successCount} default templates! Content generation is now ready.`);
+        await fetchTemplates(); // Refresh the templates list
+      } else {
+        alert('❌ Failed to create default templates. Please check the console for errors.');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error creating default templates:', error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -609,7 +803,7 @@ const PromptManagement = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                <div className="mb-4">
+                <div className="mb-4 space-y-2">
                   <Button 
                     onClick={() => setShowNewTemplateForm(true)}
                     className="w-full"
@@ -618,6 +812,28 @@ const PromptManagement = () => {
                     <Plus className="w-4 h-4 mr-2" />
                     Create New Template
                   </Button>
+                  
+                  {/* Show initialization button if no templates exist */}
+                  {templates.length === 0 && (
+                    <div className="text-center p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-sm text-yellow-800 mb-3">
+                        🚀 No prompt templates found! Content generation requires templates to work.
+                      </p>
+                      <Button 
+                        onClick={() => {
+                          if (confirm('This will create 6 default prompt templates (Article Analyzer, Social Media, Blog Post, Video Script, Prayer Points, and Image Generation). Continue?')) {
+                            createDefaultTemplates();
+                          }
+                        }}
+                        className="w-full"
+                        variant="default"
+                        size="sm"
+                      >
+                        <Wand2 className="w-4 h-4 mr-2" />
+                        Create Default Templates
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 {showNewTemplateForm && (

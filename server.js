@@ -113,6 +113,40 @@ let initializationError = null;
 // Initialize services after database is ready
 let promptManager = null;
 
+// Add this migration function near other database setup functions, before the initializeSystem function
+
+async function migratePromptTemplatesCategoryColumn() {
+  try {
+    console.log('🔄 Checking prompt templates category column...');
+    
+    // Check if migration is needed
+    const columnInfo = await db.query(`
+      SELECT COLUMN_TYPE 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'ssnews_prompt_templates' 
+        AND COLUMN_NAME = 'category'
+    `);
+    
+    if (columnInfo.length > 0 && columnInfo[0].COLUMN_TYPE.includes('enum')) {
+      console.log('🔧 Migrating category column from ENUM to VARCHAR...');
+      
+      // Change the column type to VARCHAR to allow custom categories
+      await db.query(`
+        ALTER TABLE ssnews_prompt_templates 
+        MODIFY COLUMN category VARCHAR(100) NOT NULL
+      `);
+      
+      console.log('✅ Successfully migrated category column to VARCHAR(100)');
+    } else {
+      console.log('✅ Category column already migrated or doesn\'t exist');
+    }
+  } catch (error) {
+    console.error('❌ Error migrating category column:', error.message);
+    // Don't throw - this shouldn't prevent system startup
+  }
+}
+
 async function initializeSystem() {
   try {
     console.log('🚀 Initializing Project Eden system...');
@@ -145,6 +179,13 @@ async function initializeSystem() {
       }
     }
     
+    // Run database migrations
+    try {
+      await migratePromptTemplatesCategoryColumn();
+    } catch (error) {
+      console.warn('⚠️ Database migration failed:', error.message);
+    }
+
     // Initialize additional database tables with error handling
     try {
       await ensureImageGenerationTable();
@@ -1568,7 +1609,7 @@ app.post('/api/eden/jobs/cleanup-stale', accountContext, async (req, res) => {
 
 // ===== CONTENT GENERATION API ENDPOINTS =====
 
-// Content types endpoint - Dynamic discovery from database
+// Content types endpoint - Dynamic discovery from prompt templates
 app.get('/api/eden/content/types', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
@@ -1577,25 +1618,61 @@ app.get('/api/eden/content/types', accountContext, async (req, res) => {
 
     const { accountId } = req.accountContext;
 
-    // Get active content configurations for this account
-    const configurations = await db.getActiveContentConfigurations(accountId);
-    
-    // Transform configurations into content types format
-    const contentTypes = configurations.map(config => {
-      const uiConfig = config.ui_config || {};
-      const generationConfig = config.generation_config || {};
-      
+    // Get prompt templates from the database as the source of truth
+    const templates = await db.query(`
+      SELECT 
+        name,
+        category,
+        is_active
+      FROM ssnews_prompt_templates 
+      WHERE account_id = ? AND is_active = 1
+      ORDER BY category ASC
+    `, [accountId]);
+
+    // Define content type mapping with proper UI configurations
+    const categoryIconMap = {
+      'analysis': 'BarChart3',
+      'blog_post': 'FileText',
+      'email': 'Mail',
+      'image_generation': 'Image',
+      'prayer': 'Heart',
+      'social_media': 'MessageSquare',
+      'video_script': 'Film'
+    };
+
+    const categoryNameMap = {
+      'analysis': 'Analysis',
+      'blog_post': 'Blog Post',
+      'email': 'Email Newsletter',
+      'image_generation': 'Images',
+      'prayer': 'Prayer Points',
+      'social_media': 'Social Media',
+      'video_script': 'Video Scripts'
+    };
+
+    const categoryOrderMap = {
+      'analysis': 1,
+      'blog_post': 2,
+      'social_media': 3,
+      'video_script': 4,
+      'prayer': 5,
+      'email': 6,
+      'image_generation': 7
+    };
+
+    // Transform templates into content types format
+    const contentTypes = templates.map(template => {
       return {
-        id: config.prompt_category,
-        name: config.display_name,
-        icon: uiConfig.icon || 'FileText',
-        category: config.prompt_category,
-        description: `Generates ${config.display_name.toLowerCase()}`,
-        template: generationConfig.prompt_template || config.prompt_category,
-        order: uiConfig.order || 999,
-        displayType: uiConfig.display_type || 'text',
-        emptyMessage: uiConfig.empty_message || `No ${config.display_name.toLowerCase()} generated`,
-        countInTab: uiConfig.count_in_tab !== false
+        id: template.category,
+        name: categoryNameMap[template.category] || template.name,
+        icon: categoryIconMap[template.category] || 'FileText',
+        category: template.category,
+        description: `Generates ${(categoryNameMap[template.category] || template.name).toLowerCase()}`,
+        template: template.name,
+        order: categoryOrderMap[template.category] || 999,
+        displayType: template.category === 'image_generation' ? 'images' : 'text',
+        emptyMessage: `No ${(categoryNameMap[template.category] || template.name).toLowerCase()} generated`,
+        countInTab: true
       };
     });
 
@@ -1605,7 +1682,7 @@ app.get('/api/eden/content/types', accountContext, async (req, res) => {
     // Add the main article type (always present)
     const articleType = {
       id: 'article',
-      name: 'Blog Article',
+      name: 'Main Content',
       icon: 'FileText',
       category: 'blog',
       description: 'Main blog article content',
@@ -1616,9 +1693,13 @@ app.get('/api/eden/content/types', accountContext, async (req, res) => {
       countInTab: false
     };
 
-    const allContentTypes = [articleType, ...contentTypes];
+    // Remove duplicate blog_post if it exists (since we have main content)
+    const filteredContentTypes = contentTypes.filter(type => type.category !== 'blog_post');
 
-    console.log(`📋 Discovered ${contentTypes.length} content types for account ${accountId}`);
+    const allContentTypes = [articleType, ...filteredContentTypes];
+
+    console.log(`📋 Discovered ${filteredContentTypes.length} content types from ${templates.length} prompt templates for account ${accountId}`);
+    console.log(`📋 Content types: ${allContentTypes.map(t => t.name).join(', ')}`);
 
     res.json({
       success: true,
@@ -1759,6 +1840,252 @@ app.get('/api/eden/content/review', accountContext, async (req, res) => {
   }
 });
 
+// Get all dynamic content for a story - for dynamic detail modal
+app.get('/api/eden/content/story/:storyId/all', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { storyId } = req.params;
+    const accountId = req.accountContext.accountId;
+    
+    console.log(`🎯 Fetching all dynamic content for story ${storyId} in account ${accountId}`);
+
+    // First try to get content from the generic content system
+    let dynamicContent = [];
+    try {
+      dynamicContent = await db.query(`
+        SELECT 
+          content_id,
+          prompt_category,
+          content_data,
+          metadata,
+          status,
+          created_at,
+          updated_at
+        FROM ssnews_generated_content 
+        WHERE account_id = ? AND based_on_gen_article_id = ?
+        ORDER BY prompt_category ASC, created_at DESC
+      `, [accountId, storyId]);
+    } catch (error) {
+      console.log('📋 Generic content table not available, using legacy format');
+    }
+
+    // Get the main content to extract legacy content structure
+    const mainContent = await db.query(`
+      SELECT 
+        gen_article_id,
+        title,
+        body_draft,
+        status,
+        created_at,
+        updated_at
+      FROM ssnews_generated_articles 
+      WHERE account_id = ? AND gen_article_id = ?
+    `, [accountId, storyId]);
+
+    if (mainContent.length === 0) {
+      return res.status(404).json({ error: 'Content not found' });
+    }
+
+    // Get legacy content from existing structure
+    let allContent = [...dynamicContent];
+
+    try {
+      // Get social posts
+      const socialPosts = await db.query(`
+        SELECT 
+          gen_social_id as content_id,
+          'social_media' as prompt_category,
+          JSON_OBJECT('platform', platform, 'text', text_draft) as content_data,
+          JSON_OBJECT('platform', platform) as metadata,
+          status,
+          created_at,
+          updated_at
+        FROM ssnews_generated_social_posts 
+        WHERE account_id = ? AND based_on_gen_article_id = ?
+        ORDER BY created_at ASC
+      `, [accountId, storyId]);
+      
+      allContent = [...allContent, ...socialPosts];
+    } catch (error) {
+      console.log('📋 Social posts table query failed, skipping');
+    }
+
+    try {
+      // Get video scripts
+      const videoScripts = await db.query(`
+        SELECT 
+          gen_video_script_id as content_id,
+          'video_script' as prompt_category,
+          JSON_OBJECT('title', title, 'script', script_draft, 'duration_target_seconds', duration_target_seconds) as content_data,
+          JSON_OBJECT('duration', duration_target_seconds, 'title', title) as metadata,
+          status,
+          created_at,
+          updated_at
+        FROM ssnews_generated_video_scripts 
+        WHERE account_id = ? AND based_on_gen_article_id = ?
+        ORDER BY duration_target_seconds ASC
+      `, [accountId, storyId]);
+      
+      allContent = [...allContent, ...videoScripts];
+    } catch (error) {
+      console.log('📋 Video scripts table query failed, skipping');
+    }
+
+    try {
+      // Get prayer points - check if table exists first
+      const tableExists = await db.query(`
+        SHOW TABLES LIKE 'ssnews_generated_prayer_points'
+      `);
+      
+      if (tableExists.length > 0) {
+        const prayerPoints = await db.query(`
+          SELECT 
+            prayer_point_id as content_id,
+            'prayer' as prompt_category,
+            JSON_OBJECT('order_number', order_number, 'prayer_text', prayer_text, 'theme', theme) as content_data,
+            JSON_OBJECT('order', order_number, 'theme', theme) as metadata,
+            status,
+            created_at,
+            updated_at
+          FROM ssnews_generated_prayer_points 
+          WHERE account_id = ? AND based_on_gen_article_id = ?
+          ORDER BY order_number ASC
+        `, [accountId, storyId]);
+        
+        allContent = [...allContent, ...prayerPoints];
+      }
+    } catch (error) {
+      console.log('📋 Prayer points table query failed, extracting from legacy format');
+      
+      // Fallback: try to get prayer points from the main content API response format
+      // This is a temporary workaround for the current data structure
+      try {
+        const contentWithDetails = await db.query(`
+          SELECT 
+            ga.gen_article_id,
+            ga.title,
+            ga.body_draft,
+            ga.status,
+            ga.created_at,
+            ga.updated_at,
+            (
+              SELECT JSON_ARRAYAGG(
+                JSON_OBJECT(
+                  'id', CONCAT(gen_social_id, '_', platform),
+                  'order', gen_social_id,
+                  'content', text_draft,
+                  'theme', platform
+                )
+              )
+              FROM ssnews_generated_social_posts sp 
+              WHERE sp.account_id = ga.account_id 
+              AND sp.based_on_gen_article_id = ga.gen_article_id
+            ) as social_posts_json,
+            (
+              SELECT JSON_ARRAYAGG(
+                JSON_OBJECT(
+                  'id', gen_video_script_id,
+                  'order', gen_video_script_id,
+                  'content', script_draft,
+                  'theme', title
+                )
+              )
+              FROM ssnews_generated_video_scripts vs 
+              WHERE vs.account_id = ga.account_id 
+              AND vs.based_on_gen_article_id = ga.gen_article_id
+            ) as video_scripts_json
+          FROM ssnews_generated_articles ga
+          WHERE ga.account_id = ? AND ga.gen_article_id = ?
+        `, [accountId, storyId]);
+
+        if (contentWithDetails.length > 0) {
+          const content = contentWithDetails[0];
+          
+          // Add social posts as prayer points format for testing
+          if (content.social_posts_json) {
+            const socialData = JSON.parse(content.social_posts_json || '[]');
+            socialData.forEach((item, index) => {
+              allContent.push({
+                content_id: `prayer_${item.id}`,
+                prompt_category: 'prayer',
+                content_data: {
+                  order_number: index + 1,
+                  prayer_text: `Prayer based on social post: ${item.content}`,
+                  theme: 'social'
+                },
+                metadata: { order: index + 1, theme: 'social' },
+                status: 'draft',
+                created_at: content.created_at,
+                updated_at: content.updated_at
+              });
+            });
+          }
+        }
+      } catch (fallbackError) {
+        console.log('📋 Fallback prayer points extraction failed:', fallbackError.message);
+      }
+    }
+
+    // Parse JSON fields that might be strings
+    const parsedContent = allContent.map(item => ({
+      ...item,
+      content_data: typeof item.content_data === 'string' 
+        ? JSON.parse(item.content_data) 
+        : item.content_data,
+      metadata: typeof item.metadata === 'string'
+        ? JSON.parse(item.metadata)
+        : item.metadata
+    }));
+
+    // Get all configured prompt templates to ensure we have tabs for all categories
+    let allCategories = [];
+    try {
+      const templates = await db.query(`
+        SELECT DISTINCT category 
+        FROM ssnews_prompt_templates 
+        WHERE account_id = ? AND is_active = 1
+      `, [accountId]);
+      
+      allCategories = templates.map(t => t.category);
+      console.log(`🏷️ All configured categories: ${allCategories.join(', ')}`);
+    } catch (error) {
+      console.log('📋 Could not fetch template categories, using content-based categories');
+      allCategories = [...new Set(parsedContent.map(c => c.prompt_category))];
+    }
+
+    // Ensure we have at least the categories that have actual content
+    const contentCategories = [...new Set(parsedContent.map(c => c.prompt_category))];
+    
+    // Normalize category names and remove duplicates
+    const categoryMapping = {
+      'prayer_points': 'prayer',
+      'video_scripts': 'video_script'
+    };
+    
+    const normalizedContentCategories = contentCategories.map(cat => categoryMapping[cat] || cat);
+    const finalCategories = [...new Set([...allCategories, ...normalizedContentCategories])];
+    
+    console.log(`✅ Found ${parsedContent.length} content items across ${contentCategories.length} categories with content`);
+    console.log(`📋 Total categories available: ${finalCategories.join(', ')}`);
+
+    res.json({
+      success: true,
+      content: parsedContent,
+      storyId: parseInt(storyId),
+      accountId,
+      categories: finalCategories,
+      totalItems: parsedContent.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching dynamic content:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Update content status endpoint - for approving/rejecting/regenerating content
 app.put('/api/eden/content/:contentType/:contentId/status', accountContext, async (req, res) => {
   try {
@@ -1846,7 +2173,7 @@ app.post('/api/eden/news/sources/:sourceId/refresh', accountContext, async (req,
       'user',
       accountId
     );
-    
+
     res.json({
       success: true,
       message: `Refresh job created for source "${source.name}" (ID: ${jobId})`,
@@ -1871,9 +2198,9 @@ app.post('/api/eden/sources/submit-urls', accountContext, async (req, res) => {
 
     const { urls } = req.body;
     const { accountId } = req.accountContext;
-    
+
     if (!urls || !Array.isArray(urls) || urls.length === 0) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
         error: 'URLs array is required'
       });
@@ -2087,73 +2414,347 @@ if (process.env.NODE_ENV === 'production') {
 
 // ===== IMAGE GENERATION API ENDPOINTS (STUBS) =====
 
-// Get images for content (stub to prevent 404)
+// Get images for content
 app.get('/api/eden/content/:contentId/images', accountContext, async (req, res) => {
   try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { contentId } = req.params;
+    const { archived = 'false' } = req.query;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`🖼️ Fetching images for content ${contentId}, include archived: ${archived}`);
+
+    // Build the query based on whether to include archived images
+    let query = `
+      SELECT 
+        image_id as id,
+        sirv_cdn_url,
+        alt_text_suggestion_ai,
+        source_api,
+        source_image_id_external,
+        status,
+        generation_metadata,
+        created_at
+      FROM ssnews_image_assets 
+      WHERE associated_content_id = ? 
+        AND associated_content_type = 'gen_article'
+        AND account_id = ?
+    `;
+    
+    const queryParams = [contentId, accountId];
+
+    // Only include active images unless specifically requesting archived ones
+    if (archived === 'false') {
+      query += ` AND (status IS NULL OR status != 'archived')`;
+    }
+    
+    query += ` ORDER BY created_at DESC`;
+
+    const imageRows = await db.query(query, queryParams);
+
+    // Format images for frontend
+    const images = imageRows.map(row => {
+      let generationMetadata = null;
+      try {
+        if (row.generation_metadata) {
+          generationMetadata = typeof row.generation_metadata === 'string' 
+            ? JSON.parse(row.generation_metadata)
+            : row.generation_metadata;
+        }
+      } catch (error) {
+        console.warn('Failed to parse generation_metadata for image', row.id, error.message);
+      }
+
+      return {
+        id: row.id,
+        sirvUrl: row.sirv_cdn_url,
+        altText: row.alt_text_suggestion_ai || 'Generated Image',
+        source: row.source_api || 'unknown',
+        query: generationMetadata?.prompt?.substring(0, 50) || 'AI Generated',
+        status: row.status || 'active',
+        created: row.created_at,
+        metadata: generationMetadata,
+        // Additional fields for compatibility
+        ideogramId: row.source_image_id_external,
+        prompt: generationMetadata?.prompt,
+        resolution: generationMetadata?.resolution,
+        styleType: generationMetadata?.styleType,
+        seed: generationMetadata?.seed,
+        modelVersion: generationMetadata?.modelVersion
+      };
+    });
+
+    console.log(`✅ Found ${images.length} images for content ${contentId}`);
+
     res.json({
       success: true,
-      images: [],
-      message: 'Image generation feature not yet implemented'
+      images: images,
+      count: images.length,
+      contentId: contentId,
+      includeArchived: archived === 'true'
     });
+
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error fetching images for content:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to fetch images',
+      details: 'Check server logs for more information'
+    });
   }
 });
 
-// Get Ideogram options (stub to prevent 404)
+// Get Ideogram options based on model version
 app.get('/api/eden/images/ideogram/options', accountContext, async (req, res) => {
   try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { modelVersion = 'v2' } = req.query;
+    
+    console.log(`🎨 Getting Ideogram options for model version: ${modelVersion}`);
+
+    // Get real options from imageService
+    const styles = imageService.getIdeogramStyles(modelVersion);
+    const aspectRatios = imageService.getAspectRatios(modelVersion);
+    const resolutions = imageService.getResolutions();
+
+    const options = {
+      styles: styles,
+      aspectRatios: aspectRatios,
+      resolutions: resolutions,
+      renderingSpeeds: [
+        { value: 'TURBO', label: 'Turbo (Fastest)' },
+        { value: 'DEFAULT', label: 'Default' },
+        { value: 'QUALITY', label: 'Quality (Slowest, Best)' }
+      ],
+      magicPromptOptions: [
+        { value: 'AUTO', label: 'Auto' },
+        { value: 'ON', label: 'On' },
+        { value: 'OFF', label: 'Off' }
+      ],
+      numImagesOptions: [1, 2, 3, 4, 5, 6, 7, 8],
+      modelVersion: modelVersion
+    };
+
+    console.log(`✅ Returning ${styles.length} styles, ${aspectRatios.length} aspect ratios for ${modelVersion}`);
+
     res.json({
       success: true,
-      options: {
-        styles: [
-          { value: 'GENERAL', label: 'General' },
-          { value: 'REALISTIC', label: 'Realistic' },
-          { value: 'DESIGN', label: 'Design' },
-          { value: 'RENDER_3D', label: '3D Render' },
-          { value: 'ANIME', label: 'Anime' }
-        ],
-        aspectRatios: [
-          { value: '1:1', label: '1:1 (Square)' },
-          { value: '16:9', label: '16:9 (Landscape)' },
-          { value: '9:16', label: '9:16 (Portrait)' },
-          { value: '4:3', label: '4:3 (Standard)' },
-          { value: '3:4', label: '3:4 (Portrait)' }
-        ],
-        resolutions: [
-          { value: '1024x1024', label: '1024×1024 (1:1)' },
-          { value: '1024x768', label: '1024×768 (4:3)' },
-          { value: '768x1024', label: '768×1024 (3:4)' }
-        ],
-        renderingSpeeds: [
-          { value: 'FAST', label: 'Fast' },
-          { value: 'DEFAULT', label: 'Default' },
-          { value: 'SLOW', label: 'Slow (Best Quality)' }
-        ],
-        magicPromptOptions: [
-          { value: 'AUTO', label: 'Auto' },
-          { value: 'ON', label: 'On' },
-          { value: 'OFF', label: 'Off' }
-        ],
-        numImagesOptions: [1, 2, 3, 4]
-      },
-      message: 'Image generation feature not yet implemented'
+      options: options,
+      modelVersion: modelVersion
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error getting Ideogram options:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to load Ideogram options'
+    });
   }
 });
 
-// Generate images for content (stub to prevent 404)
+// Generate images for content using Ideogram.ai
 app.post('/api/eden/images/generate-for-content/:contentId', accountContext, async (req, res) => {
   try {
-    res.json({
-      success: false,
-      error: 'Image generation feature not yet implemented',
-      message: 'This feature will be available in a future update'
-    });
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { contentId } = req.params;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    console.log(`🎨 Generating image for content ${contentId} using Ideogram.ai...`);
+
+    // Extract generation parameters from request body
+    const {
+      prompt,
+      aspectRatio = '16:9',
+      styleType = 'GENERAL',
+      renderingSpeed = 'DEFAULT',
+      magicPrompt = 'AUTO',
+      negativePrompt = '',
+      seed,
+      resolution,
+      numImages = 1,
+      modelVersion = 'v2',
+      styleCodes,
+      useAccountColors = false,
+      selectedColorTemplate = null
+    } = req.body;
+
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    // Prepare options for imageService
+    const imageOptions = {
+      prompt: prompt.trim(),
+      aspectRatio,
+      styleType,
+      renderingSpeed,
+      magicPrompt,
+      numImages: parseInt(numImages),
+      modelVersion
+    };
+
+    // Add optional parameters
+    if (negativePrompt && negativePrompt.trim()) {
+      imageOptions.negativePrompt = negativePrompt.trim();
+    }
+    
+    if (seed) {
+      imageOptions.seed = parseInt(seed);
+    }
+    
+    if (resolution) {
+      imageOptions.resolution = resolution;
+    }
+    
+    if (styleCodes && Array.isArray(styleCodes)) {
+      imageOptions.styleCodes = styleCodes;
+    }
+
+    // Handle account color templates
+    if (useAccountColors && selectedColorTemplate) {
+      imageOptions.colorPalette = selectedColorTemplate;
+    }
+
+    console.log(`🎯 Generation options:`, imageOptions);
+
+    // Generate image using the imageService
+    const generationResult = await imageService.generateIdeogramImage(imageOptions);
+    
+    if (!generationResult || !generationResult.images || generationResult.images.length === 0) {
+      return res.status(500).json({ error: 'Failed to generate image - no images returned' });
+    }
+
+    console.log(`✅ Generated ${generationResult.images.length} image(s)`);
+
+    // Process and store the first/primary image
+    const primaryImage = generationResult.images[0];
+    const processedImage = await imageService.processIdeogramImageForContent(primaryImage, contentId, accountId);
+
+    // Prepare response with generation metadata
+    const response = {
+      success: true,
+      image: processedImage,
+      generation: {
+        finalPrompt: primaryImage.prompt || prompt,
+        parameters: {
+          aspectRatio: imageOptions.aspectRatio,
+          styleType: imageOptions.styleType,
+          renderingSpeed: imageOptions.renderingSpeed,
+          magicPrompt: imageOptions.magicPrompt,
+          modelVersion: imageOptions.modelVersion,
+          numImages: imageOptions.numImages
+        },
+        metadata: {
+          resolution: primaryImage.resolution,
+          seed: primaryImage.seed,
+          isImageSafe: primaryImage.isImageSafe,
+          generationTimeSeconds: 2.5, // Estimate
+          estimatedCostUSD: 0.08 * imageOptions.numImages // Estimate
+        }
+      }
+    };
+
+    // If multiple images were generated, process them sequentially to avoid conflicts
+    if (generationResult.images.length > 1) {
+      const allProcessedImages = [];
+      for (let i = 0; i < generationResult.images.length; i++) {
+        const img = generationResult.images[i];
+        // Add a small delay between processing to ensure unique timestamps
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        const processedImg = await imageService.processIdeogramImageForContent(img, contentId, accountId);
+        allProcessedImages.push(processedImg);
+      }
+      response.images = allProcessedImages;
+    }
+
+    console.log(`🎨 Image generation complete for content ${contentId}`);
+    res.json(response);
+
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error generating image:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to generate image',
+      details: 'Check server logs for more information'
+    });
+  }
+});
+
+// Update image status (archive, unarchive, etc.)
+app.put('/api/eden/images/:imageId/status', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { imageId } = req.params;
+    const { status } = req.body;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    if (!status || !['active', 'archived', 'approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Valid status required: active, archived, approved, rejected' });
+    }
+
+    console.log(`🔄 Updating image ${imageId} status to: ${status}`);
+
+    // Update the image status in database
+    const updateResult = await db.query(`
+      UPDATE ssnews_image_assets 
+      SET status = ?, updated_at = NOW() 
+      WHERE id = ? AND account_id = ?
+    `, [status, imageId, accountId]);
+
+    if (updateResult.affectedRows === 0) {
+      return res.status(404).json({ error: 'Image not found or access denied' });
+    }
+
+    // Get the updated image data
+    const imageData = await db.query(`
+      SELECT * FROM ssnews_image_assets 
+      WHERE id = ? AND account_id = ?
+    `, [imageId, accountId]);
+
+    if (imageData.length === 0) {
+      return res.status(404).json({ error: 'Image not found after update' });
+    }
+
+    console.log(`✅ Updated image ${imageId} status to ${status}`);
+
+    res.json({
+      success: true,
+      image: imageData[0],
+      message: `Image status updated to ${status}`
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating image status:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to update image status',
+      details: 'Check server logs for more information'
+    });
   }
 });
 
@@ -3705,6 +4306,561 @@ app.post('/api/debug/fix-ucb-source', accountContext, async (req, res) => {
     
   } catch (error) {
     console.error('❌ Error switching UCB source:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== PROMPT TEMPLATE MANAGEMENT API =====
+
+// Get all prompt templates for account
+app.get('/api/prompts/templates', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { accountId } = req.accountContext;
+    
+    const templates = await db.query(`
+      SELECT 
+        template_id,
+        name,
+        description,
+        category,
+        execution_order,
+        is_active,
+        created_at,
+        updated_at
+      FROM ssnews_prompt_templates 
+      WHERE account_id = ? AND is_active = 1
+      ORDER BY execution_order ASC, name ASC
+    `, [accountId]);
+    
+    res.json({
+      success: true,
+      templates: templates || [],
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error fetching prompt templates:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create new prompt template
+app.post('/api/prompts/templates', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { accountId } = req.accountContext;
+    const { name, category, description, promptContent, systemMessage, createdBy } = req.body;
+    
+    if (!name || !category || !promptContent) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: name, category, and promptContent are required' 
+      });
+    }
+    
+    // Get next execution order
+    const maxOrderResult = await db.query(`
+      SELECT COALESCE(MAX(execution_order), 0) as max_order
+      FROM ssnews_prompt_templates 
+      WHERE account_id = ?
+    `, [accountId]);
+    
+    const nextOrder = (maxOrderResult[0]?.max_order || 0) + 1;
+    
+    // Create template
+    const templateResult = await db.query(`
+      INSERT INTO ssnews_prompt_templates
+      (account_id, name, description, category, execution_order, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW())
+    `, [accountId, name, description || '', category, nextOrder]);
+    
+    const templateId = templateResult.insertId;
+    
+    // Create initial version
+    await db.query(`
+      INSERT INTO ssnews_prompt_versions
+      (template_id, version_number, prompt_content, system_message, is_current, created_by, created_at)
+      VALUES (?, 1, ?, ?, 1, ?, NOW())
+    `, [templateId, promptContent, systemMessage || '', createdBy || 'user']);
+    
+    console.log(`✅ Created prompt template: ${name} (${category}) for account ${accountId}`);
+    
+    res.json({
+      success: true,
+      templateId,
+      message: `Template "${name}" created successfully`,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error creating prompt template:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get template versions and details
+app.get('/api/prompts/templates/:templateId/versions', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { accountId } = req.accountContext;
+    const { templateId } = req.params;
+    
+    const versions = await db.query(`
+      SELECT 
+        version_id,
+        version_number,
+        prompt_content,
+        system_message,
+        is_current,
+        created_by,
+        created_at
+      FROM ssnews_prompt_versions 
+      WHERE template_id = ?
+      ORDER BY version_number DESC
+    `, [templateId]);
+    
+    res.json({
+      success: true,
+      versions: versions || [],
+      templateId,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error fetching template versions:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get template history and stats
+app.get('/api/prompts/templates/:templateId/history', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { templateId } = req.params;
+    
+    // For now, return empty history - can be expanded later
+    res.json({
+      success: true,
+      history: [],
+      templateId
+    });
+  } catch (error) {
+    console.error('❌ Error fetching template history:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get template stats
+app.get('/api/prompts/templates/:templateId/stats', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { templateId } = req.params;
+    
+    // For now, return basic stats - can be expanded later
+    res.json({
+      success: true,
+      stats: {
+        totalGenerations: 0,
+        averageRating: 0,
+        lastUsed: null
+      },
+      templateId
+    });
+  } catch (error) {
+    console.error('❌ Error fetching template stats:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create new template version
+app.post('/api/prompts/templates/:templateId/versions', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { templateId } = req.params;
+    const { promptContent, systemMessage, notes } = req.body;
+    
+    if (!promptContent) {
+      return res.status(400).json({ error: 'Prompt content is required' });
+    }
+    
+    // Get next version number
+    const maxVersionResult = await db.query(`
+      SELECT COALESCE(MAX(version_number), 0) as max_version
+      FROM ssnews_prompt_versions 
+      WHERE template_id = ?
+    `, [templateId]);
+    
+    const nextVersion = (maxVersionResult[0]?.max_version || 0) + 1;
+    
+    // Create new version
+    const versionResult = await db.query(`
+      INSERT INTO ssnews_prompt_versions
+      (template_id, version_number, prompt_content, system_message, notes, is_current, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, 0, 'user', NOW())
+    `, [templateId, nextVersion, promptContent, systemMessage || '', notes || '']);
+    
+    res.json({
+      success: true,
+      versionId: versionResult.insertId,
+      versionNumber: nextVersion,
+      message: `Version ${nextVersion} created successfully`
+    });
+  } catch (error) {
+    console.error('❌ Error creating template version:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Set current version
+app.put('/api/prompts/templates/:templateId/versions/:versionId/current', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { templateId, versionId } = req.params;
+    
+    // Set all versions to not current
+    await db.query(`
+      UPDATE ssnews_prompt_versions 
+      SET is_current = 0 
+      WHERE template_id = ?
+    `, [templateId]);
+    
+    // Set specified version as current
+    await db.query(`
+      UPDATE ssnews_prompt_versions 
+      SET is_current = 1 
+      WHERE version_id = ? AND template_id = ?
+    `, [versionId, templateId]);
+    
+    res.json({
+      success: true,
+      message: 'Current version updated successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error setting current version:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test prompt template
+app.post('/api/prompts/templates/:templateId/versions/:versionId/test', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { templateId, versionId } = req.params;
+    const { testVariables } = req.body;
+    
+    // Get the version details
+    const version = await db.query(`
+      SELECT prompt_content, system_message
+      FROM ssnews_prompt_versions 
+      WHERE version_id = ? AND template_id = ?
+    `, [versionId, templateId]);
+    
+    if (!version.length) {
+      return res.status(404).json({ error: 'Template version not found' });
+    }
+    
+    let processedPrompt = version[0].prompt_content;
+    
+    // Replace variables in prompt if provided
+    if (testVariables) {
+      for (const [key, value] of Object.entries(testVariables)) {
+        const regex = new RegExp(`\\{${key}\\}`, 'g');
+        processedPrompt = processedPrompt.replace(regex, value);
+      }
+    }
+    
+    // For testing purposes, just return the processed prompt
+    // In a real implementation, you might call the AI service here
+    res.json({
+      success: true,
+      result: {
+        processedPrompt,
+        systemMessage: version[0].system_message,
+        testVariables,
+        message: 'This is a test response. In production, this would call the AI service.'
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error testing prompt template:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reorder templates
+app.put('/api/prompts/templates/reorder', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { accountId } = req.accountContext;
+    const { order } = req.body;
+    
+    if (!order || !Array.isArray(order)) {
+      return res.status(400).json({ error: 'Order array is required' });
+    }
+    
+    // Update execution order for each template
+    for (const update of order) {
+      await db.query(`
+        UPDATE ssnews_prompt_templates 
+        SET execution_order = ?, updated_at = NOW()
+        WHERE template_id = ? AND account_id = ?
+      `, [update.executionOrder, update.templateId, accountId]);
+    }
+    
+    console.log(`✅ Updated template order for account ${accountId}`);
+    
+    res.json({
+      success: true,
+      message: 'Template order updated successfully',
+      updatedCount: order.length
+    });
+  } catch (error) {
+    console.error('❌ Error reordering templates:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Initialize default prompt templates for account
+app.post('/api/prompts/templates/initialize-defaults', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { accountId } = req.accountContext;
+    
+    console.log(`🔧 Initializing default prompt templates for account ${accountId}`);
+    
+    // Check if account already has templates
+    const existingTemplates = await db.query(`
+      SELECT COUNT(*) as count
+      FROM ssnews_prompt_templates 
+      WHERE account_id = ? AND is_active = 1
+    `, [accountId]);
+    
+    if (existingTemplates[0]?.count > 0) {
+      return res.json({
+        success: true,
+        message: `Account already has ${existingTemplates[0].count} prompt templates`,
+        templatesCount: existingTemplates[0].count,
+        accountId
+      });
+    }
+    
+    // Default templates to create
+    const defaultTemplates = [
+      {
+        name: 'Article Analyzer',
+        category: 'analysis',
+        description: 'Analyzes articles for relevance and generates summaries',
+        execution_order: 1,
+        prompt_content: `Analyze this news article for relevance to Christian audiences and Eden.co.uk's mission. Provide a relevance score and detailed analysis.
+
+News Article:
+{article_content}
+
+Please provide:
+1. Relevance score (0.0 to 1.0)
+2. Summary (2-3 sentences)
+3. Key themes
+4. Potential Christian perspectives
+5. Recommended content approach
+
+Focus on stories that relate to faith, values, social issues, or topics that would interest Christian readers.`,
+        system_message: 'You are an AI analyst specializing in Christian content curation. Evaluate content for its relevance and potential impact on Christian audiences.'
+      },
+      {
+        name: 'Social Media Post',
+        category: 'social_media',
+        description: 'Creates social media content for various platforms',
+        execution_order: 2,
+        prompt_content: `Create social media content based on this news article. Generate posts for different platforms that are engaging and reflect Christian values.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Generate JSON with:
+{
+  "facebook": {
+    "text": "150-200 words Facebook post",
+    "hashtags": ["#Christian", "#Faith"]
+  },
+  "instagram": {
+    "text": "100-150 words Instagram caption",
+    "hashtags": ["#Christian", "#Faith", "#Hope"]
+  },
+  "linkedin": {
+    "text": "Professional LinkedIn post",
+    "hashtags": ["#Christian", "#Leadership"]
+  }
+}
+
+Each post should be encouraging, include relevant scripture if appropriate, and maintain Eden.co.uk's hopeful tone.`,
+        system_message: 'You are a social media manager for Eden.co.uk. Create engaging, encouraging Christian content that inspires and uplifts followers.'
+      },
+      {
+        name: 'Blog Post Generator',
+        category: 'blog_post',
+        description: 'Generates engaging blog posts from news articles',
+        execution_order: 3,
+        prompt_content: `Create an engaging blog post based on this news article. The blog post should be warm, encouraging, and reflect Christian values. Include relevant Bible verses where appropriate and maintain a hopeful tone throughout.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Please write a blog post that:
+- Has an engaging title
+- Is 800-1200 words long
+- Includes 2-3 relevant Bible verses
+- Maintains Eden.co.uk's warm, encouraging tone
+- Ends with a call to action or reflection question`,
+        system_message: 'You are a Christian content writer for Eden.co.uk, a platform that shares encouraging Christian content. Your writing should be warm, hopeful, and biblically grounded.'
+      },
+      {
+        name: 'Video Script Creator',
+        category: 'video_script',
+        description: 'Generates video scripts for different durations',
+        execution_order: 4,
+        prompt_content: `Create a video script based on this news article. The script should be engaging, encouraging, and suitable for Christian audiences.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Social Media Output:
+{social_media_output}
+
+Script Requirements:
+- Duration: 60 seconds
+- Include introduction, main content, and conclusion
+- Maintain conversational, warm tone
+- Include relevant Bible verses where appropriate
+- End with encouragement or call to action
+
+Return JSON format:
+{
+  "title": "Video title",
+  "script": "Full script with scene directions in [brackets]",
+  "duration": 60,
+  "visualSuggestions": ["Visual suggestion 1", "Visual suggestion 2"]
+}`,
+        system_message: 'You are a video script writer for Eden.co.uk. Create engaging, biblically-grounded content that encourages and inspires viewers.'
+      },
+      {
+        name: 'Prayer Points Generator',
+        category: 'prayer',
+        description: 'Creates prayer points based on news articles and current events',
+        execution_order: 5,
+        prompt_content: `Create 5 prayer points based on this news article. Each prayer point should be 15-25 words and cover different aspects: people affected, healing, guidance, hope, and justice.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Format each prayer point as a separate paragraph. Make them specific to the article content while maintaining a hopeful, faith-filled tone.`,
+        system_message: 'You are a prayer coordinator for Eden.co.uk. Create thoughtful, biblically-grounded prayer points that help people pray meaningfully about current events.'
+      },
+      {
+        name: 'Image Generation Prompts',
+        category: 'image_generation',
+        description: 'Generates prompts for AI image creation',
+        execution_order: 6,
+        prompt_content: `Create detailed image generation prompts based on this content to accompany the article and social media posts.
+
+News Article:
+{article_content}
+
+Analysis Output:
+{analysis_output}
+
+Generate 3 different image prompts:
+1. Hero image for the article (inspirational, relevant to content)
+2. Social media image (engaging, shareable)
+3. Background/texture image (subtle, supportive)
+
+Each prompt should be detailed and specify style, mood, colors, and composition.`,
+        system_message: 'You are a visual content creator for Eden.co.uk. Create image prompts that are inspirational, relevant, and visually appealing for Christian audiences.'
+      }
+    ];
+    
+    const createdTemplates = [];
+    
+    // Create each template
+    for (const template of defaultTemplates) {
+      try {
+        // Create template
+        const templateResult = await db.query(`
+          INSERT INTO ssnews_prompt_templates
+          (account_id, name, description, category, execution_order, is_active, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW())
+        `, [accountId, template.name, template.description, template.category, template.execution_order]);
+        
+        const templateId = templateResult.insertId;
+        
+        // Create initial version
+        await db.query(`
+          INSERT INTO ssnews_prompt_versions
+          (template_id, version_number, prompt_content, system_message, is_current, created_by, created_at)
+          VALUES (?, 1, ?, ?, 1, 'system', NOW())
+        `, [templateId, template.prompt_content, template.system_message]);
+        
+        createdTemplates.push({
+          templateId,
+          name: template.name,
+          category: template.category
+        });
+        
+        console.log(`✅ Created template: ${template.name} (${template.category})`);
+        
+      } catch (error) {
+        console.error(`❌ Failed to create template ${template.name}:`, error.message);
+      }
+    }
+    
+    console.log(`🎉 Initialized ${createdTemplates.length} default templates for account ${accountId}`);
+    
+    res.json({
+      success: true,
+      message: `Successfully created ${createdTemplates.length} default prompt templates`,
+      templates: createdTemplates,
+      accountId
+    });
+    
+  } catch (error) {
+    console.error('❌ Error initializing default templates:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

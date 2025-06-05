@@ -686,7 +686,7 @@ class ContentGenerator {
    * This replaces the hardcoded social/video/prayer methods
    */
   async generateAllConfiguredContent(article, blogId, accountId = null) {
-    console.log('🎨 Generating all configured content types with workflow chaining...');
+    console.log(`🎨 Generating all configured content types with workflow chaining for account ${accountId}...`);
     
     try {
       // Get workflow prompts in execution order
@@ -694,6 +694,18 @@ class ContentGenerator {
       const workflowSteps = await promptManager.getWorkflowPrompts(accountId, {
         article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
       });
+      
+      console.log(`📋 Found ${workflowSteps.length} workflow steps for account ${accountId}`);
+      
+      if (workflowSteps.length === 0) {
+        console.log(`⚠️ No prompt templates found for account ${accountId}. Content generation will be skipped.`);
+        console.log(`💡 Tip: Create prompt templates in the Prompt Management interface to enable content generation.`);
+        return {
+          _noTemplatesFound: true,
+          _accountId: accountId,
+          _message: 'No prompt templates configured for this account'
+        };
+      }
       
       const results = {};
       const contentTypeMap = {};

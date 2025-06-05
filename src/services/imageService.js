@@ -1074,8 +1074,10 @@ class ImageService {
     console.log(`🎨 Processing Ideogram image for content ${contentId}...`);
 
     try {
-      // Generate filename for the image
-      const filename = `ideogram-${contentId}-${Date.now()}.jpg`;
+      // Generate unique filename for the image (avoid duplicates when processing multiple images)
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substr(2, 9);
+      const filename = `ideogram-${contentId}-${timestamp}-${randomId}.jpg`;
       
       // Upload to Sirv CDN
       const sirvUrl = await this.uploadToSirv(ideogramImage.url, filename);

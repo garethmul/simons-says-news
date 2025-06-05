@@ -16,7 +16,7 @@ import PromptManagement from './PromptManagement';
 import AccountUserManagement from './AccountUserManagement';
 import ImageGenerationSettings from './ImageGenerationSettings';
 import LogViewer from './LogViewer';
-import DetailModal from './content/DetailModal';
+import DynamicDetailModal from './content/DynamicDetailModal';
 import { 
   RefreshCw, 
   Zap,
@@ -648,7 +648,7 @@ const ProjectEden = () => {
         </div>
 
         {/* Modals */}
-        <DetailModal
+        <DynamicDetailModal
           showModal={showDetailModal}
           selectedContent={selectedContent}
           onClose={closeDetailModal}
