@@ -729,7 +729,8 @@ class ContentGenerator {
           const aiContent = await this.generateAIContentFromTemplateWithWorkflow(
             step, 
             stepOutputs, 
-            blogId
+            blogId,
+            accountId
           );
           
           // Parse and structure the content according to the storage schema
@@ -1057,7 +1058,7 @@ class ContentGenerator {
   /**
    * Generate AI content for workflow step with variable substitution
    */
-  async generateAIContentFromTemplateWithWorkflow(step, variables, blogId) {
+  async generateAIContentFromTemplateWithWorkflow(step, variables, blogId, accountId = null) {
     try {
       // Substitute all available variables in the prompt
       let prompt = step.prompt;

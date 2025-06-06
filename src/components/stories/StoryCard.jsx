@@ -83,7 +83,7 @@ const StoryCard = ({
               />
             ) : null;
           })()}
-          <CardTitle className="text-lg flex-1">{story.title}</CardTitle>
+          <CardTitle className="text-lg flex-1">#{story.article_id} {story.title}</CardTitle>
           <Badge variant="outline" className="text-xs">
             #{displayIndex}
           </Badge>

@@ -1628,7 +1628,7 @@ app.get('/api/eden/content/types', accountContext, async (req, res) => {
       WHERE account_id = ? AND is_active = 1
       ORDER BY category ASC
     `, [accountId]);
-
+    
     // Define content type mapping with proper UI configurations
     const categoryIconMap = {
       'analysis': 'BarChart3',
@@ -1681,10 +1681,10 @@ app.get('/api/eden/content/types', accountContext, async (req, res) => {
 
     // Add the main article type (always present)
     const articleType = {
-      id: 'article',
+        id: 'article',
       name: 'Main Content',
-      icon: 'FileText',
-      category: 'blog',
+        icon: 'FileText',
+        category: 'blog',
       description: 'Main blog article content',
       template: 'Blog Post Generator',
       order: 0,
@@ -1856,18 +1856,18 @@ app.get('/api/eden/content/story/:storyId/all', accountContext, async (req, res)
     let dynamicContent = [];
     try {
       dynamicContent = await db.query(`
-        SELECT 
-          content_id,
-          prompt_category,
-          content_data,
-          metadata,
-          status,
-          created_at,
-          updated_at
-        FROM ssnews_generated_content 
-        WHERE account_id = ? AND based_on_gen_article_id = ?
-        ORDER BY prompt_category ASC, created_at DESC
-      `, [accountId, storyId]);
+      SELECT 
+        content_id,
+        prompt_category,
+        content_data,
+        metadata,
+        status,
+        created_at,
+        updated_at
+      FROM ssnews_generated_content 
+      WHERE account_id = ? AND based_on_gen_article_id = ?
+      ORDER BY prompt_category ASC, created_at DESC
+    `, [accountId, storyId]);
     } catch (error) {
       console.log('📋 Generic content table not available, using legacy format');
     }
@@ -1898,13 +1898,13 @@ app.get('/api/eden/content/story/:storyId/all', accountContext, async (req, res)
         SELECT 
           gen_social_id as content_id,
           'social_media' as prompt_category,
-          JSON_OBJECT('platform', platform, 'text', text_draft) as content_data,
-          JSON_OBJECT('platform', platform) as metadata,
-          status,
-          created_at,
-          updated_at
-        FROM ssnews_generated_social_posts 
-        WHERE account_id = ? AND based_on_gen_article_id = ?
+        JSON_OBJECT('platform', platform, 'text', text_draft) as content_data,
+        JSON_OBJECT('platform', platform) as metadata,
+        status,
+        created_at,
+        updated_at
+      FROM ssnews_generated_social_posts 
+      WHERE account_id = ? AND based_on_gen_article_id = ?
         ORDER BY created_at ASC
       `, [accountId, storyId]);
       
@@ -1912,20 +1912,20 @@ app.get('/api/eden/content/story/:storyId/all', accountContext, async (req, res)
     } catch (error) {
       console.log('📋 Social posts table query failed, skipping');
     }
-
+      
     try {
       // Get video scripts
       const videoScripts = await db.query(`
-        SELECT 
+      SELECT 
           gen_video_script_id as content_id,
           'video_script' as prompt_category,
-          JSON_OBJECT('title', title, 'script', script_draft, 'duration_target_seconds', duration_target_seconds) as content_data,
+        JSON_OBJECT('title', title, 'script', script_draft, 'duration_target_seconds', duration_target_seconds) as content_data,
           JSON_OBJECT('duration', duration_target_seconds, 'title', title) as metadata,
-          status,
-          created_at,
-          updated_at
-        FROM ssnews_generated_video_scripts 
-        WHERE account_id = ? AND based_on_gen_article_id = ?
+        status,
+        created_at,
+        updated_at
+      FROM ssnews_generated_video_scripts 
+      WHERE account_id = ? AND based_on_gen_article_id = ?
         ORDER BY duration_target_seconds ASC
       `, [accountId, storyId]);
       
@@ -1942,16 +1942,16 @@ app.get('/api/eden/content/story/:storyId/all', accountContext, async (req, res)
       
       if (tableExists.length > 0) {
         const prayerPoints = await db.query(`
-          SELECT 
-            prayer_point_id as content_id,
+      SELECT 
+        prayer_point_id as content_id,
             'prayer' as prompt_category,
             JSON_OBJECT('order_number', order_number, 'prayer_text', prayer_text, 'theme', theme) as content_data,
             JSON_OBJECT('order', order_number, 'theme', theme) as metadata,
-            status,
-            created_at,
-            updated_at
-          FROM ssnews_generated_prayer_points 
-          WHERE account_id = ? AND based_on_gen_article_id = ?
+        status,
+        created_at,
+        updated_at
+      FROM ssnews_generated_prayer_points 
+      WHERE account_id = ? AND based_on_gen_article_id = ?
           ORDER BY order_number ASC
         `, [accountId, storyId]);
         
@@ -2071,8 +2071,8 @@ app.get('/api/eden/content/story/:storyId/all', accountContext, async (req, res)
     console.log(`✅ Found ${parsedContent.length} content items across ${contentCategories.length} categories with content`);
     console.log(`📋 Total categories available: ${finalCategories.join(', ')}`);
 
-    res.json({
-      success: true,
+      res.json({
+        success: true,
       content: parsedContent,
       storyId: parseInt(storyId),
       accountId,
@@ -2531,16 +2531,16 @@ app.get('/api/eden/images/ideogram/options', accountContext, async (req, res) =>
       styles: styles,
       aspectRatios: aspectRatios,
       resolutions: resolutions,
-      renderingSpeeds: [
+        renderingSpeeds: [
         { value: 'TURBO', label: 'Turbo (Fastest)' },
-        { value: 'DEFAULT', label: 'Default' },
+          { value: 'DEFAULT', label: 'Default' },
         { value: 'QUALITY', label: 'Quality (Slowest, Best)' }
-      ],
-      magicPromptOptions: [
-        { value: 'AUTO', label: 'Auto' },
-        { value: 'ON', label: 'On' },
-        { value: 'OFF', label: 'Off' }
-      ],
+        ],
+        magicPromptOptions: [
+          { value: 'AUTO', label: 'Auto' },
+          { value: 'ON', label: 'On' },
+          { value: 'OFF', label: 'Off' }
+        ],
       numImagesOptions: [1, 2, 3, 4, 5, 6, 7, 8],
       modelVersion: modelVersion
     };

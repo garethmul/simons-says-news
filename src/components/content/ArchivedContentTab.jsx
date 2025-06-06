@@ -22,6 +22,8 @@ const ArchivedContentTab = ({
   loading,
   onReturnToApproved,
   onReview,
+  onImageClick,
+  onRefreshContent,
   isActionLoading
 }) => {
   // Dynamic content types
@@ -185,6 +187,8 @@ const ArchivedContentTab = ({
                 stats={stats}
                 onReturnToApproved={onReturnToApproved}
                 onReview={onReview}
+                onImageClick={onImageClick}
+                onRefreshContent={onRefreshContent}
                 isActionLoading={isActionLoading}
               />
 
@@ -226,6 +230,8 @@ const ContentList = ({
   stats,
   onReturnToApproved,
   onReview,
+  onImageClick,
+  onRefreshContent,
   isActionLoading
 }) => (
   <div className="space-y-4">
@@ -242,6 +248,8 @@ const ContentList = ({
         index={index}
         onReview={onReview}
         onReturnToApproved={onReturnToApproved}
+        onImageClick={onImageClick}
+        onRefreshContent={onRefreshContent}
         showApprovalActions={false}
         showPublishActions={false}
         showArchivedActions={true}

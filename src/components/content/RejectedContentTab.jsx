@@ -23,6 +23,8 @@ const RejectedContentTab = ({
   onReturnToReview,
   onRegenerate,
   onReview,
+  onImageClick,
+  onRefreshContent,
   isActionLoading
 }) => {
   // Dynamic content types
@@ -187,6 +189,8 @@ const RejectedContentTab = ({
                 onReturnToReview={onReturnToReview}
                 onRegenerate={onRegenerate}
                 onReview={onReview}
+                onImageClick={onImageClick}
+                onRefreshContent={onRefreshContent}
                 isActionLoading={isActionLoading}
               />
 
@@ -229,6 +233,8 @@ const ContentList = ({
   onReturnToReview,
   onRegenerate,
   onReview,
+  onImageClick,
+  onRefreshContent,
   isActionLoading
 }) => (
   <div className="space-y-4">
@@ -246,6 +252,8 @@ const ContentList = ({
         onReview={onReview}
         onReturnToReview={onReturnToReview}
         onRegenerate={onRegenerate}
+        onImageClick={onImageClick}
+        onRefreshContent={onRefreshContent}
         showApprovalActions={false}
         showPublishActions={false}
         showRejectedActions={true}

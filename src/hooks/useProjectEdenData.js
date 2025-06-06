@@ -167,8 +167,13 @@ export const useProjectEdenData = () => {
   }, [selectedAccount, hasAccess, withAccountContext, permissionsLoading]);
 
   // Fetch data for specific tab (lazy loading)
-  const fetchTabData = useCallback(async (tabName) => {
-    if (!selectedAccount || permissionsLoading || !hasAccess || loadedTabs.has(tabName)) {
+  const fetchTabData = useCallback(async (tabName, forceRefresh = false) => {
+    if (!selectedAccount || permissionsLoading || !hasAccess) {
+      return;
+    }
+    
+    // Skip if already loaded and not forcing refresh
+    if (loadedTabs.has(tabName) && !forceRefresh) {
       return;
     }
 
@@ -179,7 +184,7 @@ export const useProjectEdenData = () => {
       
       switch (tabName) {
         case 'review':
-          if (!loadedTabs.has('review')) {
+          if (!loadedTabs.has('review') || forceRefresh) {
             const reviewResponse = await fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?limit=20`);
             if (reviewResponse.ok) {
               const reviewData = await reviewResponse.json();
@@ -191,7 +196,7 @@ export const useProjectEdenData = () => {
           break;
           
         case 'approved':
-          if (!loadedTabs.has('approved')) {
+          if (!loadedTabs.has('approved') || forceRefresh) {
             const approvedResponse = await fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=approved&limit=20`);
             if (approvedResponse.ok) {
               const approvedData = await approvedResponse.json();
@@ -203,7 +208,7 @@ export const useProjectEdenData = () => {
           break;
           
         case 'archived':
-          if (!loadedTabs.has('archived')) {
+          if (!loadedTabs.has('archived') || forceRefresh) {
             const archivedResponse = await fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=archived&limit=20`);
             if (archivedResponse.ok) {
               const archivedData = await archivedResponse.json();
@@ -215,7 +220,7 @@ export const useProjectEdenData = () => {
           break;
           
         case 'rejected':
-          if (!loadedTabs.has('rejected')) {
+          if (!loadedTabs.has('rejected') || forceRefresh) {
             const rejectedResponse = await fetchWithAccountContext(`${API_ENDPOINTS.CONTENT_REVIEW}?status=rejected&limit=20`);
             if (rejectedResponse.ok) {
               const rejectedData = await rejectedResponse.json();
@@ -227,7 +232,7 @@ export const useProjectEdenData = () => {
           break;
           
         case 'articles':
-          if (!loadedTabs.has('articles')) {
+          if (!loadedTabs.has('articles') || forceRefresh) {
             const articlesResponse = await fetchWithAccountContext(`${API_ENDPOINTS.ALL_ARTICLES}?limit=100`); // Reduced from 1000
             if (articlesResponse.ok) {
               const articlesData = await articlesResponse.json();
@@ -243,7 +248,7 @@ export const useProjectEdenData = () => {
           break;
           
         case 'bookmarks':
-          if (!loadedTabs.has('bookmarks') && currentUser?.uid) {
+          if ((!loadedTabs.has('bookmarks') || forceRefresh) && currentUser?.uid) {
             const bookmarksResponse = await fetchWithAccountContext(`${API_ENDPOINTS.BOOKMARKS}/ids?userId=${currentUser.uid}`);
             if (bookmarksResponse.ok) {
               const data = await bookmarksResponse.json();

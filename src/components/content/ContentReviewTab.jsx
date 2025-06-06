@@ -24,6 +24,8 @@ const ContentReviewTab = ({
   onReject,
   onReview,
   onRegenerate,
+  onImageClick,
+  onRefreshContent,
   isActionLoading
 }) => {
   // Dynamic content types
@@ -187,6 +189,8 @@ const ContentReviewTab = ({
                 onReject={onReject}
                 onReview={onReview}
                 onRegenerate={onRegenerate}
+                onImageClick={onImageClick}
+                onRefreshContent={onRefreshContent}
                 loading={loading}
                 isActionLoading={isActionLoading}
               />
@@ -231,6 +235,8 @@ const ContentList = ({
   onReject,
   onReview,
   onRegenerate,
+  onImageClick,
+  onRefreshContent,
   loading,
   isActionLoading
 }) => (
@@ -250,6 +256,8 @@ const ContentList = ({
         onReject={onReject}
         onReview={onReview}
         onRegenerate={onRegenerate}
+        onImageClick={onImageClick}
+        onRefreshContent={onRefreshContent}
         showApprovalActions={true}
         showPublishActions={false}
         loading={loading}

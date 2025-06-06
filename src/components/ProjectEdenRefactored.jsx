@@ -21,7 +21,8 @@ import {
   RefreshCw, 
   Zap,
   Terminal,
-  LogOut
+  LogOut,
+  X
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjectEdenData } from '../hooks/useProjectEdenData';
@@ -40,6 +41,143 @@ import {
 } from '../utils/helpers';
 import { useAccount } from '../contexts/AccountContext';
 import AccountSwitcher from './AccountSwitcher';
+
+/**
+ * Image Viewer Modal Component
+ * Displays images in a full-screen modal with navigation
+ */
+const ImageViewerModal = ({ images, selectedIndex, metadata, onClose, onIndexChange }) => {
+  const [currentIndex, setCurrentIndex] = useState(selectedIndex);
+
+  // Handle keyboard navigation
+  useEffect(() => {
+    const handleKeydown = (e) => {
+      switch (e.key) {
+        case 'Escape':
+          onClose();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          goToPrevious();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          goToNext();
+          break;
+      }
+    };
+
+    document.addEventListener('keydown', handleKeydown);
+    return () => document.removeEventListener('keydown', handleKeydown);
+  }, [currentIndex]);
+
+  // Update currentIndex when selectedIndex changes
+  useEffect(() => {
+    setCurrentIndex(selectedIndex);
+  }, [selectedIndex]);
+
+  const goToPrevious = () => {
+    const newIndex = currentIndex > 0 ? currentIndex - 1 : images.length - 1;
+    setCurrentIndex(newIndex);
+    onIndexChange(newIndex);
+  };
+
+  const goToNext = () => {
+    const newIndex = currentIndex < images.length - 1 ? currentIndex + 1 : 0;
+    setCurrentIndex(newIndex);
+    onIndexChange(newIndex);
+  };
+
+  const currentImage = images[currentIndex];
+
+  if (!currentImage) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center">
+      <div className="relative w-full h-full flex flex-col">
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 bg-black bg-opacity-50 text-white">
+          <div>
+            <h3 className="text-lg font-semibold">
+              Image {currentIndex + 1} of {images.length}
+            </h3>
+            <p className="text-sm text-gray-200">{currentImage.altText}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-white hover:text-gray-300 transition-colors"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        {/* Main Image Display */}
+        <div className="flex-1 flex items-center justify-center p-8 bg-gray-900">
+          <div className="relative max-w-full max-h-full">
+            <img
+              src={currentImage.sirvUrl}
+              alt={currentImage.altText}
+              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+              onError={(e) => {
+                e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMzMzIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNHB4IiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+SW1hZ2UgZXJyb3I8L3RleHQ+PC9zdmc+';
+              }}
+            />
+
+            {/* Navigation arrows overlay */}
+            {images.length > 1 && (
+              <>
+                <button
+                  onClick={goToPrevious}
+                  className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-75 text-white p-3 rounded-full transition-all"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={goToNext}
+                  className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-75 text-white p-3 rounded-full transition-all"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Thumbnail Strip */}
+        {images.length > 1 && (
+          <div className="bg-black bg-opacity-50 p-4">
+            <div className="flex gap-2 justify-center overflow-x-auto max-w-full">
+              {images.map((image, index) => (
+                <button
+                  key={index}
+                  onClick={() => {
+                    setCurrentIndex(index);
+                    onIndexChange(index);
+                  }}
+                  className={`flex-shrink-0 w-16 h-16 rounded overflow-hidden border-2 transition-all ${
+                    index === currentIndex 
+                      ? 'border-blue-400 opacity-100' 
+                      : 'border-transparent opacity-60 hover:opacity-80'
+                  }`}
+                >
+                  <img
+                    src={image.sirvUrl}
+                    alt={`Thumbnail ${index + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 /**
  * Refactored Project Eden Main Component
@@ -81,12 +219,13 @@ const ProjectEden = () => {
     isActionLoading,
     isContentGenerationLoading
   } = useContentActions(() => {
-    // Refresh specific tab data instead of all data
-    if (activeTab === TAB_ROUTES.REVIEW) fetchTabData('review');
-    else if (activeTab === TAB_ROUTES.APPROVED) fetchTabData('approved');
-    else if (activeTab === TAB_ROUTES.ARCHIVED) fetchTabData('archived');
-    else if (activeTab === TAB_ROUTES.REJECTED) fetchTabData('rejected');
-    else if (activeTab === TAB_ROUTES.STORIES) fetchTabData('articles');
+    // Force refresh specific tab data after actions
+    console.log(`🔄 Refreshing data for active tab: ${activeTab}`);
+    if (activeTab === TAB_ROUTES.REVIEW) fetchTabData('review', true);
+    else if (activeTab === TAB_ROUTES.APPROVED) fetchTabData('approved', true);
+    else if (activeTab === TAB_ROUTES.ARCHIVED) fetchTabData('archived', true);
+    else if (activeTab === TAB_ROUTES.REJECTED) fetchTabData('rejected', true);
+    else if (activeTab === TAB_ROUTES.STORIES) fetchTabData('articles', true);
   });
 
   const {
@@ -117,6 +256,12 @@ const ProjectEden = () => {
   const [showLogViewer, setShowLogViewer] = useState(false);
   const [jobs, setJobs] = useState([]);
   const [rejectedStories, setRejectedStories] = useState(new Set());
+  
+  // Image browser modal state
+  const [showImageBrowserModal, setShowImageBrowserModal] = useState(false);
+  const [imageBrowserImages, setImageBrowserImages] = useState([]);
+  const [imageBrowserIndex, setImageBrowserIndex] = useState(0);
+  const [imageBrowserContentId, setImageBrowserContentId] = useState(null);
   
   // Loading overlay state with minimum display time
   const [showLoadingOverlay, setShowLoadingOverlay] = useState(false);
@@ -283,6 +428,49 @@ const ProjectEden = () => {
     setSelectedContent(null);
     // Update URL to remove content ID
     closeModalAndUpdateUrl(activeTab);
+  };
+
+  // Image browser modal handlers
+  const handleImageClick = (images, imageIndex, contentId) => {
+    console.log('🖼️ Opening image browser modal:', { imageIndex, contentId, imagesCount: images.length });
+    setImageBrowserImages(images);
+    setImageBrowserIndex(imageIndex);
+    setImageBrowserContentId(contentId);
+    setShowImageBrowserModal(true);
+  };
+
+  const closeImageBrowserModal = () => {
+    setShowImageBrowserModal(false);
+    setImageBrowserImages([]);
+    setImageBrowserIndex(0);
+    setImageBrowserContentId(null);
+  };
+
+  // Content refresh handler for automatic thumbnail updates
+  const handleRefreshContent = async (contentId) => {
+    console.log('🔄 Refreshing content after image generation:', contentId);
+    
+    // Refresh the current tab data to get updated images
+    switch (activeTab) {
+      case TAB_ROUTES.REVIEW:
+        await fetchTabData('review', true);
+        break;
+      case TAB_ROUTES.APPROVED:
+        await fetchTabData('approved', true);
+        break;
+      case TAB_ROUTES.ARCHIVED:
+        await fetchTabData('archived', true);
+        break;
+      case TAB_ROUTES.REJECTED:
+        await fetchTabData('rejected', true);
+        break;
+      default:
+        // For other tabs, just do a general refresh
+        await fetchTabData(activeTab === 'dashboard' ? 'review' : activeTab.replace(TAB_ROUTES.DASHBOARD, 'review'), true);
+        break;
+    }
+    
+    console.log(`✅ Content refreshed for ${activeTab} tab`);
   };
 
   // Progress modal handlers
@@ -542,6 +730,8 @@ const ProjectEden = () => {
                 onReject={rejectContent}
                 onReview={openDetailedReview}
                 onRegenerate={handleRegenerateContent}
+                onImageClick={handleImageClick}
+                onRefreshContent={handleRefreshContent}
                 isActionLoading={isActionLoading}
               />
             </TabsContent>
@@ -555,6 +745,8 @@ const ProjectEden = () => {
                 onReturnToReview={updateContentStatus}
                 onArchive={updateContentStatus}
                 onReview={openDetailedReview}
+                onImageClick={handleImageClick}
+                onRefreshContent={handleRefreshContent}
                 isActionLoading={isActionLoading}
               />
             </TabsContent>
@@ -566,6 +758,8 @@ const ProjectEden = () => {
                 loading={loading}
                 onReturnToApproved={updateContentStatus}
                 onReview={openDetailedReview}
+                onImageClick={handleImageClick}
+                onRefreshContent={handleRefreshContent}
                 isActionLoading={isActionLoading}
               />
             </TabsContent>
@@ -578,6 +772,8 @@ const ProjectEden = () => {
                 onReturnToReview={updateContentStatus}
                 onRegenerate={handleRegenerateContent}
                 onReview={openDetailedReview}
+                onImageClick={handleImageClick}
+                onRefreshContent={handleRefreshContent}
                 isActionLoading={isActionLoading}
               />
             </TabsContent>
@@ -662,6 +858,17 @@ const ProjectEden = () => {
           isActionLoading={isActionLoading}
           {...getModalActionProps()}
         />
+
+        {/* Image Browser Modal */}
+        {showImageBrowserModal && (
+          <ImageViewerModal
+            images={imageBrowserImages}
+            selectedIndex={imageBrowserIndex}
+            metadata={[]}
+            onClose={closeImageBrowserModal}
+            onIndexChange={setImageBrowserIndex}
+          />
+        )}
 
         <ProgressModal 
           isOpen={showProgressModal}

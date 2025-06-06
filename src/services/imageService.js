@@ -1074,6 +1074,25 @@ class ImageService {
     console.log(`🎨 Processing Ideogram image for content ${contentId}...`);
 
     try {
+      // If no accountId provided, try to get it from the content record
+      if (!accountId) {
+        console.log(`🔍 No accountId provided, looking up from content ${contentId}...`);
+        try {
+          const contentRecord = await db.query('SELECT account_id FROM ssnews_generated_articles WHERE gen_article_id = ?', [contentId]);
+          if (contentRecord.length > 0 && contentRecord[0].account_id) {
+            accountId = contentRecord[0].account_id;
+            console.log(`✅ Found accountId from content: ${accountId}`);
+          } else {
+            console.warn(`⚠️ No account_id found for content ${contentId}, using default account`);
+            // Set a default account ID if none found - this prevents the database error
+            accountId = '1'; // Default account ID
+          }
+        } catch (lookupError) {
+          console.warn(`⚠️ Failed to lookup accountId for content ${contentId}:`, lookupError.message);
+          accountId = '1'; // Default account ID as fallback
+        }
+      }
+
       // Generate unique filename for the image (avoid duplicates when processing multiple images)
       const timestamp = Date.now();
       const randomId = Math.random().toString(36).substr(2, 9);
@@ -1082,8 +1101,9 @@ class ImageService {
       // Upload to Sirv CDN
       const sirvUrl = await this.uploadToSirv(ideogramImage.url, filename);
       
-      // Store in database with enhanced metadata
+      // Store in database with enhanced metadata - always include account_id
       const imageData = {
+        account_id: accountId, // Always include account_id
         associated_content_type: 'gen_article',
         associated_content_id: contentId,
         source_api: 'ideogram',
@@ -1104,9 +1124,8 @@ class ImageService {
         })
       };
 
-      const imageId = accountId 
-        ? await db.insertWithAccount('ssnews_image_assets', imageData, accountId)
-        : await db.insert('ssnews_image_assets', imageData);
+      // Use regular insert since we're including account_id in the data
+      const imageId = await db.insert('ssnews_image_assets', imageData);
 
       console.log(`✅ Ideogram image processed and stored (ID: ${imageId})`);
 

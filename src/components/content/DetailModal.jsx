@@ -323,9 +323,14 @@ const DetailModal = ({
           {showApprovalActions && (
             <>
               <Button 
-                onClick={() => {
-                  onApprove(selectedContent.gen_article_id, selectedContent.content_type);
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onApprove(selectedContent.gen_article_id, selectedContent.content_type);
+                    onClose();
+                  } catch (error) {
+                    console.error('Error approving content:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -335,9 +340,14 @@ const DetailModal = ({
               </Button>
               <Button 
                 variant="destructive"
-                onClick={() => {
-                  onReject(selectedContent.gen_article_id, selectedContent.content_type);
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onReject(selectedContent.gen_article_id, selectedContent.content_type);
+                    onClose();
+                  } catch (error) {
+                    console.error('Error rejecting content:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -351,9 +361,14 @@ const DetailModal = ({
           {showPublishActions && (
             <>
               <Button 
-                onClick={() => {
-                  onPublish('article', selectedContent.gen_article_id, 'published');
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onPublish('article', selectedContent.gen_article_id, 'published');
+                    onClose();
+                  } catch (error) {
+                    console.error('Error publishing content:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -363,9 +378,14 @@ const DetailModal = ({
               </Button>
               <Button 
                 variant="outline"
-                onClick={() => {
-                  onReturnToReview('article', selectedContent.gen_article_id, 'review_pending');
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onReturnToReview('article', selectedContent.gen_article_id, 'review_pending');
+                    onClose();
+                  } catch (error) {
+                    console.error('Error returning to review:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -375,9 +395,14 @@ const DetailModal = ({
               </Button>
               <Button 
                 variant="secondary"
-                onClick={() => {
-                  onArchive('article', selectedContent.gen_article_id, 'archived');
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onArchive('article', selectedContent.gen_article_id, 'archived');
+                    onClose();
+                  } catch (error) {
+                    console.error('Error archiving content:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -395,9 +420,14 @@ const DetailModal = ({
           {showRejectedActions && (
             <>
               <Button 
-                onClick={() => {
-                  onReturnToReview(selectedContent.gen_article_id, selectedContent.content_type);
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onReturnToReview(selectedContent.gen_article_id, selectedContent.content_type);
+                    onClose();
+                  } catch (error) {
+                    console.error('Error returning to review:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -407,9 +437,14 @@ const DetailModal = ({
               </Button>
               <Button 
                 variant="outline"
-                onClick={() => {
-                  onRegenerate(selectedContent);
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onRegenerate(selectedContent);
+                    onClose();
+                  } catch (error) {
+                    console.error('Error regenerating content:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -423,9 +458,14 @@ const DetailModal = ({
           {showArchivedActions && (
             <>
               <Button 
-                onClick={() => {
-                  onReturnToApproved('article', selectedContent.gen_article_id, 'approved');
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onReturnToApproved('article', selectedContent.gen_article_id, 'approved');
+                    onClose();
+                  } catch (error) {
+                    console.error('Error returning to approved:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -435,9 +475,14 @@ const DetailModal = ({
               </Button>
               <Button 
                 variant="outline"
-                onClick={() => {
-                  onRegenerate(selectedContent);
-                  onClose();
+                onClick={async () => {
+                  try {
+                    await onRegenerate(selectedContent);
+                    onClose();
+                  } catch (error) {
+                    console.error('Error regenerating content:', error);
+                    // Keep modal open on error so user can retry
+                  }
                 }}
                 className="flex items-center gap-2"
                 disabled={isUpdating}
@@ -816,7 +861,7 @@ const SourceArticleTab = ({ sourceArticle }) => {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>{sourceArticle.title}</CardTitle>
+              <CardTitle>#{sourceArticle.article_id || 'N/A'} {sourceArticle.title}</CardTitle>
               <CardDescription className="mt-2">
                 {sourceArticle.source_name} • {formatDate(sourceArticle.publication_date)}
               </CardDescription>

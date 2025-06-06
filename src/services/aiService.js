@@ -830,6 +830,11 @@ class AIService {
   }
 
   async generateGenericContentWithPrompt(prompt, systemMessage, category, generatedArticleId = null) {
+    // Special handling for image generation - use Ideogram API
+    if (category === 'image_generation') {
+      return await this.generateImageWithIdeogram(prompt, generatedArticleId);
+    }
+    
     return await this.generateWithPrompt(prompt, systemMessage, category, generatedArticleId);
   }
 
@@ -1011,6 +1016,74 @@ class AIService {
     } catch (error) {
       console.error('❌ AI alt text generation failed:', error.message);
       return "Christian faith and inspiration";
+    }
+  }
+
+  /**
+   * Generate image using Ideogram API for template-based workflow
+   */
+  async generateImageWithIdeogram(prompt, generatedArticleId = null) {
+    try {
+      console.log(`🖼️ Generating image with Ideogram for article ${generatedArticleId}...`);
+      console.log(`🎨 Image prompt: ${prompt.substring(0, 200)}...`);
+
+      // Import imageService dynamically to avoid circular dependencies
+      const { default: imageService } = await import('./imageService.js');
+
+      // Prepare options for Ideogram generation
+      const imageOptions = {
+        prompt: prompt.trim(),
+        aspectRatio: '16:9',  // Default for social media
+        styleType: 'GENERAL', // Good default for Christian content
+        renderingSpeed: 'DEFAULT',
+        magicPrompt: 'AUTO',  // Let AI enhance the prompt
+        numImages: 1,
+        modelVersion: 'v2'    // Reliable version
+      };
+
+      console.log(`🎯 Ideogram options: ${JSON.stringify(imageOptions)}`);
+
+      // Generate image using Ideogram
+      const generationResult = await imageService.generateIdeogramImage(imageOptions);
+
+      if (!generationResult || !generationResult.images || generationResult.images.length === 0) {
+        console.error('❌ No images returned from Ideogram');
+        return '';  // Return empty string to indicate no image generated
+      }
+
+      const primaryImage = generationResult.images[0];
+      console.log(`✅ Generated image: ${primaryImage.url}`);
+
+      // Process and store the image if we have a valid article ID
+      if (generatedArticleId && generatedArticleId !== 999) {
+        try {
+          const processedImage = await imageService.processIdeogramImageForContent(
+            primaryImage, 
+            generatedArticleId,
+            null // Will use default account context
+          );
+          
+          console.log(`📁 Image stored with ID: ${processedImage.id}`);
+          console.log(`🌐 CDN URL: ${processedImage.sirvUrl}`);
+
+          // Return a descriptive string about the generated image
+          return `Generated image: "${primaryImage.prompt}" (Style: ${primaryImage.styleType}, Resolution: ${primaryImage.resolution}, Sirv URL: ${processedImage.sirvUrl})`;
+        } catch (storageError) {
+          console.warn('⚠️ Failed to store image in database:', storageError.message);
+          
+          // Still return success info even if storage failed
+          return `Generated image: "${primaryImage.prompt}" (Style: ${primaryImage.styleType}, Resolution: ${primaryImage.resolution}, URL: ${primaryImage.url})`;
+        }
+      }
+
+      // Return image info without storage
+      return `Generated image: "${primaryImage.prompt}" (Style: ${primaryImage.styleType}, Resolution: ${primaryImage.resolution})`;
+
+    } catch (error) {
+      console.error('❌ Error generating image with Ideogram:', error);
+      
+      // Return empty string to indicate failure
+      return '';
     }
   }
 }

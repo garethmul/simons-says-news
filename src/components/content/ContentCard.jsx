@@ -61,6 +61,8 @@ const ContentCard = ({
   onReturnToApproved,
   onArchive,
   onRegenerate,
+  onImageClick,
+  onRefreshContent,
   showApprovalActions = true,
   showPublishActions = false,
   showRejectedActions = false,
@@ -88,10 +90,10 @@ const ContentCard = ({
   const contentTypeIcon = getContentTypeIcon(content.content_type);
 
   return (
-    <Card className={`${getBorderColor()} border-l-4 transition-all duration-300 ease-in-out ${
-      isUpdating ? 'opacity-60 pointer-events-none transform scale-98' : 'hover:shadow-md'
+    <Card className={`${getBorderColor()} border-l-4 transition-all duration-500 ease-in-out ${
+      isUpdating ? 'opacity-30 pointer-events-none transform scale-95 translate-x-4' : 'hover:shadow-md opacity-100 scale-100'
     } ${
-      isArchiving ? 'animate-pulse' : ''
+      isArchiving ? 'bg-yellow-50 border-yellow-300' : ''
     } ${className}`}>
       <CardHeader>
         <div className="flex items-start justify-between">
@@ -112,7 +114,11 @@ const ContentCard = ({
                   />
                 ) : null;
               })()}
-              <CardTitle className="text-lg">{content.title}</CardTitle>
+              <CardTitle className="text-lg">
+                <span className="text-blue-600 font-mono mr-2">Gen#{content.gen_article_id}</span>
+                <span className="text-gray-500 mr-2">from #{content.based_on_scraped_article_id || 'N/A'}</span>
+                {content.title}
+              </CardTitle>
               <Badge variant="outline" className="text-xs">#{index + 1}</Badge>
               {showRejectedActions && (
                 <Badge variant="destructive" className="text-xs">Rejected</Badge>
@@ -172,7 +178,12 @@ const ContentCard = ({
 
         {/* Generated Images Gallery */}
         {content.images && content.images.length > 0 && (
-          <ImageGallery images={content.images} contentId={content.gen_article_id} />
+          <ImageGallery 
+            images={content.images} 
+            contentId={content.gen_article_id} 
+            onImageClick={onImageClick}
+            onRefreshContent={onRefreshContent}
+          />
         )}
 
         {/* Action Buttons */}
@@ -213,7 +224,7 @@ const SourceArticleInfo = ({ sourceArticle }) => (
       </Badge>
     </div>
     <h4 className="text-sm font-medium text-gray-900 mb-1">
-      {sourceArticle.title}
+      #{sourceArticle.article_id || 'N/A'} {sourceArticle.title}
     </h4>
     <div className="flex items-center gap-4 text-xs text-gray-600 mb-2">
       <span className="flex items-center gap-1">
@@ -303,13 +314,19 @@ const AssociatedContent = ({ content }) => {
 /**
  * Image Gallery Component
  */
-const ImageGallery = ({ images, contentId }) => {
+const ImageGallery = ({ images, contentId, onImageClick, onRefreshContent }) => {
   // Sort images by creation date (most recent first)
   const sortedImages = [...images].sort((a, b) => {
     const dateA = new Date(a.created || a.created_at || 0);
     const dateB = new Date(b.created || b.created_at || 0);
     return dateB - dateA;
   });
+
+  const handleImageClick = (imageIndex) => {
+    if (onImageClick) {
+      onImageClick(sortedImages, imageIndex, contentId);
+    }
+  };
 
   return (
   <div className="mb-4 p-3 bg-gray-50 rounded-lg border">
@@ -326,6 +343,7 @@ const ImageGallery = ({ images, contentId }) => {
           key={`content-${contentId}-image-${image.id || imageIndex}`}
           image={image} 
           index={imageIndex} 
+          onClick={() => handleImageClick(imageIndex)}
         />
       ))}
     </div>
@@ -340,7 +358,7 @@ const ImageGallery = ({ images, contentId }) => {
 /**
  * Image Thumbnail Component
  */
-const ImageThumbnail = ({ image, index }) => (
+const ImageThumbnail = ({ image, index, onClick }) => (
   <div className="flex-shrink-0">
     <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-200 border hover:border-blue-300 transition-colors cursor-pointer">
       <img
@@ -348,7 +366,7 @@ const ImageThumbnail = ({ image, index }) => (
         alt={image.altText}
         className="w-full h-full object-cover hover:scale-105 transition-transform"
         loading="lazy"
-        onClick={() => window.open(image.sirvUrl, '_blank')}
+        onClick={onClick || (() => window.open(image.sirvUrl, '_blank'))}
         onError={(e) => {
           e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2YzZjRmNiIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTBweCIgZmlsbD0iIzY1NzM4OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPjwhLS0gZXJyb3IgLS0+PC90ZXh0Pjwvc3ZnPg==';
         }}
