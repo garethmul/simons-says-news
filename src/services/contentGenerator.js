@@ -53,92 +53,57 @@ class ContentGenerator {
   }
 
   async generateContentForStory(story, accountId = null) {
-    console.log(`🎨 Generating content for: ${story.title.substring(0, 50)}...`);
-    
+    let blogId = null;
     try {
-      // Use the full article text if available, otherwise fall back to summary
-      const sourceContent = story.full_text || story.summary_ai || story.title;
-      console.log(`📄 Using source content: ${sourceContent.substring(0, 100)}...`);
-      
-      // Generate Eden angle based on the full source content
-      const edenAngle = await aiService.generateEdenAngle(sourceContent, story.keywords_ai);
-      console.log(`💡 Eden angle: ${edenAngle.angle.substring(0, 50)}...`);
+      console.log(`[Workflow START] -------------------------------------------------`);
+      console.log(`[Workflow] 1. Processing Story: ${story.title.substring(0, 50)}...`);
 
-      // Create article object for AI service
-      const articleForAI = {
+      const article = {
         title: story.title,
-        full_text: sourceContent,
-        summary_ai: story.summary_ai,
-        source_name: story.source_name,
+        full_text: story.full_text || '',
+        summary_ai: story.summary_ai || '',
+        source_name: story.source_name || 'Unknown',
         url: story.url
       };
 
-      // Generate blog post - first create the article record to get an ID for logging
-      const blogId = await db.insertGeneratedArticle({
+      console.log(`[Workflow] 2. Creating initial article record...`);
+      const mainArticleData = {
         based_on_scraped_article_id: story.article_id,
         title: story.title,
-        body_draft: 'Generating...', // Temporary placeholder
+        body_draft: 'Processing...',
         content_type: 'blog',
-        word_count: 0,
-        suggested_eden_product_links: JSON.stringify([]),
         status: 'draft'
-      }, accountId);
-
-      // Now generate the blog post with the proper ID for logging
-      const blogPostContent = await aiService.generateBlogPost(articleForAI, blogId);
+      };
       
-      // Parse the blog post content if it's JSON, otherwise use as-is
-      let blogPost;
-      try {
-        blogPost = JSON.parse(blogPostContent);
-      } catch {
-        // If not JSON, create a simple structure
-        blogPost = {
-          title: story.title,
-          body: blogPostContent,
-          suggestedLinks: []
-        };
+      blogId = await db.insertWithAccount('ssnews_generated_articles', mainArticleData, accountId);
+      console.log(`[Workflow] 3. Main article record created (ID: ${blogId})`);
+
+      console.log(`[Workflow] 4. Starting full content generation workflow...`);
+      const generatedContent = await this.generateAllConfiguredContent(article, blogId, accountId);
+      console.log(`[Workflow] 5. Full workflow complete. Generated ${Object.keys(generatedContent).length - 3} content types.`); // -3 for metadata fields
+
+      console.log(`[Workflow] 6. Updating main article with generated blog content...`);
+      let blogPostContent = 'Content generation for blog post failed or was not configured.';
+      if (generatedContent && generatedContent.blog_post && generatedContent.blog_post[0] && generatedContent.blog_post[0].content) {
+        blogPostContent = generatedContent.blog_post[0].content;
       }
+      
+      const wordCount = this.countWords(blogPostContent);
 
-      // Update the article with the actual content - with account filtering
-      const updateData = {
-        title: blogPost.title,
-        body_draft: typeof blogPost.body === 'string' ? blogPost.body : JSON.stringify(blogPost),
-        word_count: this.countWords(blogPost.body || blogPostContent),
-        suggested_eden_product_links: JSON.stringify(blogPost.suggestedLinks || [])
-      };
+      await db.update('ssnews_generated_articles', 
+        { body_draft: blogPostContent, word_count: wordCount },
+        'gen_article_id = ?',
+        [blogId]
+      );
+      console.log(`[Workflow] 7. Main article record updated successfully.`);
+      
+      console.log(`[Workflow END] --------------------------------------------------`);
+      return { ...generatedContent, blogId, title: story.title };
 
-      if (accountId) {
-        await db.update('ssnews_generated_articles', updateData, 'gen_article_id = ? AND account_id = ?', [blogId, accountId]);
-      } else {
-        await db.update('ssnews_generated_articles', updateData, 'gen_article_id = ?', [blogId]);
-      }
-
-      console.log(`📝 Blog post created (ID: ${blogId})`);
-
-      // Generate all configured content types dynamically
-      const additionalContent = await this.generateAllConfiguredContent(articleForAI, blogId, accountId);
-
-      // Generate and associate images with account context
-      const images = await this.generateImagesWithAccount(blogPost, blogId, accountId);
-
-      // Mark original article as processed - with account filtering
-      if (accountId) {
-        await db.update('ssnews_scraped_articles', { status: 'processed' }, 'article_id = ? AND account_id = ?', [story.article_id, accountId]);
-      } else {
-        await db.update('ssnews_scraped_articles', { status: 'processed' }, 'article_id = ?', [story.article_id]);
-      }
-
-      return {
-        blogId,
-        blogPost,
-        ...additionalContent, // Spread the dynamic content
-        images,
-        originalStory: story
-      };
     } catch (error) {
-      console.error(`❌ Error generating content for story ${story.article_id}:`, error.message);
-      throw error;
+      console.error(`❌❌ [Workflow FAIL] Top-level error in generateContentForStory for story ID ${story.article_id}, BlogID: ${blogId}`);
+      console.error(error.stack);
+      return { blogId: blogId, error: error.message };
     }
   }
 
@@ -716,6 +681,7 @@ class ContentGenerator {
       // Execute workflow steps in order
       for (const step of workflowSteps) {
         try {
+          console.log(`Workflow Step ${step.executionOrder} Enter: ${step.category}`);
           console.log(`📋 Executing workflow step ${step.executionOrder}: ${step.name} (${step.category})`);
           
           // Get the current prompt configuration to understand storage schema
@@ -733,8 +699,25 @@ class ContentGenerator {
             accountId
           );
           
-          // Parse and structure the content according to the storage schema
-          const structuredData = this.parseContentToSchema(aiContent, config.storage_schema, step.category);
+          // --- FIX: Use the correct, category-specific parser ---
+          let structuredData;
+          switch (step.category) {
+            case 'prayer_points':
+            case 'prayer':
+              structuredData = this.parsePrayerPointsContent(aiContent);
+              break;
+            case 'social_media':
+            case 'social_posts':
+              structuredData = this.parseSocialMediaContent(aiContent);
+              break;
+            case 'video_script':
+            case 'video_scripts':
+              structuredData = this.parseVideoScriptContent(aiContent);
+              break;
+            default:
+              structuredData = this.parseContentToSchema(aiContent, config.storage_schema, step.category);
+              break;
+          }
           
           // Store in generic content table
           const contentId = await this.storeGenericContent(
@@ -771,7 +754,10 @@ class ContentGenerator {
           
         } catch (error) {
           console.error(`❌ Error in workflow step ${step.category}:`, error.message);
+          console.error(`Stack trace for ${step.category}:`, error.stack);
           results[step.category] = [];
+        } finally {
+          console.log(`Workflow Step ${step.executionOrder} Exit: ${step.category}`);
         }
       }
       
@@ -993,6 +979,7 @@ class ContentGenerator {
    * Store content in generic content table
    */
   async storeGenericContent(blogId, category, contentData, metadata, accountId) {
+    console.log(`➡️ ENTER: storeGenericContent for category: ${category}`);
     const storageData = {
       based_on_gen_article_id: blogId,
       prompt_category: category,
@@ -1005,10 +992,14 @@ class ContentGenerator {
       status: 'draft'
     };
 
+    let contentId;
     if (accountId) {
-      return await db.insertWithAccount('ssnews_generated_content', storageData, accountId);
+      contentId = await db.insertWithAccount('ssnews_generated_content', storageData, accountId);
+    } else {
+      contentId = await db.insert('ssnews_generated_content', storageData);
     }
-    return await db.insert('ssnews_generated_content', storageData);
+    console.log(`⬅️ EXIT: storeGenericContent for category: ${category}, Inserted ID: ${contentId}`);
+    return contentId;
   }
 
   /**
@@ -1119,6 +1110,17 @@ class ContentGenerator {
         case 'video_script':
         case 'video_scripts':
           return structuredData.map(item => item.script || item.text || '').join('\n\n');
+        
+        case 'image_generation':
+          // For image generation, return the structured prompts for debugging
+          console.log(`🖼️ DEBUG: Image generation prompt data:`, structuredData);
+          return structuredData.map(item => {
+            if (typeof item === 'string') {
+              console.log(`🖼️ DEBUG: Raw image prompt string:`, item.substring(0, 200));
+              return item;
+            }
+            return item.text || item.content || item.prompt || JSON.stringify(item);
+          }).join('\n\n');
         
         default:
           // Generic extraction - try common field names

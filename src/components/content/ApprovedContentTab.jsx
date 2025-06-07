@@ -37,6 +37,7 @@ const ApprovedContentTab = ({
   const [contentTypeFilter, setContentTypeFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [sortBy, setSortBy] = useState('approved_date');
+  const [sortDirection, setSortDirection] = useState('desc');
 
   // Get unique sources for filter options
   const sourceOptions = useMemo(() => {
@@ -66,22 +67,34 @@ const ApprovedContentTab = ({
       filtered = filtered.filter(content => content.source_name === sourceFilter);
     }
 
-    // Apply sorting
+    // Apply sorting with direction support
     filtered.sort((a, b) => {
+      let comparison = 0;
+      
       switch (sortBy) {
         case 'approved_date':
-          return new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
+          comparison = new Date(a.updated_at || a.created_at) - new Date(b.updated_at || b.created_at);
+          break;
         case 'created_date':
-          return new Date(b.created_at) - new Date(a.created_at);
+        case 'generation_time':
+          comparison = new Date(a.created_at) - new Date(b.created_at);
+          break;
         case 'title':
-          return (a.title || '').localeCompare(b.title || '');
+          comparison = (a.title || '').localeCompare(b.title || '');
+          break;
         case 'content_type':
-          return (a.content_type || '').localeCompare(b.content_type || '');
+          comparison = (a.content_type || '').localeCompare(b.content_type || '');
+          break;
         case 'source':
-          return (a.source_name || '').localeCompare(b.source_name || '');
+          comparison = (a.source_name || '').localeCompare(b.source_name || '');
+          break;
         default:
-          return new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
+          comparison = new Date(a.updated_at || a.created_at) - new Date(b.updated_at || b.created_at);
+          break;
       }
+      
+      // Apply sort direction
+      return sortDirection === 'desc' ? -comparison : comparison;
     });
 
     const itemsPerPage = PAGINATION_CONFIG.ARTICLES_PER_PAGE;
@@ -93,7 +106,7 @@ const ApprovedContentTab = ({
       totalContent: filtered.length,
       totalPages: Math.ceil(filtered.length / itemsPerPage)
     };
-  }, [approvedContent, searchText, contentTypeFilter, sourceFilter, sortBy, currentPage]);
+  }, [approvedContent, searchText, contentTypeFilter, sourceFilter, sortBy, sortDirection, currentPage]);
 
   // Reset page when filters change
   const handleFilterChange = (filterFn) => {
@@ -117,17 +130,30 @@ const ApprovedContentTab = ({
     }
   ];
 
-  const sortOptions = [{
+  const sortOptions = [
+    {
     value: sortBy,
     onChange: setSortBy,
+      placeholder: "Sort Field",
     options: [
       { value: 'approved_date', label: 'Sort by Date Approved' },
       { value: 'created_date', label: 'Sort by Date Created' },
+        { value: 'generation_time', label: 'Sort by Generation Time' },
       { value: 'title', label: 'Sort by Title' },
       { value: 'content_type', label: 'Sort by Content Type' },
       { value: 'source', label: 'Sort by Source' }
     ]
-  }];
+    },
+    {
+      value: sortDirection,
+      onChange: setSortDirection,
+      placeholder: "Sort Direction",
+      options: [
+        { value: 'desc', label: 'Descending (Newest First)' },
+        { value: 'asc', label: 'Ascending (Oldest First)' }
+      ]
+    }
+  ];
 
   return (
     <ErrorBoundary>

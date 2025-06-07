@@ -197,8 +197,16 @@ class DatabaseService {
     return this.findMany(table, accountWhere, [...whereParams, accountId], orderBy, limit);
   }
 
+  // Generic insert with account_id check
   async insertWithAccount(table, data, accountId) {
-    return this.insert(table, { ...data, account_id: accountId });
+    console.log(`➡️ ENTER: db.insertWithAccount for table: ${table}`);
+    if (!accountId) {
+      throw new Error('accountId is required for multi-tenant insert');
+    }
+    const fullData = { ...data, account_id: accountId };
+    const result = await this.insert(table, fullData);
+    console.log(`⬅️ EXIT: db.insertWithAccount, Result: ${JSON.stringify(result)}`);
+    return result;
   }
 
   // News Sources methods - updated for account context

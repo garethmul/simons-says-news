@@ -1303,23 +1303,25 @@ app.get('/api/eden/jobs/stream', accountContext, async (req, res) => {
     console.error('Error fetching initial job data:', error);
   }
 
-  // Send updates every 10 seconds (less aggressive than 5 seconds)
+  // Send updates every 5 seconds for real-time feedback
   const updateInterval = setInterval(async () => {
     try {
       const accountId = req.accountContext.accountId;
       const stats = await jobManager.getQueueStats(accountId);
+      const recentJobs = await jobManager.getRecentJobs(20, accountId); // Get more jobs for better tracking
       const workerStatus = jobWorker.getStatus();
       
       res.write(`data: ${JSON.stringify({
         type: 'queue_update',
         stats,
+        recentJobs,
         worker: workerStatus,
         timestamp: new Date().toISOString()
       })}\n\n`);
     } catch (error) {
       clearInterval(updateInterval);
     }
-  }, 10000);
+  }, 5000); // Faster updates for better real-time experience
 
   req.on('close', () => {
     clearInterval(updateInterval);
@@ -3633,6 +3635,86 @@ app.post('/api/debug/optimize-database', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Database optimization failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get comprehensive AI tracking data for content
+app.get('/api/eden/ai-tracking', accountContext, async (req, res) => {
+  try {
+    if (!isSystemReady) {
+      return res.status(503).json({ error: 'System not ready' });
+    }
+
+    const { currentUserId } = req;
+    const { accountId } = req.accountContext;
+    const { contentId, category } = req.query;
+    
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    if (!contentId) {
+      return res.status(400).json({ error: 'Content ID is required' });
+    }
+
+    console.log(`📊 Fetching AI tracking data for content ${contentId} (account: ${accountId})`);
+
+    // Build query conditions
+    let whereConditions = ['generated_article_id = ?'];
+    let queryParams = [parseInt(contentId)];
+
+    if (category) {
+      whereConditions.push('content_category = ?');
+      queryParams.push(category);
+    }
+
+    // Query detailed AI response logs
+    const trackingEntries = await db.query(`
+      SELECT 
+        response_log_id,
+        generated_article_id,
+        template_id,
+        version_id,
+        content_category,
+        ai_service,
+        model_used,
+        prompt_text,
+        system_message,
+        response_text,
+        tokens_used_input,
+        tokens_used_output,
+        tokens_used_total,
+        generation_time_ms,
+        temperature,
+        max_output_tokens,
+        stop_reason,
+        finish_reason,
+        is_complete,
+        is_truncated,
+        safety_ratings,
+        content_filter_applied,
+        success,
+        error_message,
+        warning_message,
+        created_at
+      FROM ssnews_ai_response_log 
+      WHERE ${whereConditions.join(' AND ')}
+      ORDER BY created_at DESC
+    `, queryParams);
+
+    console.log(`✅ Found ${trackingEntries.length} AI tracking entries for content ${contentId}`);
+
+    res.json({
+      success: true,
+      contentId: parseInt(contentId),
+      category: category || null,
+      entries: trackingEntries,
+      count: trackingEntries.length,
+      accountId
+    });
+  } catch (error) {
+    console.error('❌ Error fetching AI tracking data:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

@@ -204,12 +204,33 @@ class AIService {
         systemInstruction: promptData.systemMessage,
         generationConfig: {
           temperature: 0.3,
-          maxOutputTokens: 2000
+          maxOutputTokens: 10000
         }
       });
 
       const generationTime = Date.now() - startTime;
       const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
+      const resultText = response.response.text();
+
+      // Capture detailed response metadata
+      const responseMetadata = this.extractGeminiResponseMetadata(response.response);
+      
+      // Log detailed response data for comprehensive tracking
+      await this.logDetailedAIResponse({
+        generatedArticleId: null, // Analysis doesn't have a generated article ID
+        templateId: promptData.templateId,
+        versionId: promptData.versionId,
+        category: 'analysis',
+        aiService: 'gemini',
+        modelUsed: 'gemini-1.5-flash',
+        promptText: promptData.prompt,
+        systemMessage: promptData.systemMessage,
+        responseText: resultText,
+        metadata: responseMetadata,
+        generationTimeMs: generationTime,
+        temperature: 0.3,
+        maxOutputTokens: 10000
+      });
 
       // Log the generation (no article ID for analysis)
       await promptManager.logGeneration(
@@ -475,8 +496,35 @@ class AIService {
 
       const generationTime = Date.now() - startTime;
       const tokensUsed = response.usage?.total_tokens || 0;
+      const resultText = response.choices[0].message.content;
 
-      // Log the generation
+      // Log detailed response data for comprehensive tracking
+      await this.logDetailedAIResponse({
+        generatedArticleId,
+        templateId: promptData.templateId,
+        versionId: promptData.versionId,
+        category: 'blog_post',
+        aiService: 'openai',
+        modelUsed: 'gpt-4',
+        promptText: promptData.prompt,
+        systemMessage: promptData.systemMessage,
+        responseText: resultText,
+        metadata: {
+          inputTokens: response.usage?.prompt_tokens || 0,
+          outputTokens: response.usage?.completion_tokens || 0,
+          totalTokens: tokensUsed,
+          stopReason: response.choices[0]?.finish_reason || 'STOP',
+          isComplete: response.choices[0]?.finish_reason === 'stop',
+          isTruncated: response.choices[0]?.finish_reason === 'length',
+          safetyRatings: [],
+          contentFilterApplied: false
+        },
+        generationTimeMs: generationTime,
+        temperature: 0.7,
+        maxOutputTokens: 2000
+      });
+
+      // Log the generation (basic logging)
       if (generatedArticleId) {
         await promptManager.logGeneration(
           generatedArticleId,
@@ -490,7 +538,7 @@ class AIService {
         );
       }
 
-      return response.choices[0].message.content;
+      return resultText;
     } catch (error) {
       console.error('❌ Error generating blog post:', error);
       
@@ -538,13 +586,42 @@ class AIService {
         }],
         systemInstruction: promptData.systemMessage,
         generationConfig: {
-          temperature: 0.8
+          temperature: 0.8,
+          maxOutputTokens: 2000  // Increased to ensure complete JSON for all platforms
         }
       });
 
       const generationTime = Date.now() - startTime;
       const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
       const resultText = response.response.text();
+
+      // Capture detailed response metadata for debugging
+      const responseMetadata = this.extractGeminiResponseMetadata(response.response);
+      console.log(`🔍 Social Media Generation Metadata:`, {
+        tokensUsed,
+        stopReason: responseMetadata.stopReason,
+        isComplete: responseMetadata.isComplete,
+        isTruncated: responseMetadata.isTruncated,
+        outputTokens: responseMetadata.outputTokens,
+        maxTokens: 2000
+      });
+
+      // Log detailed response data
+      await this.logDetailedAIResponse({
+        generatedArticleId,
+        templateId: promptData.templateId,
+        versionId: promptData.versionId,
+        category: 'social_media',
+        aiService: 'gemini',
+        modelUsed: 'gemini-1.5-flash',
+        promptText: promptData.prompt,
+        systemMessage: promptData.systemMessage,
+        responseText: resultText,
+        metadata: responseMetadata,
+        generationTimeMs: generationTime,
+        temperature: 0.8,
+        maxOutputTokens: 2000
+      });
 
       // Log the generation (only if we have a valid article ID)
       if (generatedArticleId && generatedArticleId !== 999) {
@@ -620,8 +697,35 @@ class AIService {
 
       const generationTime = Date.now() - startTime;
       const tokensUsed = response.usage?.total_tokens || 0;
+      const resultText = response.choices[0].message.content;
 
-      // Log the generation
+      // Log detailed response data for comprehensive tracking
+      await this.logDetailedAIResponse({
+        generatedArticleId,
+        templateId: promptData.templateId,
+        versionId: promptData.versionId,
+        category: 'video_script',
+        aiService: 'openai',
+        modelUsed: 'gpt-4',
+        promptText: promptData.prompt,
+        systemMessage: promptData.systemMessage,
+        responseText: resultText,
+        metadata: {
+          inputTokens: response.usage?.prompt_tokens || 0,
+          outputTokens: response.usage?.completion_tokens || 0,
+          totalTokens: tokensUsed,
+          stopReason: response.choices[0]?.finish_reason || 'STOP',
+          isComplete: response.choices[0]?.finish_reason === 'stop',
+          isTruncated: response.choices[0]?.finish_reason === 'length',
+          safetyRatings: [],
+          contentFilterApplied: false
+        },
+        generationTimeMs: generationTime,
+        temperature: 0.7,
+        maxOutputTokens: 1500
+      });
+
+      // Log the generation (basic logging)
       if (generatedArticleId) {
         await promptManager.logGeneration(
           generatedArticleId,
@@ -635,7 +739,7 @@ class AIService {
         );
       }
 
-      return response.choices[0].message.content;
+      return resultText;
     } catch (error) {
       console.error('❌ Error generating video script:', error);
       
@@ -690,13 +794,43 @@ class AIService {
         systemInstruction: promptData.systemMessage || "You are a Christian prayer writer helping believers respond to current events through prayer.",
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1000
+          maxOutputTokens: 10000
         }
       });
 
       const generationTime = Date.now() - startTime;
       const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
       const resultText = response.response.text();
+
+      // Capture detailed response metadata for debugging
+      const responseMetadata = this.extractGeminiResponseMetadata(response.response);
+      console.log(`🔍 Prayer Points Generation Metadata:`, {
+        tokensUsed,
+        stopReason: responseMetadata.stopReason,
+        isComplete: responseMetadata.isComplete,
+        isTruncated: responseMetadata.isTruncated,
+        outputTokens: responseMetadata.outputTokens,
+        maxTokens: 10000,
+        responseLength: resultText.length,
+        responsePreview: resultText.substring(0, 200)
+      });
+
+      // Log detailed response data
+      await this.logDetailedAIResponse({
+        generatedArticleId,
+        templateId: promptData.templateId,
+        versionId: promptData.versionId,
+        category: 'prayer_points',
+        aiService: 'gemini',
+        modelUsed: 'gemini-1.5-flash',
+        promptText: `Based on this news article, create 5 prayer points for Christians to pray about the themes and people mentioned. Each prayer point should be 15-25 words. Return as a simple numbered list:\n\n${promptData.prompt}`,
+        systemMessage: promptData.systemMessage || "You are a Christian prayer writer helping believers respond to current events through prayer.",
+        responseText: resultText,
+        metadata: responseMetadata,
+        generationTimeMs: generationTime,
+        temperature: 0.7,
+        maxOutputTokens: 10000
+      });
 
       // Log the generation (only if we have a valid article ID)
       if (generatedArticleId && generatedArticleId !== 999) {
@@ -830,9 +964,18 @@ class AIService {
   }
 
   async generateGenericContentWithPrompt(prompt, systemMessage, category, generatedArticleId = null) {
-    // Special handling for image generation - use Ideogram API
+    console.log(`➡️ ENTER: generateGenericContentWithPrompt for category: ${category}`);
+    
+    // Special handling for image generation - first generate the image prompt, then create the image
     if (category === 'image_generation') {
-      return await this.generateImageWithIdeogram(prompt, generatedArticleId);
+      console.log(`🖼️ Image generation workflow: First generating visual description using template...`);
+      
+      // First, use the template to generate a proper image prompt
+      const visualDescription = await this.generateWithPrompt(prompt, systemMessage, category, generatedArticleId);
+      console.log(`🎨 Generated visual description: ${visualDescription.substring(0, 200)}...`);
+      
+      // Then use that description to generate the actual image with Ideogram
+      return await this.generateImageWithIdeogram(visualDescription, generatedArticleId);
     }
     
     return await this.generateWithPrompt(prompt, systemMessage, category, generatedArticleId);
@@ -843,16 +986,17 @@ class AIService {
    */
   async generateWithPrompt(prompt, systemMessage, category, generatedArticleId = null, generationConfig = {}) {
     try {
+      console.log(`➡️ ENTER: generateWithPrompt for category: ${category}`);
       const startTime = Date.now();
       
       // Use generation config or defaults
       const config = {
         temperature: generationConfig?.temperature || 0.7,
-        maxOutputTokens: generationConfig?.max_tokens || 1500,
+        maxOutputTokens: generationConfig?.max_tokens || 15000,
         ...generationConfig
       };
 
-      const response = await this.geminiModel.generateContent({
+      const generationPromise = this.geminiModel.generateContent({
         contents: [{ 
           role: 'user', 
           parts: [{ text: prompt }] 
@@ -861,9 +1005,32 @@ class AIService {
         generationConfig: config
       });
 
+      // Add a 30-second timeout to the generation promise
+      const response = await this.withTimeout(generationPromise, 30000);
+
       const generationTime = Date.now() - startTime;
       const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
       const resultText = response.response.text();
+
+      // Capture detailed response metadata for debugging
+      const responseMetadata = this.extractGeminiResponseMetadata(response.response);
+      
+      // Log detailed response data for comprehensive tracking
+      await this.logDetailedAIResponse({
+        generatedArticleId,
+        templateId: null, // May not have template ID for generic prompts
+        versionId: null,
+        category: category,
+        aiService: 'gemini',
+        modelUsed: 'gemini-1.5-flash',
+        promptText: prompt,
+        systemMessage: systemMessage || `You are an AI assistant generating ${category} content for Christian audiences.`,
+        responseText: resultText,
+        metadata: responseMetadata,
+        generationTimeMs: generationTime,
+        temperature: config.temperature,
+        maxOutputTokens: config.maxOutputTokens
+      });
 
       console.log(`✨ Generated ${category} content: ${resultText.substring(0, 100)}...`);
       
@@ -872,8 +1039,11 @@ class AIService {
       
       return resultText;
     } catch (error) {
-      console.error(`❌ Error generating ${category} content with prompt:`, error);
+      console.error(`❌ Error in generateWithPrompt for ${category}:`, error.message);
+      console.error(`Stack trace for ${category}:`, error.stack);
       throw error;
+    } finally {
+      console.log(`⬅️ EXIT: generateWithPrompt for category: ${category}`);
     }
   }
 
@@ -902,7 +1072,7 @@ class AIService {
       // Use generation config or defaults
       const config = {
         temperature: generationConfig?.temperature || 0.7,
-        maxOutputTokens: generationConfig?.max_tokens || 1500,
+        maxOutputTokens: generationConfig?.max_tokens || 15000,
         ...generationConfig
       };
 
@@ -919,7 +1089,27 @@ class AIService {
       const tokensUsed = response.response.usageMetadata?.totalTokenCount || 0;
       const resultText = response.response.text();
 
-      // Log the generation
+      // Capture detailed response metadata for debugging
+      const responseMetadata = this.extractGeminiResponseMetadata(response.response);
+      
+      // Log detailed response data for comprehensive tracking
+      await this.logDetailedAIResponse({
+        generatedArticleId,
+        templateId: promptData.templateId,
+        versionId: promptData.versionId,
+        category: category,
+        aiService: 'gemini',
+        modelUsed: 'gemini-1.5-flash',
+        promptText: promptData.prompt,
+        systemMessage: promptData.systemMessage || `You are an AI assistant generating ${category} content for Christian audiences.`,
+        responseText: resultText,
+        metadata: responseMetadata,
+        generationTimeMs: generationTime,
+        temperature: config.temperature,
+        maxOutputTokens: config.maxOutputTokens
+      });
+
+      // Log the generation (basic logging)
       if (generatedArticleId && generatedArticleId !== 999) {
         try {
           await promptManager.logGeneration(
@@ -1020,19 +1210,134 @@ class AIService {
   }
 
   /**
+   * Extract detailed metadata from Gemini response
+   */
+  extractGeminiResponseMetadata(geminiResponse) {
+    try {
+      const usageMetadata = geminiResponse.usageMetadata || {};
+      const candidates = geminiResponse.candidates || [];
+      const firstCandidate = candidates[0] || {};
+      
+      // Get finish reason and safety ratings
+      const finishReason = firstCandidate.finishReason || 'UNKNOWN';
+      const safetyRatings = firstCandidate.safetyRatings || [];
+      
+      // Determine if response was truncated
+      const outputTokens = usageMetadata.candidatesTokenCount || 0;
+      const inputTokens = usageMetadata.promptTokenCount || 0;
+      const totalTokens = usageMetadata.totalTokenCount || 0;
+      
+      const isTruncated = finishReason === 'MAX_TOKENS' || finishReason === 'LENGTH';
+      const isComplete = finishReason === 'STOP';
+      
+      return {
+        stopReason: finishReason,
+        isComplete,
+        isTruncated,
+        outputTokens,
+        inputTokens,
+        totalTokens,
+        safetyRatings,
+        contentFilterApplied: safetyRatings.some(rating => rating.blocked === true)
+      };
+    } catch (error) {
+      console.warn('⚠️ Failed to extract Gemini metadata:', error.message);
+      return {
+        stopReason: 'ERROR',
+        isComplete: false,
+        isTruncated: false,
+        outputTokens: 0,
+        inputTokens: 0,
+        totalTokens: 0,
+        safetyRatings: [],
+        contentFilterApplied: false
+      };
+    }
+  }
+
+  /**
+   * Log detailed AI response data for debugging and analysis
+   */
+  async logDetailedAIResponse(logData) {
+    try {
+      // Use the existing database module (already imported at the top of this file)
+      const database = (await import('./database.js')).default;
+      
+      // Ensure database is initialized
+      if (!database.pool) {
+        await database.initialize();
+      }
+      
+      console.log(`🔄 Attempting to log detailed AI response for ${logData.category}...`);
+      
+      await database.query(`
+        INSERT INTO ssnews_ai_response_log (
+          generated_article_id, template_id, version_id, content_category,
+          ai_service, model_used, prompt_text, system_message, response_text,
+          tokens_used_input, tokens_used_output, tokens_used_total,
+          generation_time_ms, temperature, max_output_tokens,
+          stop_reason, is_complete, is_truncated, safety_ratings,
+          content_filter_applied, success, warning_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        logData.generatedArticleId,
+        logData.templateId,
+        logData.versionId,
+        logData.category,
+        logData.aiService,
+        logData.modelUsed,
+        logData.promptText,
+        logData.systemMessage,
+        logData.responseText,
+        logData.metadata.inputTokens,
+        logData.metadata.outputTokens,
+        logData.metadata.totalTokens,
+        logData.generationTimeMs,
+        logData.temperature,
+        logData.maxOutputTokens,
+        logData.metadata.stopReason,
+        logData.metadata.isComplete,
+        logData.metadata.isTruncated,
+        JSON.stringify(logData.metadata.safetyRatings),
+        logData.metadata.contentFilterApplied,
+        true,
+        logData.metadata.isTruncated ? 'Response was truncated due to token limits' : null
+      ]);
+      
+      console.log(`✅ Successfully logged detailed AI response for ${logData.category} (article: ${logData.generatedArticleId})`);
+    } catch (error) {
+      console.error('❌ Failed to log detailed AI response:', error.message);
+      console.error('❌ Stack trace:', error.stack);
+      console.error('❌ Log data:', {
+        category: logData.category,
+        generatedArticleId: logData.generatedArticleId,
+        aiService: logData.aiService,
+        modelUsed: logData.modelUsed,
+        promptTextLength: logData.promptText?.length,
+        responseTextLength: logData.responseText?.length
+      });
+    }
+  }
+
+  /**
    * Generate image using Ideogram API for template-based workflow
    */
   async generateImageWithIdeogram(prompt, generatedArticleId = null) {
     try {
       console.log(`🖼️ Generating image with Ideogram for article ${generatedArticleId}...`);
-      console.log(`🎨 Image prompt: ${prompt.substring(0, 200)}...`);
+      console.log(`🎨 Raw image prompt response: ${prompt.substring(0, 200)}...`);
+
+      // Parse the AI-generated prompt response to extract individual image prompts
+      const extractedPrompt = this.extractImagePromptFromResponse(prompt);
+      
+      console.log(`🎯 Extracted image prompt: ${extractedPrompt.substring(0, 200)}...`);
 
       // Import imageService dynamically to avoid circular dependencies
       const { default: imageService } = await import('./imageService.js');
 
       // Prepare options for Ideogram generation
       const imageOptions = {
-        prompt: prompt.trim(),
+        prompt: extractedPrompt.trim(),
         aspectRatio: '16:9',  // Default for social media
         styleType: 'GENERAL', // Good default for Christian content
         renderingSpeed: 'DEFAULT',
@@ -1048,11 +1353,64 @@ class AIService {
 
       if (!generationResult || !generationResult.images || generationResult.images.length === 0) {
         console.error('❌ No images returned from Ideogram');
+        
+        // Log failed image generation
+        await this.logDetailedAIResponse({
+          generatedArticleId,
+          templateId: null,
+          versionId: null,
+          category: 'image_generation',
+          aiService: 'ideogram',
+          modelUsed: 'ideogram-v2',
+          promptText: extractedPrompt,
+          systemMessage: 'Ideogram AI image generation service',
+          responseText: 'No images returned from Ideogram API',
+          metadata: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            stopReason: 'ERROR',
+            isComplete: false,
+            isTruncated: false,
+            safetyRatings: [],
+            contentFilterApplied: false
+          },
+          generationTimeMs: Date.now() - Date.now(), // Will be very small
+          temperature: 0,
+          maxOutputTokens: 0
+        });
+        
         return '';  // Return empty string to indicate no image generated
       }
 
       const primaryImage = generationResult.images[0];
       console.log(`✅ Generated image: ${primaryImage.url}`);
+      
+      // Log successful image generation
+      await this.logDetailedAIResponse({
+        generatedArticleId,
+        templateId: null,
+        versionId: null,
+        category: 'image_generation',
+        aiService: 'ideogram',
+        modelUsed: 'ideogram-v2',
+        promptText: extractedPrompt,
+        systemMessage: 'Ideogram AI image generation service',
+        responseText: `Generated image: ${primaryImage.url}`,
+        metadata: {
+          inputTokens: 0, // Ideogram doesn't use tokens
+          outputTokens: 0,
+          totalTokens: 0,
+          stopReason: 'STOP',
+          isComplete: true,
+          isTruncated: false,
+          safetyRatings: [],
+          contentFilterApplied: false
+        },
+        generationTimeMs: generationResult.generation?.metadata?.generationTimeSeconds * 1000 || 0,
+        temperature: 0,
+        maxOutputTokens: 0
+      });
 
       // Process and store the image if we have a valid article ID
       if (generatedArticleId && generatedArticleId !== 999) {
@@ -1085,6 +1443,118 @@ class AIService {
       // Return empty string to indicate failure
       return '';
     }
+  }
+
+  /**
+   * Extract a specific image prompt from the AI-generated response
+   * The image generation template creates multiple prompts, we need to extract one
+   */
+  extractImagePromptFromResponse(aiResponse) {
+    try {
+      // Try to extract the first (hero) image prompt from the AI response
+      const response = aiResponse.trim();
+      console.log(`🖼️ DEBUG: Full AI response for image generation:`, response);
+      
+      // Look for numbered lists (1. Hero image, 2. Social media, 3. Background)
+      const heroImageMatch = response.match(/1\.\s*(?:Hero image[^:]*:?\s*)(.+?)(?:\n(?:2\.|$))/is);
+      if (heroImageMatch && heroImageMatch[1]) {
+        const heroPrompt = heroImageMatch[1].trim();
+        console.log(`🎯 Extracted hero image prompt: ${heroPrompt}`);
+        return heroPrompt;
+      }
+
+      // Look for "Hero image" section specifically with more flexible matching
+      const heroSectionMatch = response.match(/(?:Hero image|1\.\s*Hero)[^:]*:?\s*([^\n\d]{20,})/i);
+      if (heroSectionMatch && heroSectionMatch[1]) {
+        const heroPrompt = heroSectionMatch[1].trim();
+        console.log(`🎯 Extracted hero section prompt: ${heroPrompt}`);
+        return heroPrompt;
+      }
+
+      // Look for any line that starts with "1." and extract everything until next number or end
+      const firstPromptMatch = response.match(/^1\.\s*(.+?)(?=\n\s*2\.|$)/sm);
+      if (firstPromptMatch && firstPromptMatch[1]) {
+        const firstPrompt = firstPromptMatch[1].trim().replace(/\s+/g, ' ');
+        console.log(`🎯 Extracted first numbered prompt: ${firstPrompt}`);
+        return firstPrompt;
+      }
+
+      // Look for any content between "1." and "2." more aggressively  
+      const betweenNumbersMatch = response.match(/1\.(.+?)2\./s);
+      if (betweenNumbersMatch && betweenNumbersMatch[1]) {
+        const betweenPrompt = betweenNumbersMatch[1].trim().replace(/\s+/g, ' ');
+        if (betweenPrompt.length > 20) {
+          console.log(`🎯 Extracted prompt between numbers: ${betweenPrompt}`);
+          return betweenPrompt;
+        }
+      }
+
+      // Try to extract the first meaningful line (fallback)
+      const lines = response.split('\n').filter(line => line.trim().length > 10);
+      if (lines.length > 0) {
+        // Skip header lines and find the first descriptive prompt
+        for (const line of lines) {
+          const cleanLine = line.replace(/^[\d\.\-\*\s]*/, '').trim();
+          if (cleanLine.length > 30 && 
+              !cleanLine.toLowerCase().includes('generate') && 
+              !cleanLine.toLowerCase().includes('create') &&
+              !cleanLine.toLowerCase().includes('based on')) {
+            console.log(`🎯 Extracted first meaningful line: ${cleanLine}`);
+            return cleanLine;
+          }
+        }
+      }
+
+      // If we have a substantial response, try to extract a meaningful portion
+      if (response.length > 50) {
+        // Look for the first sentence that seems like an image description
+        const sentences = response.split(/[.!?]+/).filter(s => s.trim().length > 20);
+        for (const sentence of sentences) {
+          const cleaned = sentence.trim();
+          if (cleaned.length > 30 && cleaned.length < 200) {
+            console.log(`🎯 Extracted meaningful sentence: ${cleaned}`);
+            return cleaned;
+          }
+        }
+      }
+
+      // Ultimate fallback - use a contextual prompt if response exists but can't be parsed
+      if (response.length > 10) {
+        console.warn(`⚠️ Could not parse structured prompts from response: "${response.substring(0, 100)}..."`);
+        return 'A warm, inspiring Christian image with natural lighting, hope, and human connection suitable for accompanying news content about faith and community';
+      }
+
+      // Final fallback for empty responses
+      console.error(`❌ Empty or very short response for image generation: "${response}"`);
+      return 'A warm, inspirational image with natural lighting and hopeful atmosphere suitable for Christian content';
+
+    } catch (error) {
+      console.error('❌ Error extracting image prompt:', error);
+      // Return a safe fallback prompt
+      return 'A warm, inspirational image with natural lighting and hopeful atmosphere suitable for Christian content';
+    }
+  }
+
+  /**
+   * Utility to add timeout to a promise
+   */
+  async withTimeout(promise, ms) {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Promise timed out after ${ms} ms`));
+      }, ms);
+
+      promise.then(
+        (res) => {
+          clearTimeout(timeoutId);
+          resolve(res);
+        },
+        (err) => {
+          clearTimeout(timeoutId);
+          reject(err);
+        }
+      );
+    });
   }
 }
 

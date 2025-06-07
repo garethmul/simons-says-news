@@ -29,10 +29,12 @@ import {
   Mail,
   Mic,
   BookOpen,
-  Users
+  Users,
+  Brain
 } from 'lucide-react';
 import { formatDate, getDaysAgo, parseKeywords } from '../../utils/helpers';
 import { useAccount } from '../../contexts/AccountContext';
+import AITrackingView from '../AITrackingView';
 
 /**
  * Dynamic Detail Modal Component
@@ -53,7 +55,8 @@ const DynamicDetailModal = ({
   showPublishActions = false,
   showRejectedActions = false,
   showArchivedActions = false,
-  isActionLoading
+  isActionLoading,
+  onRefreshContent // Add onRefreshContent prop for thumbnail refresh
 }) => {
   const { withAccountContext } = useAccount();
   const [activeTab, setActiveTab] = useState('content');
@@ -139,6 +142,12 @@ const DynamicDetailModal = ({
         fetchLatestImages(selectedContent.gen_article_id, showArchivedImages).then(latestImages => {
           setCurrentImages(latestImages);
           console.log(`✅ Refreshed images: ${latestImages.length} total images loaded`);
+          
+          // Also refresh the main tab content to update thumbnails in Story cards
+          if (onRefreshContent) {
+            console.log('🔄 Triggering main tab content refresh for thumbnail update...');
+            onRefreshContent(selectedContent.gen_article_id);
+          }
         });
       }
       return;
@@ -161,6 +170,12 @@ const DynamicDetailModal = ({
         created: new Date().toISOString()
       }
     ]);
+    
+    // Also refresh the main tab content to update thumbnails in Story cards for single images
+    if (onRefreshContent) {
+      console.log('🔄 Triggering main tab content refresh for thumbnail update...');
+      onRefreshContent(selectedContent.gen_article_id);
+    }
   };
 
   const handleImageStatusUpdate = async (imageId, newStatus) => {
@@ -218,14 +233,14 @@ const DynamicDetailModal = ({
           data.categories.forEach(category => {
             // Skip blog_post as it's handled separately as "Main Content"
             if (category !== 'blog_post') {
-              grouped[category] = [];
-              types.push({
-                key: category,
-                name: formatCategoryName(category),
-                icon: getContentTypeIcon(category),
-                count: 0
-              });
-            }
+            grouped[category] = [];
+            types.push({
+              key: category,
+              name: formatCategoryName(category),
+              icon: getContentTypeIcon(category),
+              count: 0
+            });
+          }
           });
         }
         
@@ -233,7 +248,7 @@ const DynamicDetailModal = ({
         data.content.forEach(item => {
           const category = item.prompt_category;
           if (grouped[category]) {
-            grouped[category].push(item);
+          grouped[category].push(item);
           } else {
             // Handle legacy categories that might not be in the configured list
             grouped[category] = [item];
@@ -415,6 +430,19 @@ const DynamicDetailModal = ({
                     );
                   })}
                   
+                  {/* AI Tracking Tab */}
+                  <button
+                    onClick={() => setActiveTab('ai-tracking')}
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors ${
+                      activeTab === 'ai-tracking' 
+                        ? 'bg-blue-100 text-blue-700 border border-blue-200' 
+                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    }`}
+                  >
+                    <Brain className="w-4 h-4 flex-shrink-0" />
+                    <span className="truncate">AI Tracking</span>
+                  </button>
+                  
                   {/* Source Article Tab */}
                   <button
                     onClick={() => setActiveTab('source')}
@@ -453,16 +481,24 @@ const DynamicDetailModal = ({
                         onOpenCustomImageModal={() => setShowCustomImageModal(true)}
                       />
                     ) : (
-                      <DynamicContentTab 
-                        key={type.key}
-                        contentType={type}
-                        content={dynamicContent[type.key] || []}
-                      />
-                    )
+                    <DynamicContentTab 
+                      key={type.key}
+                      contentType={type}
+                      content={dynamicContent[type.key] || []}
+                    />
+                  )
                   )
                 )}
 
 
+
+                {/* AI Tracking Tab */}
+                {activeTab === 'ai-tracking' && (
+                  <AITrackingView 
+                    contentId={selectedContent.gen_article_id}
+                    contentCategory={null}
+                  />
+                )}
 
                 {/* Source Article Tab */}
                 {activeTab === 'source' && (
@@ -481,7 +517,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onApprove(selectedContent.gen_article_id, selectedContent.content_type);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error approving content:', error);
                     // Keep modal open on error so user can retry
@@ -498,7 +534,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onReject(selectedContent.gen_article_id, selectedContent.content_type);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error rejecting content:', error);
                     // Keep modal open on error so user can retry
@@ -519,7 +555,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onPublish('article', selectedContent.gen_article_id, 'published');
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error publishing content:', error);
                     // Keep modal open on error so user can retry
@@ -536,7 +572,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onReturnToReview('article', selectedContent.gen_article_id, 'review_pending');
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error returning to review:', error);
                     // Keep modal open on error so user can retry
@@ -553,7 +589,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onArchive('article', selectedContent.gen_article_id, 'archived');
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error archiving content:', error);
                     // Keep modal open on error so user can retry
@@ -578,7 +614,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onReturnToReview(selectedContent.gen_article_id, selectedContent.content_type);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error returning to review:', error);
                     // Keep modal open on error so user can retry
@@ -595,7 +631,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onRegenerate(selectedContent);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error regenerating content:', error);
                     // Keep modal open on error so user can retry
@@ -616,7 +652,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onReturnToApproved('article', selectedContent.gen_article_id, 'approved');
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error returning to approved:', error);
                     // Keep modal open on error so user can retry
@@ -633,7 +669,7 @@ const DynamicDetailModal = ({
                 onClick={async () => {
                   try {
                     await onRegenerate(selectedContent);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error regenerating content:', error);
                     // Keep modal open on error so user can retry
@@ -746,18 +782,18 @@ const DynamicContentRenderer = ({ contentItem, contentType, index }) => {
     switch (contentType.key) {
       case 'social_media':
       case 'social_posts':
-        return <SocialMediaRenderer data={contentData} icon={IconComponent} />;
+        return <SocialMediaRenderer data={contentData} icon={IconComponent} contentItem={contentItem} />;
       
       case 'video_script':
       case 'video_scripts':
-        return <VideoScriptRenderer data={contentData} icon={IconComponent} index={index} />;
+        return <VideoScriptRenderer data={contentData} icon={IconComponent} index={index} contentItem={contentItem} />;
       
       case 'prayer_points':
       case 'prayer':
-        return <PrayerPointsRenderer data={contentData} icon={IconComponent} />;
+        return <PrayerPointsRenderer data={contentData} icon={IconComponent} contentItem={contentItem} />;
       
       default:
-        return <GenericContentRenderer data={contentData} contentType={contentType} index={index} />;
+        return <GenericContentRenderer data={contentData} contentType={contentType} index={index} contentItem={contentItem} />;
     }
   } catch (error) {
     console.error('Error rendering content:', error);
@@ -768,28 +804,99 @@ const DynamicContentRenderer = ({ contentItem, contentType, index }) => {
 /**
  * Social Media Content Renderer
  */
-const SocialMediaRenderer = ({ data, icon: IconComponent }) => {
-  // Handle both single posts and platform-specific posts
+const SocialMediaRenderer = ({ data, icon: IconComponent, contentItem }) => {
+  
+  // Helper function to parse JSON content if it's embedded as a string
+  const parseJsonContent = (text) => {
+    try {
+      console.log(`🔍 Parsing social media content:`, text.substring(0, 100) + '...');
+      
+      // Check if text contains JSON (starts with ```json or similar)
+      if (typeof text === 'string' && (text.includes('```json') || text.includes('{"'))) {
+        // Extract JSON from markdown code blocks
+        const jsonMatch = text.match(/```json\s*\n?([\s\S]*?)```/);
+        if (jsonMatch) {
+          console.log(`✅ Found JSON in code block, attempting to parse`);
+          return JSON.parse(jsonMatch[1]);
+        }
+        // Try to parse direct JSON
+        if (text.trim().startsWith('{')) {
+          console.log(`✅ Found direct JSON, attempting to parse`);
+          return JSON.parse(text);
+        }
+        
+        // Look for JSON patterns even if not at the start
+        const jsonMatches = text.match(/\{[^{}]*\}/g);
+        if (jsonMatches) {
+          for (const match of jsonMatches) {
+            try {
+              const parsed = JSON.parse(match);
+              console.log(`✅ Parsed extracted JSON:`, parsed);
+              return parsed;
+            } catch (e) {
+              // Continue to next match
+            }
+          }
+        }
+        
+        // Try to handle incomplete JSON (common with truncation)
+        const incompleteJsonMatch = text.match(/\{[\s\S]*$/);
+        if (incompleteJsonMatch) {
+          const incomplete = incompleteJsonMatch[0];
+          const completionAttempts = [
+            incomplete + '}',
+            incomplete + '"}',
+            incomplete + '"]}',
+            incomplete + '"}]}'
+          ];
+          
+          for (const attempt of completionAttempts) {
+            try {
+              const parsed = JSON.parse(attempt);
+              console.log(`✅ Parsed completed JSON:`, parsed);
+              return parsed;
+            } catch (e) {
+              // Continue to next attempt
+            }
+          }
+        }
+      }
+      return null;
+    } catch (error) {
+      console.log('Could not parse JSON from text:', error);
+      return null;
+    }
+  };
+
+  // Handle array of content_data items
   if (Array.isArray(data)) {
-    // Array of individual posts
     return (
       <div className="space-y-4">
-        {data.map((post, index) => (
-          <Card key={index}>
+        {data.map((item, index) => {
+          // Try to parse JSON content first
+          const parsedContent = parseJsonContent(item.text);
+          
+          if (parsedContent) {
+            // Render parsed JSON content
+            const platforms = ['facebook', 'instagram', 'linkedin', 'twitter', 'general'];
+            return (
+              <div key={index} className="space-y-3">
+                {platforms.filter(platform => parsedContent[platform]).map(platform => (
+                  <Card key={`${index}-${platform}`}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <IconComponent className="w-5 h-5" />
-                {post.platform ? `${post.platform.charAt(0).toUpperCase() + post.platform.slice(1)} Post` : `Social Post ${index + 1}`}
+                        {platform === 'general' ? 'General Post' : `${platform.charAt(0).toUpperCase() + platform.slice(1)} Post`}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-gray-800 mb-3">{post.text || post.content}</p>
-                {post.hashtags && (
-                  <div className="flex flex-wrap gap-2">
-                    {post.hashtags.map((tag, tagIndex) => (
+                        <p className="text-gray-800 mb-3 whitespace-pre-wrap">{parsedContent[platform].text}</p>
+                        {parsedContent[platform].hashtags && parsedContent[platform].hashtags.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            {parsedContent[platform].hashtags.map((tag, tagIndex) => (
                       <Badge key={tagIndex} variant="secondary" className="text-xs">
-                        {tag}
+                                {tag.startsWith('#') ? tag : `#${tag}`}
                       </Badge>
                     ))}
                   </div>
@@ -800,51 +907,66 @@ const SocialMediaRenderer = ({ data, icon: IconComponent }) => {
         ))}
       </div>
     );
-  } else if (data.facebook || data.instagram || data.linkedin) {
-    // Platform-specific structure
-    const platforms = ['facebook', 'instagram', 'linkedin'];
+          } else {
+            // Fallback: display as plain text
     return (
-      <div className="space-y-4">
-        {platforms.filter(platform => data[platform]).map(platform => (
-          <Card key={platform}>
+              <Card key={index}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <IconComponent className="w-5 h-5" />
-                {platform.charAt(0).toUpperCase() + platform.slice(1)} Post
+                    {item.platform ? `${item.platform.charAt(0).toUpperCase() + item.platform.slice(1)} Post` : `Social Post ${index + 1}`}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-gray-800 mb-3">{data[platform].text}</p>
-                {data[platform].hashtags && (
-                  <div className="flex flex-wrap gap-2">
-                    {data[platform].hashtags.map((tag, tagIndex) => (
+                    <p className="text-gray-800 mb-3 whitespace-pre-wrap">{item.text || item.content}</p>
+                    {item.hashtags && item.hashtags.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {item.hashtags.map((tag, tagIndex) => (
                       <Badge key={tagIndex} variant="secondary" className="text-xs">
-                        {tag}
+                            {tag.startsWith('#') ? tag : `#${tag}`}
                       </Badge>
                     ))}
                   </div>
                 )}
               </div>
+                  {item.text && (item.text.includes('```json') || item.text.includes('...') || item.text.endsWith('"') === false) && (
+                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <div className="flex items-center gap-2 text-yellow-800 text-sm">
+                        <ExternalLink className="w-4 h-4" />
+                        <div>
+                          <p className="font-medium">Warning: Content appears to be truncated</p>
+                          <p className="text-xs mt-1">The AI response may have been cut off during generation or storage. Consider regenerating this content.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
             </CardContent>
           </Card>
-        ))}
+            );
+          }
+        })}
       </div>
     );
-  } else {
-    // Fallback for unknown structure
-    return <GenericContentRenderer data={data} contentType={{ icon: IconComponent, name: 'Social Media' }} />;
   }
+
+  // Fallback for other structures
+  return <GenericContentRenderer data={data} contentType={{ icon: IconComponent, name: 'Social Media' }} contentItem={contentItem} />;
 };
 
 /**
  * Video Script Content Renderer
  */
-const VideoScriptRenderer = ({ data, icon: IconComponent, index }) => {
+const VideoScriptRenderer = ({ data, icon: IconComponent, index, contentItem }) => {
+  
   if (Array.isArray(data)) {
     return (
       <div className="space-y-4">
-        {data.map((script, scriptIndex) => (
+        {data.map((script, scriptIndex) => {
+          const scriptContent = script.script || script.content || script.text;
+          const isEmpty = !scriptContent || scriptContent.trim() === '';
+          
+          return (
           <Card key={scriptIndex}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -854,18 +976,54 @@ const VideoScriptRenderer = ({ data, icon: IconComponent, index }) => {
               {script.duration_target_seconds && (
                 <CardDescription>Target Duration: {script.duration_target_seconds}s</CardDescription>
               )}
+                {script.duration && !script.duration_target_seconds && (
+                  <CardDescription>Target Duration: {script.duration}s</CardDescription>
+                )}
             </CardHeader>
             <CardContent>
-              <pre className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
-                {script.script || script.content || script.text}
+                {isEmpty ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <Video className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p className="font-medium">No video script content available</p>
+                    <p className="text-sm mt-2">The video script generation may have failed or returned empty content.</p>
+                    {contentItem?.metadata?.generated_at && (
+                      <p className="text-xs mt-2 text-gray-400">
+                        Generated: {new Date(contentItem.metadata.generated_at).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <pre className="text-sm text-gray-700 whitespace-pre-wrap overflow-x-auto max-h-96 overflow-y-auto">
+                        {scriptContent}
               </pre>
+                    </div>
+                    {script.visual_suggestions && script.visual_suggestions.length > 0 && (
+                      <div className="border-t pt-4">
+                        <h4 className="font-medium text-gray-900 mb-2">Visual Suggestions</h4>
+                        <div className="space-y-2">
+                          {script.visual_suggestions.map((suggestion, suggestionIndex) => (
+                            <div key={suggestionIndex} className="bg-blue-50 p-3 rounded-lg">
+                              <p className="text-sm text-blue-800">{suggestion}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
             </CardContent>
           </Card>
-        ))}
+          );
+        })}
       </div>
     );
   } else {
     // Single script object
+    const scriptContent = data.script || data.content || data.text;
+    const isEmpty = !scriptContent || scriptContent.trim() === '';
+    
     return (
       <Card>
         <CardHeader>
@@ -876,11 +1034,43 @@ const VideoScriptRenderer = ({ data, icon: IconComponent, index }) => {
           {data.duration_target_seconds && (
             <CardDescription>Target Duration: {data.duration_target_seconds}s</CardDescription>
           )}
+          {data.duration && !data.duration_target_seconds && (
+            <CardDescription>Target Duration: {data.duration}s</CardDescription>
+          )}
         </CardHeader>
         <CardContent>
-          <pre className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
-            {data.script || data.content || data.text}
+          {isEmpty ? (
+            <div className="text-center py-8 text-gray-500">
+              <Video className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p className="font-medium">No video script content available</p>
+              <p className="text-sm mt-2">The video script generation may have failed or returned empty content.</p>
+              {contentItem?.metadata?.generated_at && (
+                <p className="text-xs mt-2 text-gray-400">
+                  Generated: {new Date(contentItem.metadata.generated_at).toLocaleString()}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <pre className="text-sm text-gray-700 whitespace-pre-wrap overflow-x-auto max-h-96 overflow-y-auto">
+                  {scriptContent}
           </pre>
+              </div>
+              {data.visual_suggestions && data.visual_suggestions.length > 0 && (
+                <div className="border-t pt-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Visual Suggestions</h4>
+                  <div className="space-y-2">
+                    {data.visual_suggestions.map((suggestion, suggestionIndex) => (
+                      <div key={suggestionIndex} className="bg-blue-50 p-3 rounded-lg">
+                        <p className="text-sm text-blue-800">{suggestion}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     );
@@ -890,8 +1080,11 @@ const VideoScriptRenderer = ({ data, icon: IconComponent, index }) => {
 /**
  * Prayer Points Content Renderer
  */
-const PrayerPointsRenderer = ({ data, icon: IconComponent }) => {
+const PrayerPointsRenderer = ({ data, icon: IconComponent, contentItem }) => {
+  
   const prayerPoints = Array.isArray(data) ? data : [data];
+  const expectedCount = contentItem?.metadata?.custom_instructions?.includes('5 prayer points') ? 5 : 
+                       contentItem?.metadata?.custom_instructions?.includes('3 prayer points') ? 3 : null;
   
   return (
     <Card>
@@ -899,7 +1092,15 @@ const PrayerPointsRenderer = ({ data, icon: IconComponent }) => {
         <CardTitle className="flex items-center gap-2">
           <IconComponent className="w-5 h-5" />
           Prayer Points
+          <Badge variant="outline" className="text-xs">
+            {prayerPoints.length} {prayerPoints.length === 1 ? 'point' : 'points'}
+          </Badge>
         </CardTitle>
+        {expectedCount && prayerPoints.length < expectedCount && (
+          <CardDescription className="text-orange-600">
+            Expected {expectedCount} prayer points, but only {prayerPoints.length} {prayerPoints.length === 1 ? 'was' : 'were'} generated.
+          </CardDescription>
+        )}
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
@@ -921,6 +1122,26 @@ const PrayerPointsRenderer = ({ data, icon: IconComponent }) => {
             </div>
           ))}
         </div>
+        
+        {expectedCount && prayerPoints.length < expectedCount && (
+          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-start gap-2 text-yellow-800 text-sm">
+              <ExternalLink className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="font-medium">Incomplete Generation</p>
+                <p>The AI was instructed to generate {expectedCount} prayer points, but only generated {prayerPoints.length}. This might indicate an issue with the generation process or prompt limits.</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {contentItem?.metadata?.generated_at && (
+          <div className="mt-4 pt-3 border-t text-xs text-gray-500">
+            Generated: {new Date(contentItem.metadata.generated_at).toLocaleString()} • 
+            Model: {contentItem.metadata.model || 'Unknown'} • 
+            Temperature: {contentItem.metadata.temperature || 'Unknown'}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -929,37 +1150,126 @@ const PrayerPointsRenderer = ({ data, icon: IconComponent }) => {
 /**
  * Generic Content Renderer - Handles unknown content types
  */
-const GenericContentRenderer = ({ data, contentType, index = 0 }) => {
+const GenericContentRenderer = ({ data, contentType, index = 0, contentItem }) => {
   const IconComponent = contentType.icon;
   
   // Handle different data structures
   if (Array.isArray(data)) {
     return (
       <div className="space-y-4">
-        {data.map((item, itemIndex) => (
+        {data.map((item, itemIndex) => {
+          const content = item.text || item.content || item;
+          const isEmpty = !content || (typeof content === 'string' && content.trim() === '');
+          
+          return (
           <Card key={itemIndex}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <IconComponent className="w-5 h-5" />
                 {contentType.name} {itemIndex + 1}
+                  {item.order_number && (
+                    <Badge variant="outline" className="text-xs">
+                      #{item.order_number}
+                    </Badge>
+                  )}
+              </CardTitle>
+                {item.theme && (
+                  <CardDescription>Theme: {item.theme}</CardDescription>
+                )}
+            </CardHeader>
+            <CardContent>
+                {isEmpty ? (
+                  <div className="text-center py-6 text-gray-500">
+                    <IconComponent className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                    <p className="font-medium">No content available</p>
+                    <p className="text-sm mt-1">The content generation may have failed or returned empty content.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {typeof content === 'string' ? (
+                      <div className="bg-gray-50 p-4 rounded-lg">
+                        <div className="prose max-w-none text-sm">
+                          <div className="whitespace-pre-wrap text-gray-800">{content}</div>
+                        </div>
+                      </div>
+                ) : (
+                      <div className="bg-gray-50 p-4 rounded-lg">
+                        <div className="text-xs text-gray-600 mb-2">Raw Data:</div>
+                        <pre className="text-xs overflow-x-auto max-h-60 overflow-y-auto">
+                          {JSON.stringify(content, null, 2)}
+                  </pre>
+                      </div>
+                )}
+                    
+                    {/* Additional metadata */}
+                    {item.order_number && item.theme && (
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <Badge variant="secondary" className="text-xs">
+                          Order: {item.order_number}
+                        </Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          Theme: {item.theme}
+                        </Badge>
+              </div>
+                    )}
+                  </div>
+                )}
+            </CardContent>
+          </Card>
+          );
+        })}
+        
+        {/* Metadata section */}
+        {contentItem?.metadata && (
+          <Card className="mt-4 border-gray-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Clock className="w-4 h-4" />
+                Generation Details
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="prose max-w-none">
-                {typeof item === 'string' ? (
-                  <p>{item}</p>
-                ) : (
-                  <pre className="text-sm bg-gray-50 p-4 rounded-lg overflow-x-auto">
-                    {JSON.stringify(item, null, 2)}
-                  </pre>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                {contentItem.metadata.generated_at && (
+                  <div>
+                    <span className="font-medium text-gray-600">Generated:</span>
+                    <div className="text-gray-800">{new Date(contentItem.metadata.generated_at).toLocaleString()}</div>
+                  </div>
+                )}
+                {contentItem.metadata.model && (
+                  <div>
+                    <span className="font-medium text-gray-600">Model:</span>
+                    <div className="text-gray-800">{contentItem.metadata.model}</div>
+                  </div>
+                )}
+                {contentItem.metadata.temperature && (
+                  <div>
+                    <span className="font-medium text-gray-600">Temperature:</span>
+                    <div className="text-gray-800">{contentItem.metadata.temperature}</div>
+                  </div>
+                )}
+                {contentItem.metadata.item_count && (
+                  <div>
+                    <span className="font-medium text-gray-600">Items Generated:</span>
+                    <div className="text-gray-800">{contentItem.metadata.item_count}</div>
+                  </div>
                 )}
               </div>
+              {contentItem.metadata.custom_instructions && (
+                <div className="mt-3 p-2 bg-blue-50 rounded text-xs">
+                  <span className="font-medium text-blue-800">Instructions:</span>
+                  <div className="text-blue-700 mt-1">{contentItem.metadata.custom_instructions}</div>
+                </div>
+              )}
             </CardContent>
           </Card>
-        ))}
+        )}
       </div>
     );
   } else if (typeof data === 'object' && data !== null) {
+    const content = data.text || data.content || data;
+    const isEmpty = !content || (typeof content === 'string' && content.trim() === '');
+    
     return (
       <Card>
         <CardHeader>
@@ -969,15 +1279,28 @@ const GenericContentRenderer = ({ data, contentType, index = 0 }) => {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {isEmpty ? (
+            <div className="text-center py-6 text-gray-500">
+              <IconComponent className="w-10 h-10 mx-auto mb-3 opacity-50" />
+              <p className="font-medium">No content available</p>
+              <p className="text-sm mt-1">The content generation may have failed or returned empty content.</p>
+            </div>
+          ) : (
           <div className="prose max-w-none">
-            {data.text || data.content ? (
-              <p>{data.text || data.content}</p>
+              {typeof content === 'string' ? (
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="whitespace-pre-wrap text-gray-800 text-sm">{content}</div>
+                </div>
             ) : (
-              <pre className="text-sm bg-gray-50 p-4 rounded-lg overflow-x-auto">
-                {JSON.stringify(data, null, 2)}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="text-xs text-gray-600 mb-2">Raw Data:</div>
+                  <pre className="text-xs overflow-x-auto max-h-60 overflow-y-auto">
+                    {JSON.stringify(content, null, 2)}
               </pre>
+                </div>
             )}
           </div>
+          )}
         </CardContent>
       </Card>
     );
@@ -991,7 +1314,9 @@ const GenericContentRenderer = ({ data, contentType, index = 0 }) => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p>{String(data)}</p>
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <div className="whitespace-pre-wrap text-gray-800 text-sm">{String(data)}</div>
+          </div>
         </CardContent>
       </Card>
     );

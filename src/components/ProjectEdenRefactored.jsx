@@ -697,7 +697,7 @@ const ProjectEden = () => {
               <TabsTrigger value={TAB_ROUTES.ARCHIVED}>Archived ({stats.archivedContent || 0})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.REJECTED}>Rejected ({stats.rejectedContent || 0})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.STORIES}>Stories ({stats.articlesAnalyzed || 0})</TabsTrigger>
-              <TabsTrigger value={TAB_ROUTES.QUEUED}>Queued ({jobStats.summary.queued || 0})</TabsTrigger>
+              <TabsTrigger value={TAB_ROUTES.QUEUED}>Active ({(jobStats.summary.queued || 0) + (jobStats.summary.processing || 0)})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.JOBS}>Jobs</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.SOURCES}>Sources ({sources.length})</TabsTrigger>
               <TabsTrigger value={TAB_ROUTES.PROMPTS}>Prompts</TabsTrigger>
@@ -855,6 +855,7 @@ const ProjectEden = () => {
           onReturnToApproved={updateContentStatus}
           onArchive={updateContentStatus}
           onRegenerate={handleRegenerateContent}
+          onRefreshContent={handleRefreshContent}
           isActionLoading={isActionLoading}
           {...getModalActionProps()}
         />

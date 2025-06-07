@@ -136,17 +136,24 @@ const ContentCard = ({
               <span className="flex items-center gap-1">
                 <DynamicIcon iconName={contentTypeIcon} className="w-3 h-3" />
                 {contentTypeName} • {content.word_count} words • 
-                Created {formatDate(content.created_at)}
+                Generated {formatDate(content.created_at)}
               </span>
             </CardDescription>
             
-            {/* Date/Time Information */}
-            <div className="mt-2 text-xs text-gray-500 flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                Created: {new Date(content.created_at).toLocaleString()}
+            {/* Enhanced Date/Time Information */}
+            <div className="mt-2 text-sm text-gray-600 flex items-center gap-4">
+              <span className="flex items-center gap-1 font-medium">
+                <Clock className="w-4 h-4 text-blue-500" />
+                Generated: {new Date(content.created_at).toLocaleString('en-GB', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                })}
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 text-xs">
                 <Calendar className="w-3 h-3" />
                 {getDaysAgo(content.created_at)}
               </span>

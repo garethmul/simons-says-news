@@ -3,11 +3,7 @@ import db from './database.js'; // Import database service
 
 class ImageService {
   constructor() {
-    this.ideogramApiKey = process.env.IDEOGRAM_API_KEY;
-    this.sirvClientId = process.env.SIRV_CLIENT_ID;
-    this.sirvClientSecret = process.env.SIRV_CLIENT_SECRET;
-    this.sirvPublicUrl = process.env.SIRV_PUBLIC_URL;
-    
+    // Don't cache environment variables in constructor since they may not be loaded yet
     this.sirvToken = null;
     this.sirvTokenExpiry = null;
 
@@ -28,13 +24,16 @@ class ImageService {
     console.log('🔑 Getting Sirv authentication token...');
 
     try {
-      if (!this.sirvClientId || !this.sirvClientSecret) {
+      const sirvClientId = process.env.SIRV_CLIENT_ID;
+      const sirvClientSecret = process.env.SIRV_CLIENT_SECRET;
+      
+      if (!sirvClientId || !sirvClientSecret) {
         throw new Error('Sirv credentials not configured');
       }
 
       const response = await axios.post('https://api.sirv.com/v2/token', {
-        clientId: this.sirvClientId,
-        clientSecret: this.sirvClientSecret
+        clientId: sirvClientId,
+        clientSecret: sirvClientSecret
       }, this.axiosConfig);
 
       this.sirvToken = response.data.token;
@@ -74,7 +73,7 @@ class ImageService {
         }
       );
 
-      const sirvUrl = `${this.sirvPublicUrl}/eden-content/${filename}`;
+      const sirvUrl = `${process.env.SIRV_PUBLIC_URL}/eden-content/${filename}`;
       console.log(`✅ Image uploaded to Sirv: ${sirvUrl}`);
       
       return sirvUrl;
@@ -462,11 +461,12 @@ class ImageService {
     console.log('🎨 Generating custom image with Ideogram.ai...');
     
     try {
-      if (!this.ideogramApiKey) {
+      const ideogramApiKey = process.env.IDEOGRAM_API_KEY;
+      if (!ideogramApiKey) {
         throw new Error('Ideogram API key not configured');
       }
 
-      if (!this.ideogramApiKey.startsWith('Bearer ') && !this.ideogramApiKey.match(/^[A-Za-z0-9_-]+$/)) {
+      if (!ideogramApiKey.startsWith('Bearer ') && !ideogramApiKey.match(/^[A-Za-z0-9_-]+$/)) {
         console.warn('⚠️ Ideogram API key format may be incorrect');
       }
 
@@ -554,7 +554,7 @@ class ImageService {
       let requestData;
       let headers = {
         ...this.axiosConfig.headers,
-        'Api-Key': this.ideogramApiKey
+        'Api-Key': ideogramApiKey
       };
 
       // Convert aspect ratio to API format based on model version
@@ -841,7 +841,8 @@ class ImageService {
     console.log('🎨 Editing image with Ideogram Magic Fill (v3)...');
     
     try {
-      if (!this.ideogramApiKey) {
+      const ideogramApiKey = process.env.IDEOGRAM_API_KEY;
+      if (!ideogramApiKey) {
         throw new Error('Ideogram API key not configured');
       }
 
@@ -937,7 +938,7 @@ class ImageService {
 
       const headers = {
         ...this.axiosConfig.headers,
-        'Api-Key': this.ideogramApiKey,
+        'Api-Key': ideogramApiKey,
         'Content-Type': 'multipart/form-data'
       };
 

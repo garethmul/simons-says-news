@@ -491,22 +491,24 @@ Format each prayer point as a separate paragraph. Make them specific to the arti
         {
           name: 'Image Generation Prompts',
           category: 'image_generation',
-          description: 'Generates prompts for AI image creation',
-          promptContent: `Create detailed image generation prompts based on this content to accompany the article and social media posts.
+          description: 'Generates a prompt for AI image creation',
+          promptContent: `You are an AI assistant that is an expert at writing image generation prompts. Based on the following article and analysis, write a single, detailed, and evocative paragraph that can be used as a prompt for an AI image generator like Ideogram.
 
-News Article:
+**Article:**
 {article_content}
 
-Analysis Output:
+**Analysis:**
 {analysis_output}
 
-Generate 3 different image prompts:
-1. Hero image for the article (inspirational, relevant to content)
-2. Social media image (engaging, shareable)
-3. Background/texture image (subtle, supportive)
+**Instructions:**
+- Write only the prompt itself.
+- Do not include any preamble, instructions, or extra text like "Here is a prompt:".
+- The prompt should describe a visually rich scene, including details about the subject, setting, lighting, color, and mood.
+- The prompt should be a single paragraph.
 
-Each prompt should be detailed and specify style, mood, colors, and composition.`,
-          systemMessage: 'You are a visual content creator for Eden.co.uk. Create image prompts that are inspirational, relevant, and visually appealing for Christian audiences.'
+**Example of a good prompt:**
+A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam cutting through the dark clouds, symbolizing hope and steadfastness in times of trial. The waves crash against the rocks below, sending a salty spray high into the air. The overall mood is one of resilience and unwavering faith.`,
+          systemMessage: 'You are an expert image prompt writer for Eden.co.uk. Your prompts create visually stunning, thematically relevant images for a Christian audience.'
         }
       ];
 

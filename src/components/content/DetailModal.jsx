@@ -326,7 +326,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onApprove(selectedContent.gen_article_id, selectedContent.content_type);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error approving content:', error);
                     // Keep modal open on error so user can retry
@@ -343,7 +343,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onReject(selectedContent.gen_article_id, selectedContent.content_type);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error rejecting content:', error);
                     // Keep modal open on error so user can retry
@@ -364,7 +364,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onPublish('article', selectedContent.gen_article_id, 'published');
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error publishing content:', error);
                     // Keep modal open on error so user can retry
@@ -381,7 +381,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onReturnToReview('article', selectedContent.gen_article_id, 'review_pending');
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error returning to review:', error);
                     // Keep modal open on error so user can retry
@@ -398,7 +398,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onArchive('article', selectedContent.gen_article_id, 'archived');
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error archiving content:', error);
                     // Keep modal open on error so user can retry
@@ -423,7 +423,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onReturnToReview(selectedContent.gen_article_id, selectedContent.content_type);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error returning to review:', error);
                     // Keep modal open on error so user can retry
@@ -440,7 +440,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onRegenerate(selectedContent);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error regenerating content:', error);
                     // Keep modal open on error so user can retry
@@ -461,7 +461,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onReturnToApproved('article', selectedContent.gen_article_id, 'approved');
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error returning to approved:', error);
                     // Keep modal open on error so user can retry
@@ -478,7 +478,7 @@ const DetailModal = ({
                 onClick={async () => {
                   try {
                     await onRegenerate(selectedContent);
-                    onClose();
+                  onClose();
                   } catch (error) {
                     console.error('Error regenerating content:', error);
                     // Keep modal open on error so user can retry
