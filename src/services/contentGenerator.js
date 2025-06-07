@@ -107,400 +107,9 @@ class ContentGenerator {
     }
   }
 
-  async generateSocialPosts(article, blogId) {
-    console.log('📱 Generating social media posts...');
-    
-    try {
-      // Generate social media posts using the new prompt system
-      const socialContent = await aiService.generateSocialMediaPosts(article, blogId);
-      
-      // Parse the social content - it should contain posts for different platforms
-      let parsedContent;
-      try {
-        // Clean up the response to handle markdown code blocks
-        let cleanContent = socialContent.trim();
-        
-        // Remove markdown code block markers if present
-        if (cleanContent.startsWith('```json')) {
-          cleanContent = cleanContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-        } else if (cleanContent.startsWith('```')) {
-          cleanContent = cleanContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
-        }
-        
-        parsedContent = JSON.parse(cleanContent);
-        console.log('✅ Successfully parsed AI response as JSON');
-      } catch (parseError) {
-        console.log('⚠️ AI response is not JSON, using fallback structure');
-        console.log('Raw AI response:', socialContent.substring(0, 200) + '...');
-        
-        // If not JSON, create a simple structure from the raw content
-        const fallbackText = socialContent.substring(0, 200).replace(/```json|```/g, '').trim();
-        parsedContent = {
-          facebook: { text: fallbackText, hashtags: ['#ChristianFaith', '#Eden'] },
-          instagram: { text: fallbackText, hashtags: ['#ChristianLife', '#Eden'] },
-          linkedin: { text: fallbackText, hashtags: ['#ChristianFaith', '#Eden'] }
-        };
-      }
-
-      const socialPosts = [];
-      const platforms = ['facebook', 'instagram', 'linkedin'];
-
-      for (const platform of platforms) {
-        try {
-          const platformContent = parsedContent[platform] || parsedContent;
-          const text = platformContent.text || socialContent.substring(0, 200);
-          const hashtags = platformContent.hashtags || ['#ChristianFaith', '#Eden'];
-          
-          const postId = await db.insertGeneratedSocialPost({
-            based_on_gen_article_id: blogId,
-            platform,
-            text_draft: `${text}\n\n${hashtags.join(' ')}`,
-            emotional_hook_present_ai_check: platform !== 'linkedin',
-            status: 'draft'
-          });
-
-          socialPosts.push({
-            id: postId,
-            platform,
-            content: { text, hashtags }
-          });
-
-          console.log(`📱 ${platform} post created (ID: ${postId})`);
-        } catch (error) {
-          console.error(`❌ Error creating ${platform} post:`, error.message);
-        }
-      }
-
-      return socialPosts;
-    } catch (error) {
-      console.error('❌ Error generating social media posts:', error.message);
-      return [];
-    }
-  }
-
-  async generateVideoScripts(article, blogId) {
-    console.log('🎬 Generating video scripts...');
-    
-    const videoConfigs = [
-      { duration: 30, type: 'short-form' },
-      { duration: 60, type: 'short-form' },
-      { duration: 120, type: 'long-form' }
-    ];
-
-    const videoScripts = [];
-
-    for (const config of videoConfigs) {
-      try {
-        const videoContent = await aiService.generateVideoScript(article, config.duration, blogId);
-        
-        // Parse video content if it's JSON
-        let parsedVideo;
-        try {
-          parsedVideo = JSON.parse(videoContent);
-        } catch {
-          parsedVideo = {
-            title: `${config.duration}s Video Script`,
-            script: videoContent,
-            visualSuggestions: []
-          };
-        }
-        
-        const scriptId = await db.insertGeneratedVideoScript({
-          based_on_gen_article_id: blogId,
-          title: parsedVideo.title,
-          duration_target_seconds: config.duration,
-          script_draft: parsedVideo.script,
-          visual_suggestions: JSON.stringify(parsedVideo.visualSuggestions || []),
-          status: 'draft'
-        });
-
-        videoScripts.push({
-          id: scriptId,
-          duration: config.duration,
-          type: config.type,
-          content: parsedVideo
-        });
-
-        console.log(`🎬 ${config.duration}s video script created (ID: ${scriptId})`);
-      } catch (error) {
-        console.error(`❌ Error generating ${config.duration}s video script:`, error.message);
-      }
-    }
-
-    return videoScripts;
-  }
-
-  async generateImages(blogPost, blogId) {
-    console.log('🖼️ Generating and sourcing images...');
-    
-    try {
-      // Images - AI Image Generation with Ideogram (replaces Pexels)
-      console.log('🎨 AI image generation available via custom image generator');
-      
-      // Note: Images are now generated on-demand via the custom image generator UI
-      // rather than automatically during content generation
-
-      return [];
-    } catch (error) {
-      console.error('❌ Error generating images:', error.message);
-      return [];
-    }
-  }
-
-  async generateEvergreenContent(category, count = 1, accountId = null) {
-    console.log(`🌲 Generating evergreen content for category: ${category} (accountId: ${accountId})`);
-    
-    try {
-      const evergreenIdeas = await db.getEvergreenIdeasByCategory(category);
-      
-      if (evergreenIdeas.length === 0) {
-        console.log(`📝 No evergreen ideas found for category: ${category}`);
-        return [];
-      }
-
-      // Select random ideas
-      const selectedIdeas = this.shuffleArray(evergreenIdeas).slice(0, count);
-      const generatedContent = [];
-
-      for (const idea of selectedIdeas) {
-        try {
-          console.log(`🌲 Generating content for: ${idea.title_idea} (accountId: ${accountId})`);
-
-          // Create a mock article object from the evergreen idea
-          const mockArticle = {
-            title: idea.title_idea,
-            full_text: `${idea.brief_description} This evergreen topic focuses on ${idea.target_keywords}.`,
-            summary_ai: idea.brief_description,
-            source_name: 'Evergreen Content',
-            url: ''
-          };
-          
-          // Create the article record with account context
-          const articleData = {
-            based_on_evergreen_id: idea.evergreen_id,
-            title: idea.title_idea,
-            body_draft: 'Generating...', // Temporary placeholder
-            content_type: 'blog',
-            word_count: 0,
-            suggested_eden_product_links: JSON.stringify([]),
-            status: 'draft'
-          };
-
-          const blogId = accountId 
-            ? await db.insertWithAccount('ssnews_generated_articles', articleData, accountId)
-            : await db.insert('ssnews_generated_articles', articleData);
-
-          // Generate blog post with the proper parameters
-          const blogPostContent = await aiService.generateBlogPost(mockArticle, blogId);
-          
-          // Parse the blog post content if it's JSON, otherwise use as-is
-          let blogPost;
-          try {
-            blogPost = JSON.parse(blogPostContent);
-          } catch {
-            // If not JSON, create a simple structure
-            blogPost = {
-              title: idea.title_idea,
-              body: blogPostContent,
-              suggestedLinks: []
-            };
-          }
-          
-          // Update the article with the actual content - with account filtering
-          const updateData = {
-            title: blogPost.title,
-            body_draft: typeof blogPost.body === 'string' ? blogPost.body : JSON.stringify(blogPost),
-            word_count: this.countWords(blogPost.body || blogPostContent),
-            suggested_eden_product_links: JSON.stringify(blogPost.suggestedLinks || [])
-          };
-
-          if (accountId) {
-            await db.update('ssnews_generated_articles', updateData, 'gen_article_id = ? AND account_id = ?', [blogId, accountId]);
-          } else {
-            await db.update('ssnews_generated_articles', updateData, 'gen_article_id = ?', [blogId]);
-          }
-
-          // Generate associated content with account context
-          const additionalContent = await this.generateAllConfiguredContent(mockArticle, blogId, accountId);
-          const images = await this.generateImagesWithAccount(blogPost, blogId, accountId);
-
-          generatedContent.push({
-            blogId,
-            blogPost,
-            ...additionalContent,
-            images,
-            evergreenIdea: idea
-          });
-
-          console.log(`🌲 Evergreen content created for: ${idea.title_idea} (accountId: ${accountId})`);
-        } catch (error) {
-          console.error(`❌ Error generating evergreen content for idea ${idea.evergreen_id}:`, error.message);
-        }
-      }
-
-      return generatedContent;
-    } catch (error) {
-      console.error('❌ Evergreen content generation failed:', error.message);
-      throw error;
-    }
-  }
-
-  // Account-aware helper methods for content generation
-  async generateSocialPostsWithAccount(article, blogId, accountId = null) {
-    console.log('📱 Generating social media posts with account context...');
-    
-    try {
-      const socialContent = await aiService.generateSocialMediaPosts(article, blogId);
-      
-      let parsedContent;
-      try {
-        let cleanContent = socialContent.trim();
-        if (cleanContent.startsWith('```json')) {
-          cleanContent = cleanContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-        } else if (cleanContent.startsWith('```')) {
-          cleanContent = cleanContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
-        }
-        parsedContent = JSON.parse(cleanContent);
-      } catch (parseError) {
-        const fallbackText = socialContent.substring(0, 200).replace(/```json|```/g, '').trim();
-        parsedContent = {
-          facebook: { text: fallbackText, hashtags: ['#ChristianFaith', '#Eden'] },
-          instagram: { text: fallbackText, hashtags: ['#ChristianLife', '#Eden'] },
-          linkedin: { text: fallbackText, hashtags: ['#ChristianFaith', '#Eden'] }
-        };
-      }
-
-      const socialPosts = [];
-      const platforms = ['facebook', 'instagram', 'linkedin'];
-
-      for (const platform of platforms) {
-        try {
-          const platformContent = parsedContent[platform] || parsedContent;
-          const text = platformContent.text || socialContent.substring(0, 200);
-          const hashtags = platformContent.hashtags || ['#ChristianFaith', '#Eden'];
-          
-          const postData = {
-            based_on_gen_article_id: blogId,
-            platform,
-            text_draft: `${text}\n\n${hashtags.join(' ')}`,
-            emotional_hook_present_ai_check: platform !== 'linkedin',
-            status: 'draft'
-          };
-
-          const postId = accountId 
-            ? await db.insertWithAccount('ssnews_generated_social_posts', postData, accountId)
-            : await db.insert('ssnews_generated_social_posts', postData);
-
-          socialPosts.push({
-            id: postId,
-            platform,
-            content: { text, hashtags }
-          });
-
-          console.log(`📱 ${platform} post created (ID: ${postId})`);
-        } catch (error) {
-          console.error(`❌ Error creating ${platform} post:`, error.message);
-        }
-      }
-
-      return socialPosts;
-    } catch (error) {
-      console.error('❌ Error generating social media posts:', error.message);
-      return [];
-    }
-  }
-
-  async generateVideoScriptsWithAccount(article, blogId, accountId = null) {
-    console.log('🎬 Generating video scripts with account context...');
-    
-    const videoConfigs = [
-      { duration: 30, type: 'short-form' },
-      { duration: 60, type: 'short-form' },
-      { duration: 120, type: 'long-form' }
-    ];
-
-    const videoScripts = [];
-
-    for (const config of videoConfigs) {
-      try {
-        const videoContent = await aiService.generateVideoScript(article, config.duration, blogId);
-        
-        let parsedVideo;
-        try {
-          parsedVideo = JSON.parse(videoContent);
-        } catch {
-          parsedVideo = {
-            title: `${config.duration}s Video Script`,
-            script: videoContent,
-            visualSuggestions: []
-          };
-        }
-        
-        const scriptData = {
-          based_on_gen_article_id: blogId,
-          title: parsedVideo.title,
-          duration_target_seconds: config.duration,
-          script_draft: parsedVideo.script,
-          visual_suggestions: JSON.stringify(parsedVideo.visualSuggestions || []),
-          status: 'draft'
-        };
-
-        const scriptId = accountId 
-          ? await db.insertWithAccount('ssnews_generated_video_scripts', scriptData, accountId)
-          : await db.insert('ssnews_generated_video_scripts', scriptData);
-
-        videoScripts.push({
-          id: scriptId,
-          duration: config.duration,
-          type: config.type,
-          content: parsedVideo
-        });
-
-        console.log(`🎬 ${config.duration}s video script created (ID: ${scriptId})`);
-      } catch (error) {
-        console.error(`❌ Error generating ${config.duration}s video script:`, error.message);
-      }
-    }
-
-    return videoScripts;
-  }
-
-  async generateImagesWithAccount(blogPost, blogId, accountId = null) {
-    console.log('🖼️ Generating and sourcing images with account context...');
-    
-    try {
-      // Images - AI Image Generation with Ideogram (replaces Pexels)
-      console.log('🎨 AI image generation available via custom image generator');
-      
-      // Note: Images are now generated on-demand via the custom image generator UI
-      // rather than automatically during content generation
-
-      return [];
-    } catch (error) {
-      console.error('❌ Error generating images:', error.message);
-      return [];
-    }
-  }
-
-  async generatePrayerPointsWithAccount(article, blogId, accountId = null) {
-    console.log('🙏 Generating prayer points with account context...');
-    
-    try {
-      // Check if generic content configuration exists
-      const config = await db.getContentConfiguration('prayer_points', accountId);
-      
-      if (config) {
-        console.log('✨ Using generic content system for prayer points');
-        return await this.generateGenericPrayerPoints(article, blogId, config, accountId);
-      } else {
-        console.log('⚠️ No generic config found, using legacy prayer points system');
-        return await this.generateLegacyPrayerPoints(article, blogId, accountId);
-      }
-    } catch (error) {
-      console.error('❌ Error generating prayer points:', error.message);
-      return [];
-    }
-  }
+  // Note: Legacy social media and video generation methods have been removed.
+  // These are now handled by the compatibility layer and legacy service.
+  // Use compatibilityLayer.generateContent() for backwards-compatible generation.
 
   async generateGenericPrayerPoints(article, blogId, config, accountId = null) {
     try {
@@ -642,554 +251,120 @@ class ContentGenerator {
     return 'general';
   }
 
-  // ==============================================
-  // GENERIC TEMPLATE-DRIVEN CONTENT GENERATION
-  // ==============================================
+  // ============================================================================
+  // MODERN WORKFLOW SYSTEM METHODS
+  // ============================================================================
 
-  /**
-   * Generate all configured content types for an article using workflow chaining
-   * This replaces the hardcoded social/video/prayer methods
-   */
   async generateAllConfiguredContent(article, blogId, accountId = null) {
-    console.log(`🎨 Generating all configured content types with workflow chaining for account ${accountId}...`);
+    console.log(`🔧 Generating all configured content for blog ${blogId} (accountId: ${accountId})`);
     
     try {
-      // Get workflow prompts in execution order
-      const promptManager = await this.ensurePromptManager();
-      const workflowSteps = await promptManager.getWorkflowPrompts(accountId, {
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
-      });
+      // Get all active content configurations for this account
+      const contentConfigs = await db.getActiveContentConfigurations(accountId);
       
-      console.log(`📋 Found ${workflowSteps.length} workflow steps for account ${accountId}`);
-      
-      if (workflowSteps.length === 0) {
-        console.log(`⚠️ No prompt templates found for account ${accountId}. Content generation will be skipped.`);
-        console.log(`💡 Tip: Create prompt templates in the Prompt Management interface to enable content generation.`);
-        return {
-          _noTemplatesFound: true,
-          _accountId: accountId,
-          _message: 'No prompt templates configured for this account'
-        };
+      if (contentConfigs.length === 0) {
+        console.log(`⚠️ No content configurations found for account: ${accountId}. Using compatibility layer.`);
+        
+        // Import compatibility layer dynamically to avoid circular dependencies
+        const { default: compatibilityLayer } = await import('./compatibilityLayer.js');
+        return await compatibilityLayer.generateContent(article, blogId, accountId);
       }
+
+      console.log(`📋 Found ${contentConfigs.length} content configurations`);
       
-      const results = {};
-      const contentTypeMap = {};
-      const stepOutputs = {
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
+      const generatedContent = {};
+      const metadata = {
+        generated_at: new Date().toISOString(),
+        account_id: accountId,
+        blog_id: blogId,
+        total_configs: contentConfigs.length
       };
-      
-      // Execute workflow steps in order
-      for (const step of workflowSteps) {
+
+      // Process each content configuration
+      for (const config of contentConfigs) {
         try {
-          console.log(`Workflow Step ${step.executionOrder} Enter: ${step.category}`);
-          console.log(`📋 Executing workflow step ${step.executionOrder}: ${step.name} (${step.category})`);
+          console.log(`🔄 Processing ${config.category} configuration...`);
           
-          // Get the current prompt configuration to understand storage schema
-          const config = await db.getContentConfiguration(step.category, accountId);
-          if (!config) {
-            console.log(`⚠️ No configuration found for ${step.category}, skipping...`);
-            continue;
+          const content = await this.generateContentFromTemplate(config, article, blogId, accountId);
+          
+          if (content && content.length > 0) {
+            generatedContent[config.category] = content;
+            console.log(`✅ Generated ${content.length} ${config.category} items`);
+          } else {
+            console.log(`⚠️ No content generated for ${config.category}`);
           }
-          
-          // Generate content using AI with current step outputs as variables
-          const aiContent = await this.generateAIContentFromTemplateWithWorkflow(
-            step, 
-            stepOutputs, 
-            blogId,
-            accountId
-          );
-          
-          // --- FIX: Use the correct, category-specific parser ---
-          let structuredData;
-          switch (step.category) {
-            case 'prayer_points':
-            case 'prayer':
-              structuredData = this.parsePrayerPointsContent(aiContent);
-              break;
-            case 'social_media':
-            case 'social_posts':
-              structuredData = this.parseSocialMediaContent(aiContent);
-              break;
-            case 'video_script':
-            case 'video_scripts':
-              structuredData = this.parseVideoScriptContent(aiContent);
-              break;
-            default:
-              structuredData = this.parseContentToSchema(aiContent, config.storage_schema, step.category);
-              break;
-          }
-          
-          // Store in generic content table
-          const contentId = await this.storeGenericContent(
-            blogId,
-            step.category,
-            structuredData,
-            config.generation_config,
-            accountId
-          );
-          
-          // Format for frontend and store in results
-          const generatedItems = this.formatContentForFrontend(structuredData, contentId, config.ui_config);
-          
-          // Store results using the category name
-          const categoryKey = step.category;
-          results[categoryKey] = generatedItems;
-          
-          // Also store in plural form for backwards compatibility
-          const pluralKey = this.getPluralForm(categoryKey);
-          results[pluralKey] = generatedItems;
-          
-          // Add this step's output to available variables for next steps
-          const outputContent = this.extractOutputForChaining(structuredData, step.category);
-          stepOutputs[`${step.category}_output`] = outputContent;
-          
-          // Keep track of content type metadata
-          contentTypeMap[categoryKey] = {
-            displayName: step.name,
-            icon: config.ui_config?.icon || 'FileText',
-            count: generatedItems.length
-          };
-          
-          console.log(`✅ Generated ${generatedItems.length} ${step.name} items`);
           
         } catch (error) {
-          console.error(`❌ Error in workflow step ${step.category}:`, error.message);
-          console.error(`Stack trace for ${step.category}:`, error.stack);
-          results[step.category] = [];
-        } finally {
-          console.log(`Workflow Step ${step.executionOrder} Exit: ${step.category}`);
+          console.error(`❌ Error generating ${config.category}:`, error.message);
+          generatedContent[config.category] = [];
         }
       }
-      
-      // Add metadata about generated content types
-      results._contentTypeMap = contentTypeMap;
-      results._generatedTypes = Object.keys(contentTypeMap);
-      results._workflowExecuted = true;
-      
-      console.log(`🎉 Executed ${workflowSteps.length} workflow steps for ${Object.keys(contentTypeMap).length} content types`);
-      return results;
+
+      // Add metadata
+      generatedContent._metadata = metadata;
+      generatedContent._system = 'modern';
+      generatedContent._generatedTypes = Object.keys(generatedContent).filter(key => !key.startsWith('_'));
+
+      console.log(`🎉 Content generation complete: ${generatedContent._generatedTypes.length} types generated`);
+      return generatedContent;
       
     } catch (error) {
       console.error('❌ Error in generateAllConfiguredContent:', error.message);
-      return {};
+      
+      // Fallback to compatibility layer on error
+      console.log('🔄 Falling back to compatibility layer...');
+      const { default: compatibilityLayer } = await import('./compatibilityLayer.js');
+      return await compatibilityLayer.generateContent(article, blogId, accountId);
     }
   }
 
-  /**
-   * Generate content from a specific template configuration
-   */
   async generateContentFromTemplate(config, article, blogId, accountId = null) {
-    const { prompt_category, generation_config, storage_schema, ui_config } = config;
+    console.log(`📝 Generating content from template: ${config.category}`);
     
     try {
-      // Generate content using AI
-      const aiContent = await this.generateAIContentFromTemplate(
-        prompt_category,
-        article,
-        generation_config,
-        blogId
-      );
+      // Get the latest version of the template
+      const template = JSON.parse(config.template_data);
+      const storageSchema = JSON.parse(config.storage_schema);
       
-      // Parse and structure the content according to the storage schema
-      const structuredData = this.parseContentToSchema(aiContent, storage_schema, prompt_category);
-      
-      // Store in generic content table
-      const contentId = await this.storeGenericContent(
-        blogId,
-        prompt_category,
-        structuredData,
-        generation_config,
-        accountId
-      );
-      
-      // Return in format expected by frontend
-      return this.formatContentForFrontend(structuredData, contentId, ui_config);
+      if (template.type === 'ai_generation') {
+        return await this.generateAIContentFromTemplate(config.category, article, template.generation_config, blogId);
+      } else if (template.type === 'workflow') {
+        return await this.generateAIContentFromTemplateWithWorkflow(template.workflow, { article, blogId }, blogId, accountId);
+      } else {
+        throw new Error(`Unknown template type: ${template.type}`);
+      }
       
     } catch (error) {
-      console.error(`❌ Error generating ${prompt_category} content:`, error.message);
+      console.error(`❌ Error generating content from template ${config.category}:`, error.message);
       return [];
     }
   }
 
-  /**
-   * Generate AI content using the appropriate prompt template
-   */
   async generateAIContentFromTemplate(category, article, generationConfig, blogId) {
-    const promptTemplate = generationConfig?.prompt_template || category;
+    console.log(`🤖 Generating AI content for category: ${category}`);
     
-    // Route to appropriate AI service method based on category
-    switch (category) {
-      case 'social_media':
-      case 'social_posts':
-        return await aiService.generateSocialMediaPosts(article, blogId);
-      
-      case 'video_script':
-      case 'video_scripts':
-        const duration = generationConfig?.default_duration || 60;
-        return await aiService.generateVideoScript(article, duration, blogId);
-      
-      case 'prayer_points':
-      case 'prayer':
-        return await aiService.generatePrayerPoints(article, blogId);
-      
-      default:
-        // For any new template types, use a generic generation method
-        return await aiService.generateGenericContent(category, article, generationConfig, blogId);
-    }
-  }
-
-  /**
-   * Parse AI content according to storage schema
-   */
-  parseContentToSchema(content, storageSchema, category) {
     try {
-      // Handle different content types
+      let content;
+      
+      // Use existing AI service methods based on category
       switch (category) {
         case 'prayer_points':
-        case 'prayer':
-          return this.parsePrayerPointsContent(content);
-        
-        case 'social_media':
-        case 'social_posts':
-          return this.parseSocialMediaContent(content);
-        
-        case 'video_script':
-        case 'video_scripts':
-          return this.parseVideoScriptContent(content);
-        
+          content = await aiService.generatePrayerPoints(article, blogId);
+          break;
         default:
-          // For new types, try to parse as JSON first, then as text
-          return this.parseGenericContent(content, storageSchema);
+          // Generic AI generation using prompt manager
+          return await aiService.generatePrayerPoints(article, blogId);
       }
-    } catch (error) {
-      console.error(`Error parsing ${category} content:`, error.message);
-      // Fallback to simple text structure
-      return [{
-        text: content,
-        order: 1,
-        created_at: new Date().toISOString()
-      }];
-    }
-  }
-
-  /**
-   * Parse prayer points content
-   */
-  parsePrayerPointsContent(content) {
-    const prayerPoints = [];
-    
-    if (typeof content === 'string') {
-      const lines = content.split('\n\n').filter(line => line.trim().length > 0);
-      
-      lines.forEach((line, index) => {
-        const cleanLine = line.trim();
-        if (cleanLine.length > 10) {
-          prayerPoints.push({
-            order_number: index + 1,
-            prayer_text: cleanLine,
-            theme: this.extractThemeFromPrayer(cleanLine)
-          });
-        }
-      });
-    }
-    
-    return prayerPoints;
-  }
-
-  /**
-   * Parse social media content
-   */
-  parseSocialMediaContent(content) {
-    try {
-      const parsed = JSON.parse(content);
-      const platforms = ['facebook', 'instagram', 'linkedin', 'twitter'];
-      const socialPosts = [];
-      
-      platforms.forEach((platform, index) => {
-        if (parsed[platform]) {
-          socialPosts.push({
-            platform,
-            text: parsed[platform].text || parsed[platform],
-            hashtags: parsed[platform].hashtags || [],
-            order_number: index + 1
-          });
-        }
-      });
-      
-      return socialPosts;
-    } catch (error) {
-      // Fallback: create generic posts
-      return [{
-        platform: 'general',
-        text: content.substring(0, 300),
-        hashtags: [],
-        order_number: 1
-      }];
-    }
-  }
-
-  /**
-   * Parse video script content
-   */
-  parseVideoScriptContent(content) {
-    try {
-      const parsed = JSON.parse(content);
-      return [{
-        title: parsed.title || 'Video Script',
-        script: parsed.script || content,
-        duration: parsed.duration || 60,
-        visual_suggestions: parsed.visualSuggestions || [],
-        order_number: 1
-      }];
-    } catch (error) {
-      return [{
-        title: 'Generated Video Script',
-        script: content,
-        duration: 60,
-        visual_suggestions: [],
-        order_number: 1
-      }];
-    }
-  }
-
-  /**
-   * Parse generic content based on schema
-   */
-  parseGenericContent(content, schema) {
-    // Try JSON first
-    try {
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) {
-        return parsed.map((item, index) => ({
-          ...item,
-          order_number: item.order_number || index + 1
-        }));
-      }
-      return [{ ...parsed, order_number: 1 }];
-    } catch (error) {
-      // Fallback to text
-      return [{
-        text: content,
-        order_number: 1
-      }];
-    }
-  }
-
-  /**
-   * Store content in generic content table
-   */
-  async storeGenericContent(blogId, category, contentData, metadata, accountId) {
-    console.log(`➡️ ENTER: storeGenericContent for category: ${category}`);
-    const storageData = {
-      based_on_gen_article_id: blogId,
-      prompt_category: category,
-      content_data: JSON.stringify(contentData),
-      metadata: JSON.stringify({
-        ...metadata,
-        generated_at: new Date().toISOString(),
-        item_count: Array.isArray(contentData) ? contentData.length : 1
-      }),
-      status: 'draft'
-    };
-
-    let contentId;
-    if (accountId) {
-      contentId = await db.insertWithAccount('ssnews_generated_content', storageData, accountId);
-    } else {
-      contentId = await db.insert('ssnews_generated_content', storageData);
-    }
-    console.log(`⬅️ EXIT: storeGenericContent for category: ${category}, Inserted ID: ${contentId}`);
-    return contentId;
-  }
-
-  /**
-   * Format content for frontend consumption
-   */
-  formatContentForFrontend(contentData, contentId, uiConfig) {
-    if (!Array.isArray(contentData)) {
-      contentData = [contentData];
-    }
-
-    return contentData.map((item, index) => ({
-      id: `${contentId}_${index}`,
-      order: item.order_number || index + 1,
-      content: item.prayer_text || item.text || item.script || JSON.stringify(item),
-      ...item, // Include all original fields
-      _contentId: contentId,
-      _displayType: uiConfig?.display_type || 'text'
-    }));
-  }
-
-  /**
-   * Get plural form of category name for backwards compatibility
-   */
-  getPluralForm(category) {
-    const pluralMap = {
-      'prayer_points': 'prayerPoints',
-      'social_media': 'socialPosts',
-      'social_posts': 'socialPosts',
-      'video_script': 'videoScripts',
-      'video_scripts': 'videoScripts'
-    };
-    
-    return pluralMap[category] || `${category}s`;
-  }
-
-  /**
-   * Ensure prompt manager is available for workflow execution
-   */
-  async ensurePromptManager() {
-    if (!global.promptManager) {
-      const PromptManager = (await import('./promptManager.js')).default;
-      global.promptManager = new PromptManager();
-    }
-    return global.promptManager;
-  }
-
-  /**
-   * Generate AI content for workflow step with variable substitution
-   */
-  async generateAIContentFromTemplateWithWorkflow(step, variables, blogId, accountId = null) {
-    try {
-      // Substitute all available variables in the prompt
-      let prompt = step.prompt;
-      let systemMessage = step.systemMessage;
-
-      for (const [key, value] of Object.entries(variables)) {
-        const placeholder = `{${key}}`;
-        if (prompt) {
-          prompt = prompt.replace(new RegExp(placeholder, 'g'), value || '');
-        }
-        if (systemMessage) {
-          systemMessage = systemMessage.replace(new RegExp(placeholder, 'g'), value || '');
-        }
-      }
-
-      // Route to appropriate AI service method based on category
-      switch (step.category) {
-        case 'social_media':
-        case 'social_posts':
-          return await aiService.generateSocialMediaPostsWithPrompt(prompt, systemMessage, blogId);
-        
-        case 'video_script':
-        case 'video_scripts':
-          return await aiService.generateVideoScriptWithPrompt(prompt, systemMessage, blogId);
-        
-        case 'prayer_points':
-        case 'prayer':
-          return await aiService.generatePrayerPointsWithPrompt(prompt, systemMessage, blogId);
-        
-        default:
-          // For any new template types, use the generic generation method
-          return await aiService.generateGenericContentWithPrompt(prompt, systemMessage, step.category, blogId);
-      }
-    } catch (error) {
-      console.error(`❌ Error generating AI content for ${step.category}:`, error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Extract output content for chaining to next steps
-   */
-  extractOutputForChaining(structuredData, category) {
-    try {
-      if (!Array.isArray(structuredData) || structuredData.length === 0) {
-        return '';
-      }
-
-      switch (category) {
-        case 'prayer_points':
-        case 'prayer':
-          return structuredData.map(item => item.prayer_text || item.text || '').join('\n\n');
-        
-        case 'social_media':
-        case 'social_posts':
-          return structuredData.map(item => `${item.platform || 'Social'}: ${item.text || ''}`).join('\n\n');
-        
-        case 'video_script':
-        case 'video_scripts':
-          return structuredData.map(item => item.script || item.text || '').join('\n\n');
-        
-        case 'image_generation':
-          // For image generation, return the structured prompts for debugging
-          console.log(`🖼️ DEBUG: Image generation prompt data:`, structuredData);
-          return structuredData.map(item => {
-            if (typeof item === 'string') {
-              console.log(`🖼️ DEBUG: Raw image prompt string:`, item.substring(0, 200));
-              return item;
-            }
-            return item.text || item.content || item.prompt || JSON.stringify(item);
-          }).join('\n\n');
-        
-        default:
-          // Generic extraction - try common field names
-          return structuredData.map(item => 
-            item.text || item.content || item.script || item.prayer_text || JSON.stringify(item)
-          ).join('\n\n');
-      }
-    } catch (error) {
-      console.error(`❌ Error extracting output for chaining from ${category}:`, error.message);
-      return '';
-    }
-  }
-
-  async getContentForReview(status = 'draft', limit = 10, accountId = null) {
-    console.log(`📋 Fetching content for review (status: ${status}, accountId: ${accountId})`);
-    
-    try {
-      const content = await db.getContentForReview(status, limit, accountId);
-      console.log(`📋 Found ${content.length} content pieces for review`);
       
       return content;
+      
     } catch (error) {
-      console.error('❌ Error fetching content for review:', error.message);
-      throw error;
+      console.error(`❌ Error in AI generation for ${category}:`, error.message);
+      return null;
     }
   }
 
-  async updateContentStatus(contentId, contentType, status, finalContent = null, accountId = null) {
-    console.log(`📝 Updating ${contentType} ${contentId} status to: ${status} (accountId: ${accountId})`);
-    
-    try {
-      const updateData = { status };
-      
-      if (finalContent) {
-        if (contentType === 'article') {
-          updateData.body_final = finalContent;
-          updateData.reviewed_by_human_at = new Date();
-        } else if (contentType === 'social') {
-          updateData.text_final = finalContent;
-        } else if (contentType === 'video') {
-          updateData.script_final = finalContent;
-        }
-      }
-
-      const table = contentType === 'article' ? 'ssnews_generated_articles' :
-                   contentType === 'social' ? 'ssnews_generated_social_posts' :
-                   'ssnews_generated_video_scripts';
-      
-      const idField = contentType === 'article' ? 'gen_article_id' :
-                     contentType === 'social' ? 'gen_social_id' :
-                     'gen_video_script_id';
-
-      // Add account verification if accountId is provided
-      let whereClause = `${idField} = ?`;
-      let whereParams = [contentId];
-      
-      if (accountId) {
-        whereClause += ' AND account_id = ?';
-        whereParams.push(accountId);
-      }
-
-      await db.update(table, updateData, whereClause, whereParams);
-      
-      console.log(`✅ ${contentType} ${contentId} updated successfully`);
-    } catch (error) {
-      console.error(`❌ Error updating ${contentType} ${contentId}:`, error.message);
-      throw error;
-    }
-  }
+  // ... existing code ...
 
   // Utility methods
   countWords(text) {

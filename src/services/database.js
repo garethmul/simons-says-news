@@ -749,6 +749,129 @@ class DatabaseService {
       console.log('✅ Database connections closed');
     }
   }
+
+  // ============================================================================
+  // TRANSACTION SUPPORT METHODS - STAGE 2
+  // ============================================================================
+
+  /**
+   * Begin a database transaction
+   */
+  async beginTransaction() {
+    try {
+      const connection = await this.pool.getConnection();
+      await connection.beginTransaction();
+      console.log('🔄 [TRANSACTION] Started database transaction');
+      return connection;
+    } catch (error) {
+      console.error('❌ [TRANSACTION] Failed to begin transaction:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Commit a database transaction
+   */
+  async commitTransaction(connection) {
+    try {
+      await connection.commit();
+      connection.release();
+      console.log('✅ [TRANSACTION] Transaction committed successfully');
+    } catch (error) {
+      console.error('❌ [TRANSACTION] Failed to commit transaction:', error.message);
+      await this.rollbackTransaction(connection);
+      throw error;
+    }
+  }
+
+  /**
+   * Rollback a database transaction
+   */
+  async rollbackTransaction(connection) {
+    try {
+      await connection.rollback();
+      connection.release();
+      console.log('🔄 [TRANSACTION] Transaction rolled back');
+    } catch (error) {
+      console.error('❌ [TRANSACTION] Failed to rollback transaction:', error.message);
+      // Always release connection even if rollback fails
+      try {
+        connection.release();
+      } catch (releaseError) {
+        console.error('❌ [TRANSACTION] Failed to release connection:', releaseError.message);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Insert data within a transaction
+   */
+  async insertInTransaction(table, data, connection) {
+    const columns = Object.keys(data);
+    const values = Object.values(data);
+    const placeholders = columns.map(() => '?').join(', ');
+    
+    const sql = `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
+    
+    try {
+      const [result] = await connection.execute(sql, values);
+      console.log(`📝 [TRANSACTION] Inserted into ${table} (ID: ${result.insertId})`);
+      return result.insertId;
+    } catch (error) {
+      console.error('❌ [TRANSACTION] Database insert failed:', error.message);
+      console.error('SQL:', sql);
+      console.error('Values:', values);
+      throw error;
+    }
+  }
+
+  /**
+   * Insert data with account ID within a transaction
+   */
+  async insertWithAccountInTransaction(table, data, accountId, connection) {
+    if (!accountId) {
+      throw new Error('accountId is required for multi-tenant insert in transaction');
+    }
+    const fullData = { ...data, account_id: accountId };
+    return await this.insertInTransaction(table, fullData, connection);
+  }
+
+  /**
+   * Update data within a transaction
+   */
+  async updateInTransaction(table, data, where, whereParams = [], connection) {
+    const setClause = Object.keys(data).map(key => `${key} = ?`).join(', ');
+    const values = [...Object.values(data), ...whereParams];
+    
+    const sql = `UPDATE ${table} SET ${setClause} WHERE ${where}`;
+    
+    try {
+      const [result] = await connection.execute(sql, values);
+      console.log(`📝 [TRANSACTION] Updated ${table} (${result.affectedRows} rows)`);
+      return result.affectedRows;
+    } catch (error) {
+      console.error('❌ [TRANSACTION] Database update failed:', error.message);
+      console.error('SQL:', sql);
+      console.error('Values:', values);
+      throw error;
+    }
+  }
+
+  /**
+   * Query within a transaction
+   */
+  async queryInTransaction(sql, params = [], connection) {
+    try {
+      const [rows] = await connection.execute(sql, params);
+      return rows;
+    } catch (error) {
+      console.error('❌ [TRANSACTION] Database query failed:', error.message);
+      console.error('SQL:', sql);
+      console.error('Params:', params);
+      throw error;
+    }
+  }
 }
 
 // Create singleton instance

@@ -40,7 +40,12 @@
     "migrate:unique-constraints": "node src/scripts/add-unique-constraints.js",
     "setup:prompts": "node src/scripts/setup-prompt-management.js",
     "setup:constraints": "node src/scripts/add-unique-constraints.js",
-    "setup:logs": "node scripts/add-logs-table.js"
+    "setup:logs": "node scripts/add-logs-table.js",
+    "test:all": "node tests/run-all-tests.js",
+    "test:comprehensive": "node tests/run-comprehensive-tests.js",
+    "test:eden-validation": "node tests/run-all-tests.js",
+    "test:stage3": "node test-stage3-core.js",
+    "test:modules": "node tests/unit/test-news-aggregation.js && node tests/unit/test-image-sourcing.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
