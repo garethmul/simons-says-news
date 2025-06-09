@@ -822,15 +822,15 @@ function createJobLogger(jobId, accountId = null) {
   return {
     info: (message, metadata = null) => {
       originalConsoleLog(`[Job ${jobId}] ${message}`);
-      // logToDatabase('info', message, metadata, jobId, accountId);
+      logToDatabase('info', message, metadata, jobId, accountId);
     },
     warn: (message, metadata = null) => {
       originalConsoleWarn(`[Job ${jobId}] ${message}`);
-      // logToDatabase('warn', message, metadata, jobId, accountId);
+      logToDatabase('warn', message, metadata, jobId, accountId);
     },
     error: (message, metadata = null) => {
       originalConsoleError(`[Job ${jobId}] ${message}`);
-      // logToDatabase('error', message, metadata, jobId, accountId);
+      logToDatabase('error', message, metadata, jobId, accountId);
     },
     debug: (message, metadata = null) => {
       originalConsoleLog(`[Job ${jobId}] DEBUG: ${message}`);
@@ -1611,7 +1611,7 @@ app.post('/api/eden/jobs/cleanup-stale', accountContext, async (req, res) => {
 
 // ===== CONTENT GENERATION API ENDPOINTS =====
 
-// Content types endpoint - Dynamic discovery from prompt templates
+// Content types endpoint - Dynamic discovery from prompt templates (EXTENSIBLE ARCHITECTURE)
 app.get('/api/eden/content/types', accountContext, async (req, res) => {
   try {
     if (!isSystemReady) {
@@ -1620,73 +1620,101 @@ app.get('/api/eden/content/types', accountContext, async (req, res) => {
 
     const { accountId } = req.accountContext;
 
-    // Get prompt templates from the database as the source of truth
+    // Get prompt templates from database - NO HARDCODED MAPPINGS!
+    // Query both account-specific and global templates for maximum flexibility
     const templates = await db.query(`
       SELECT 
         name,
         category,
+        media_type,
+        parsing_method,
+        ui_config,
+        execution_order,
         is_active
       FROM ssnews_prompt_templates 
-      WHERE account_id = ? AND is_active = 1
-      ORDER BY category ASC
+      WHERE (account_id = ? OR account_id = 'global') AND is_active = 1
+      ORDER BY execution_order ASC, category ASC
     `, [accountId]);
     
-    // Define content type mapping with proper UI configurations
-    const categoryIconMap = {
-      'analysis': 'BarChart3',
-      'blog_post': 'FileText',
-      'email': 'Mail',
-      'image_generation': 'Image',
-      'prayer': 'Heart',
-      'social_media': 'MessageSquare',
-      'video_script': 'Film'
-    };
+    console.log(`🔍 Found ${templates.length} active templates for account ${accountId}`);
 
-    const categoryNameMap = {
-      'analysis': 'Analysis',
-      'blog_post': 'Blog Post',
-      'email': 'Email Newsletter',
-      'image_generation': 'Images',
-      'prayer': 'Prayer Points',
-      'social_media': 'Social Media',
-      'video_script': 'Video Scripts'
-    };
+    if (templates.length === 0) {
+      console.log('⚠️ No templates found, falling back to generated content discovery');
+      
+      // Fallback: discover content types from actual generated content
+      const generatedCategories = await db.query(`
+        SELECT DISTINCT prompt_category as category, COUNT(*) as count
+        FROM ssnews_generated_content 
+        WHERE account_id = ?
+        GROUP BY prompt_category
+        ORDER BY prompt_category
+      `, [accountId]);
+      
+      // Create minimal templates for discovered categories
+      const fallbackTypes = generatedCategories.map((cat, index) => ({
+        id: cat.category,
+        name: cat.category.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+        icon: getFallbackIcon(cat.category),
+        category: cat.category,
+        description: `Generated ${cat.category.replace('_', ' ')} content`,
+        template: `${cat.category} Generator`,
+        order: index + 1,
+        displayType: cat.category === 'image_generation' ? 'images' : 'text',
+        emptyMessage: `No ${cat.category.replace('_', ' ')} content generated`,
+        countInTab: true,
+        mediaType: getFallbackMediaType(cat.category),
+        parsingMethod: getFallbackParsingMethod(cat.category)
+      }));
+      
+      console.log(`📋 Discovered ${fallbackTypes.length} content types from generated content: ${fallbackTypes.map(t => t.category).join(', ')}`);
+      
+      return res.json({
+        success: true,
+        contentTypes: fallbackTypes,
+        accountId,
+        source: 'generated_content_discovery'
+      });
+    }
 
-    const categoryOrderMap = {
-      'analysis': 1,
-      'blog_post': 2,
-      'social_media': 3,
-      'video_script': 4,
-      'prayer': 5,
-      'email': 6,
-      'image_generation': 7
-    };
-
-    // Transform templates into content types format
+    // Transform templates using EXTENSIBLE ui_config - NO HARDCODING!
     const contentTypes = templates.map(template => {
+      let uiConfig = {};
+      
+      // Parse ui_config JSON
+      if (template.ui_config) {
+        try {
+          uiConfig = JSON.parse(template.ui_config);
+        } catch (e) {
+          console.warn(`⚠️ Invalid ui_config for template ${template.name}: ${e.message}`);
+        }
+      }
+      
       return {
         id: template.category,
-        name: categoryNameMap[template.category] || template.name,
-        icon: categoryIconMap[template.category] || 'FileText',
+        name: uiConfig.displayName || template.name,
+        icon: uiConfig.icon || 'FileText',
         category: template.category,
-        description: `Generates ${(categoryNameMap[template.category] || template.name).toLowerCase()}`,
+        description: template.description || `Generated ${template.category.replace('_', ' ')} content`,
         template: template.name,
-        order: categoryOrderMap[template.category] || 999,
-        displayType: template.category === 'image_generation' ? 'images' : 'text',
-        emptyMessage: `No ${(categoryNameMap[template.category] || template.name).toLowerCase()} generated`,
-        countInTab: true
+        order: template.execution_order || 999,
+        displayType: template.media_type === 'image' ? 'images' : 'text',
+        emptyMessage: `No ${(uiConfig.displayName || template.category).toLowerCase()} generated`,
+        countInTab: true,
+        mediaType: template.media_type,
+        parsingMethod: template.parsing_method,
+        color: uiConfig.color || '#6B7280'
       };
     });
 
-    // Sort by order
+    // Sort by execution order
     contentTypes.sort((a, b) => a.order - b.order);
 
-    // Add the main article type (always present)
+    // Add the main article type (always present) 
     const articleType = {
-        id: 'article',
+      id: 'article',
       name: 'Main Content',
-        icon: 'FileText',
-        category: 'blog',
+      icon: 'FileText',
+      category: 'blog',
       description: 'Main blog article content',
       template: 'Blog Post Generator',
       order: 0,
@@ -1695,24 +1723,52 @@ app.get('/api/eden/content/types', accountContext, async (req, res) => {
       countInTab: false
     };
 
-    // Remove duplicate blog_post if it exists (since we have main content)
-    const filteredContentTypes = contentTypes.filter(type => type.category !== 'blog_post');
+    const allContentTypes = [articleType, ...contentTypes];
 
-    const allContentTypes = [articleType, ...filteredContentTypes];
-
-    console.log(`📋 Discovered ${filteredContentTypes.length} content types from ${templates.length} prompt templates for account ${accountId}`);
+    console.log(`✅ Discovered ${contentTypes.length} extensible content types from templates`);
     console.log(`📋 Content types: ${allContentTypes.map(t => t.name).join(', ')}`);
 
     res.json({
       success: true,
       contentTypes: allContentTypes,
-      accountId
+      accountId,
+      source: 'prompt_templates'
     });
   } catch (error) {
     console.error('❌ Error fetching content types:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
+
+// Helper functions for fallback content type discovery
+function getFallbackIcon(category) {
+  const iconMap = {
+    'analysis': 'BarChart3',
+    'blog_post': 'FileText', 
+    'social_media': 'MessageSquare',
+    'video_script': 'Film',
+    'image_generation': 'Image',
+    'prayer': 'Heart',
+    'email': 'Mail',
+    'letter': 'FileText'
+  };
+  return iconMap[category] || 'FileText';
+}
+
+function getFallbackMediaType(category) {
+  if (category === 'video_script') return 'video';
+  if (category === 'image_generation') return 'image';
+  return 'text';
+}
+
+function getFallbackParsingMethod(category) {
+  const methodMap = {
+    'social_media': 'social_media',
+    'video_script': 'video_script', 
+    'prayer': 'prayer_points'
+  };
+  return methodMap[category] || 'generic';
+}
 
 // Generation stats endpoint
 app.get('/api/eden/stats/generation', accountContext, async (req, res) => {
@@ -4580,28 +4636,59 @@ app.post('/api/prompts/templates/:templateId/versions', accountContext, async (r
       return res.status(400).json({ error: 'Prompt content is required' });
     }
     
-    // Get next version number
-    const maxVersionResult = await db.query(`
-      SELECT COALESCE(MAX(version_number), 0) as max_version
-      FROM ssnews_prompt_versions 
-      WHERE template_id = ?
-    `, [templateId]);
+    // Start transaction to ensure data consistency
+    await db.query('START TRANSACTION');
     
-    const nextVersion = (maxVersionResult[0]?.max_version || 0) + 1;
+    try {
+      // Get next version number
+      const maxVersionResult = await db.query(`
+        SELECT COALESCE(MAX(version_number), 0) as max_version
+        FROM ssnews_prompt_versions 
+        WHERE template_id = ?
+      `, [templateId]);
+      
+      const nextVersion = (maxVersionResult[0]?.max_version || 0) + 1;
+      
+      // Set all existing versions as not current
+      await db.query(`
+        UPDATE ssnews_prompt_versions 
+        SET is_current = 0 
+        WHERE template_id = ?
+      `, [templateId]);
+      
+      // Create new version and set it as current
+      const versionResult = await db.query(`
+        INSERT INTO ssnews_prompt_versions
+        (template_id, version_number, prompt_content, system_message, notes, is_current, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, 1, 'user', NOW())
+      `, [templateId, nextVersion, promptContent, systemMessage || '', notes || '']);
+      
+      // Update template's updated_at timestamp
+      await db.query(`
+        UPDATE ssnews_prompt_templates 
+        SET updated_at = NOW() 
+        WHERE template_id = ?
+      `, [templateId]);
+      
+      // Commit transaction
+      await db.query('COMMIT');
+      
+      console.log(`✅ Created new version ${nextVersion} for template ${templateId} and set as current`);
+      
+      res.json({
+        success: true,
+        versionId: versionResult.insertId,
+        versionNumber: nextVersion,
+        isCurrentVersion: true,
+        message: `Version ${nextVersion} created successfully and set as current`
+      });
+      
+    } catch (error) {
+      // Rollback transaction on error
+      await db.query('ROLLBACK');
+      throw error;
+    }
     
-    // Create new version
-    const versionResult = await db.query(`
-      INSERT INTO ssnews_prompt_versions
-      (template_id, version_number, prompt_content, system_message, notes, is_current, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, 0, 'user', NOW())
-    `, [templateId, nextVersion, promptContent, systemMessage || '', notes || '']);
-    
-    res.json({
-      success: true,
-      versionId: versionResult.insertId,
-      versionNumber: nextVersion,
-      message: `Version ${nextVersion} created successfully`
-    });
   } catch (error) {
     console.error('❌ Error creating template version:', error.message);
     res.status(500).json({ error: error.message });

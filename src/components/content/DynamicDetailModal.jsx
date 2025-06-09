@@ -34,7 +34,39 @@ import {
 } from 'lucide-react';
 import { formatDate, getDaysAgo, parseKeywords } from '../../utils/helpers';
 import { useAccount } from '../../contexts/AccountContext';
+import { useContentTypes } from '../../hooks/useContentTypes';
 import AITrackingView from '../AITrackingView';
+
+// Icon components mapping for dynamic icon rendering
+const ICON_COMPONENTS = {
+  FileText,
+  Share2,
+  Video,
+  Heart,
+  Image,
+  MessageSquare,
+  Film,
+  Zap,
+  Mail,
+  Mic,
+  BookOpen,
+  Users,
+  ExternalLink,
+  Star,
+  Clock,
+  User,
+  Tag,
+  Archive,
+  Wand2,
+  Plus,
+  Loader2,
+  Eye,
+  X,
+  Check,
+  XCircle,
+  Calendar,
+  Brain
+};
 
 /**
  * Dynamic Detail Modal Component
@@ -72,8 +104,11 @@ const DynamicDetailModal = ({
   const [showArchivedImages, setShowArchivedImages] = useState(false);
   const [showCustomImageModal, setShowCustomImageModal] = useState(false);
 
-  // Icon mapping for different content types
-  const getContentTypeIcon = (category) => {
+  // EXTENSIBLE: Use content types from API instead of hardcoded mappings
+  const { contentTypes: availableContentTypes, getContentTypeName, getContentTypeIcon: getExtensibleIcon } = useContentTypes();
+  
+  // Fallback icon mapping for when content types aren't loaded yet
+  const getFallbackIcon = (category) => {
     const iconMap = {
       social_media: MessageSquare,
       social_posts: Share2,
@@ -93,6 +128,15 @@ const DynamicDetailModal = ({
     };
     
     return iconMap[category] || FileText;
+  };
+  
+  // Use extensible system with fallback
+  const getContentTypeIcon = (category) => {
+    const iconName = getExtensibleIcon ? getExtensibleIcon(category) : null;
+    if (iconName && ICON_COMPONENTS[iconName]) {
+      return ICON_COMPONENTS[iconName];
+    }
+    return getFallbackIcon(category);
   };
 
   // Image-related functions
@@ -236,7 +280,7 @@ const DynamicDetailModal = ({
             grouped[category] = [];
             types.push({
               key: category,
-              name: formatCategoryName(category),
+              name: getContentTypeName ? getContentTypeName(category) : formatCategoryName(category),
               icon: getContentTypeIcon(category),
               count: 0
             });
@@ -255,7 +299,7 @@ const DynamicDetailModal = ({
             if (!types.find(t => t.key === category)) {
               types.push({
                 key: category,
-                name: formatCategoryName(category),
+                name: getContentTypeName ? getContentTypeName(category) : formatCategoryName(category),
                 icon: getContentTypeIcon(category),
                 count: 0
               });
@@ -2435,7 +2479,12 @@ const SourceArticleTab = ({ sourceArticle }) => {
 /**
  * Helper function to format category names
  */
+// EXTENSIBLE: Use content types API for names, fallback to formatting
 const formatCategoryName = (category) => {
+  // Try to get from extensible content types first
+  // Note: This function is called within the component where getContentTypeName is available
+  // For now, use the fallback formatting since this is a standalone function
+  
   const nameMap = {
     social_media: 'Social Media',
     social_posts: 'Social Posts',

@@ -40,7 +40,9 @@ export const TemplateBuilder = ({
   const [templateData, setTemplateData] = React.useState({
     name: '',
     description: '',
-    category: 'social_media',
+    category: '',
+    media_type: 'text',
+    parsing_method: 'generic',
     prompt: '',
     systemMessage: '',
     variables: [],
@@ -66,15 +68,29 @@ export const TemplateBuilder = ({
     ...availableVariables
   ];
 
-  // Template categories with icons and colors
-  const templateCategories = [
-    { id: 'social_media', name: 'Social Media', icon: '📱', color: '#1DA1F2' },
-    { id: 'video_script', name: 'Video Script', icon: '🎥', color: '#FF0000' },
-    { id: 'blog_post', name: 'Blog Post', icon: '📝', color: '#10B981' },
-    { id: 'email', name: 'Email', icon: '📧', color: '#6366F1' },
-    { id: 'prayer_points', name: 'Prayer Points', icon: '🙏', color: '#8B5CF6' },
-    { id: 'custom', name: 'Custom', icon: '⚙️', color: '#6B7280' },
-    ...categories
+  // Media types for functional routing (required)
+  const mediaTypes = [
+    { id: 'text', name: 'Text Content', icon: '📝', description: 'Written content of any type' },
+    { id: 'video', name: 'Video Content', icon: '🎥', description: 'Video scripts and visual content' },
+    { id: 'audio', name: 'Audio Content', icon: '🎵', description: 'Audio scripts and sound content' },
+    { id: 'image', name: 'Image Content', icon: '🖼️', description: 'Visual content and image generation' }
+  ];
+
+  // Parsing methods for content structure (optional)
+  const parsingMethods = [
+    { id: 'generic', name: 'Generic Text', description: 'Simple text parsing (default)' },
+    { id: 'structured', name: 'Structured Content', description: 'Section-based parsing' },
+    { id: 'json', name: 'JSON Format', description: 'Structured JSON parsing' },
+    { id: 'social_media', name: 'Social Media Posts', description: 'Multi-platform social content' },
+    { id: 'video_script', name: 'Video Script', description: 'Script with timing and visuals' },
+    { id: 'prayer_points', name: 'Prayer Points', description: 'Thematic prayer content' }
+  ];
+
+  // Suggested content types (examples, but user can enter anything)
+  const suggestedContentTypes = [
+    'blog-post', 'social-media', 'video-script', 'thank-you-letter', 'product-description',
+    'meeting-agenda', 'recipe', 'technical-docs', 'email-newsletter', 'prayer-points',
+    'sermon-outline', 'devotional', 'press-release', 'job-description', 'course-outline'
   ];
 
   // Update template data
@@ -180,7 +196,8 @@ export const TemplateBuilder = ({
     return preview;
   };
 
-  const selectedCategory = templateCategories.find(cat => cat.id === templateData.category);
+  const selectedMediaType = mediaTypes.find(type => type.id === templateData.media_type);
+  const selectedParsingMethod = parsingMethods.find(method => method.id === templateData.parsing_method);
 
   return (
     <div className={cn('w-full max-w-6xl mx-auto', className)} {...props}>
@@ -265,38 +282,80 @@ export const TemplateBuilder = ({
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="category">Category *</Label>
-                    <select
+                    <Label htmlFor="category">Content Type *</Label>
+                    <Input
                       id="category"
+                      placeholder="e.g., thank-you-letter, product-description, blog-post"
                       value={templateData.category}
                       onChange={(e) => updateTemplate('category', e.target.value)}
-                      className="w-full p-2 border border-input rounded-md bg-background"
-                    >
-                      {templateCategories.map(category => (
-                        <option key={category.id} value={category.id}>
-                          {category.icon} {category.name}
-                        </option>
+                      className={validationErrors.category ? 'border-red-500' : ''}
+                      list="suggested-content-types"
+                    />
+                    <datalist id="suggested-content-types">
+                      {suggestedContentTypes.map(type => (
+                        <option key={type} value={type} />
                       ))}
-                    </select>
+                    </datalist>
+                    <p className="text-xs text-muted-foreground">
+                      Enter any content type you want - you're not limited to predefined categories!
+                    </p>
                     {validationErrors.category && (
                       <p className="text-sm text-red-500">{validationErrors.category}</p>
                     )}
                   </div>
 
-                  {selectedCategory && (
+                  <div className="space-y-2">
+                    <Label htmlFor="media_type">Media Type *</Label>
+                    <select
+                      id="media_type"
+                      value={templateData.media_type}
+                      onChange={(e) => updateTemplate('media_type', e.target.value)}
+                      className="w-full p-2 border border-input rounded-md bg-background"
+                    >
+                      {mediaTypes.map(type => (
+                        <option key={type.id} value={type.id}>
+                          {type.icon} {type.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedMediaType?.description}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="parsing_method">Parsing Method</Label>
+                    <select
+                      id="parsing_method"
+                      value={templateData.parsing_method}
+                      onChange={(e) => updateTemplate('parsing_method', e.target.value)}
+                      className="w-full p-2 border border-input rounded-md bg-background"
+                    >
+                      {parsingMethods.map(method => (
+                        <option key={method.id} value={method.id}>
+                          {method.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedParsingMethod?.description}
+                    </p>
+                  </div>
+
+                  {templateData.category && (
                     <div className="p-3 bg-accent/50 rounded-lg border">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">{selectedCategory.icon}</span>
-                        <span className="font-medium">{selectedCategory.name}</span>
-                        <Badge 
-                          variant="secondary" 
-                          style={{ backgroundColor: selectedCategory.color + '20', color: selectedCategory.color }}
-                        >
-                          {templateData.category}
+                        <span className="text-lg">{selectedMediaType?.icon}</span>
+                        <span className="font-medium">{templateData.category}</span>
+                        <Badge variant="secondary">
+                          {templateData.media_type}
+                        </Badge>
+                        <Badge variant="outline">
+                          {templateData.parsing_method}
                         </Badge>
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        This template will be optimised for {selectedCategory.name.toLowerCase()} content generation.
+                        This template will generate {templateData.media_type} content for "{templateData.category}" using {templateData.parsing_method} parsing.
                       </p>
                     </div>
                   )}
@@ -394,7 +453,7 @@ export const TemplateBuilder = ({
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      {selectedCategory?.icon} {templateData.name || 'Untitled Template'}
+                      {selectedMediaType?.icon} {templateData.name || 'Untitled Template'}
                     </CardTitle>
                     <CardDescription>{templateData.description}</CardDescription>
                   </CardHeader>

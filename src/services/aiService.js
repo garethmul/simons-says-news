@@ -193,7 +193,14 @@ class AIService {
       
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('analysis', {
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`
+        // Underscore format (legacy)
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
+        // Dot notation format (modern)
+        'article.title': article.title || 'No title available',
+        'article.content': article.full_text || article.summary_ai || 'No content available',
+        'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+        'article.source': article.source_name || 'Unknown',
+        'article.url': article.url || ''
       });
 
       const response = await this.geminiModel.generateContent({
@@ -479,7 +486,14 @@ class AIService {
       
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('blog_post', {
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`
+        // Underscore format (legacy)
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
+        // Dot notation format (modern)
+        'article.title': article.title || 'No title available',
+        'article.content': article.full_text || article.summary_ai || 'No content available',
+        'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+        'article.source': article.source_name || 'Unknown',
+        'article.url': article.url || ''
       });
 
       const messages = [
@@ -576,7 +590,14 @@ class AIService {
       
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('social_media', {
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
+        // Underscore format (legacy)
+        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+        // Dot notation format (modern)
+        'article.title': article.title || 'No title available',
+        'article.content': article.full_text || article.summary_ai || 'No content available',
+        'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+        'article.source': article.source_name || 'Unknown',
+        'article.url': article.url || ''
       });
 
       const response = await this.geminiModel.generateContent({
@@ -587,7 +608,7 @@ class AIService {
         systemInstruction: promptData.systemMessage,
         generationConfig: {
           temperature: 0.8,
-          maxOutputTokens: 2000  // Increased to ensure complete JSON for all platforms
+          maxOutputTokens: 20000  // Increased 10-fold to prevent truncation of complex social media content
         }
       });
 
@@ -603,7 +624,7 @@ class AIService {
         isComplete: responseMetadata.isComplete,
         isTruncated: responseMetadata.isTruncated,
         outputTokens: responseMetadata.outputTokens,
-        maxTokens: 2000
+        maxTokens: 20000
       });
 
       // Log detailed response data
@@ -620,7 +641,7 @@ class AIService {
         metadata: responseMetadata,
         generationTimeMs: generationTime,
         temperature: 0.8,
-        maxOutputTokens: 2000
+        maxOutputTokens: 20000
       });
 
       // Log the generation (only if we have a valid article ID)
@@ -679,7 +700,14 @@ class AIService {
       
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('video_script', {
+        // Underscore format (legacy)
         article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+        // Dot notation format (modern)
+        'article.title': article.title || 'No title available',
+        'article.content': article.full_text || article.summary_ai || 'No content available',
+        'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+        'article.source': article.source_name || 'Unknown',
+        'article.url': article.url || '',
         duration: duration
       });
 
@@ -779,7 +807,14 @@ class AIService {
       let promptData;
       try {
         promptData = await promptManager.getPromptForGeneration('prayer', {
-          article_content: `Title: ${article.title}\\n\\nContent: ${article.full_text || article.summary_ai || 'No content available'}\\n\\nSource: ${article.source_name || 'Unknown'}`
+          // Underscore format (legacy)
+          article_content: `Title: ${article.title}\\n\\nContent: ${article.full_text || article.summary_ai || 'No content available'}\\n\\nSource: ${article.source_name || 'Unknown'}`,
+          // Dot notation format (modern)
+          'article.title': article.title || 'No title available',
+          'article.content': article.full_text || article.summary_ai || 'No content available',
+          'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+          'article.source': article.source_name || 'Unknown',
+          'article.url': article.url || ''
         });
       } catch (error) {
         console.log(`⚠️ Could not get prayer template: ${error.message}`);
@@ -963,7 +998,7 @@ class AIService {
     return await this.generateWithPrompt(prompt, systemMessage, 'prayer_points', generatedArticleId);
   }
 
-  async generateGenericContentWithPrompt(prompt, systemMessage, category, generatedArticleId = null) {
+  async generateGenericContentWithPrompt(prompt, systemMessage, category, generatedArticleId = null, accountId = null) {
     console.log(`➡️ ENTER: generateGenericContentWithPrompt for category: ${category}`);
     
     // Special handling for image generation - first generate the image prompt, then create the image
@@ -974,8 +1009,8 @@ class AIService {
       const visualDescription = await this.generateWithPrompt(prompt, systemMessage, category, generatedArticleId);
       console.log(`🎨 Generated visual description: ${visualDescription.substring(0, 200)}...`);
       
-      // Then use that description to generate the actual image with Ideogram
-      return await this.generateImageWithIdeogram(visualDescription, generatedArticleId);
+      // Then use that description to generate the actual image with Ideogram (now with account settings!)
+      return await this.generateImageWithIdeogram(visualDescription, generatedArticleId, accountId);
     }
     
     return await this.generateWithPrompt(prompt, systemMessage, category, generatedArticleId);
@@ -1051,7 +1086,7 @@ class AIService {
    * Generic content generation for new template types
    * This enables extensible content generation without hardcoded methods
    */
-  async generateGenericContent(category, article, generationConfig, generatedArticleId = null) {
+  async generateGenericContent(category, article, generationConfig, generatedArticleId = null, accountId = null) {
     try {
       const startTime = Date.now();
       
@@ -1061,19 +1096,31 @@ class AIService {
       // Get prompt template for this category
       let promptData;
       try {
+        // Pass all article fields to support both underscore and dot notation placeholders
         promptData = await promptManager.getPromptForGeneration(category, {
-          article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`
-        });
+          // Underscore format (legacy)
+          article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+          // Dot notation format (modern)
+          'article.title': article.title || 'No title available',
+          'article.content': article.full_text || article.summary_ai || 'No content available',
+          'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+          'article.source': article.source_name || 'Unknown',
+          'article.url': article.url || ''
+        }, accountId);
       } catch (error) {
         console.log(`⚠️ Could not get ${category} template: ${error.message}`);
         throw error;
       }
 
-      // Use generation config or defaults
+      // Use generation config or defaults - filter only valid Gemini API fields
       const config = {
         temperature: generationConfig?.temperature || 0.7,
-        maxOutputTokens: generationConfig?.max_tokens || 15000,
-        ...generationConfig
+        maxOutputTokens: generationConfig?.max_tokens || generationConfig?.maxOutputTokens || 15000,
+        // Only include valid Gemini API fields
+        ...(generationConfig?.topP && { topP: generationConfig.topP }),
+        ...(generationConfig?.topK && { topK: generationConfig.topK }),
+        ...(generationConfig?.candidateCount && { candidateCount: generationConfig.candidateCount }),
+        ...(generationConfig?.stopSequences && { stopSequences: generationConfig.stopSequences })
       };
 
       const response = await this.geminiModel.generateContent({
@@ -1321,30 +1368,89 @@ class AIService {
 
   /**
    * Generate image using Ideogram API for template-based workflow
+   * Now uses account settings instead of hardcoded defaults!
    */
-  async generateImageWithIdeogram(prompt, generatedArticleId = null) {
+  async generateImageWithIdeogram(prompt, generatedArticleId = null, accountId = null) {
     try {
       console.log(`🖼️ Generating image with Ideogram for article ${generatedArticleId}...`);
       console.log(`🎨 Raw image prompt response: ${prompt.substring(0, 200)}...`);
 
       // Parse the AI-generated prompt response to extract individual image prompts
-      const extractedPrompt = this.extractImagePromptFromResponse(prompt);
+      let extractedPrompt = this.extractImagePromptFromResponse(prompt);
       
       console.log(`🎯 Extracted image prompt: ${extractedPrompt.substring(0, 200)}...`);
 
-      // Import imageService dynamically to avoid circular dependencies
+      // Import services dynamically to avoid circular dependencies
       const { default: imageService } = await import('./imageService.js');
+      const { default: database } = await import('./database.js');
 
-      // Prepare options for Ideogram generation
+      // Load account image generation settings
+      let accountSettings = null;
+      if (accountId || generatedArticleId) {
+        try {
+          // If no accountId provided, get it from the generated article
+          let targetAccountId = accountId;
+          if (!targetAccountId && generatedArticleId && generatedArticleId !== 999) {
+            const contentRecord = await database.query(
+              'SELECT account_id FROM ssnews_generated_articles WHERE gen_article_id = ?', 
+              [generatedArticleId]
+            );
+            if (contentRecord.length > 0) {
+              targetAccountId = contentRecord[0].account_id;
+              console.log(`🔍 Found accountId from content: ${targetAccountId}`);
+            }
+          }
+
+          if (targetAccountId) {
+            const settingsResult = await database.query(
+              'SELECT settings_data FROM ssnews_account_settings WHERE account_id = ? AND setting_type = ?',
+              [targetAccountId, 'image_generation']
+            );
+
+            if (settingsResult.length > 0) {
+              accountSettings = JSON.parse(settingsResult[0].settings_data);
+              console.log(`🎨 Loaded account image settings for ${targetAccountId}`);
+            }
+          }
+        } catch (settingsError) {
+          console.warn('⚠️ Failed to load account image settings:', settingsError.message);
+        }
+      }
+
+      // Apply account prompt prefix/suffix if available
+      if (accountSettings?.promptPrefix || accountSettings?.promptSuffix) {
+        const prefix = accountSettings.promptPrefix || '';
+        const suffix = accountSettings.promptSuffix || '';
+        extractedPrompt = `${prefix} ${extractedPrompt} ${suffix}`.trim();
+        console.log(`🎯 Applied account prefix/suffix to prompt`);
+      }
+
+      // Prepare options using account settings with intelligent fallbacks
       const imageOptions = {
         prompt: extractedPrompt.trim(),
-        aspectRatio: '16:9',  // Default for social media
-        styleType: 'GENERAL', // Good default for Christian content
-        renderingSpeed: 'DEFAULT',
-        magicPrompt: 'AUTO',  // Let AI enhance the prompt
-        numImages: 1,
-        modelVersion: 'v2'    // Reliable version
+        aspectRatio: accountSettings?.defaults?.aspectRatio || '16:9',
+        styleType: accountSettings?.defaults?.styleType || 'GENERAL',
+        renderingSpeed: accountSettings?.defaults?.renderingSpeed || 'DEFAULT',
+        magicPrompt: accountSettings?.defaults?.magicPrompt || 'AUTO',
+        numImages: accountSettings?.defaults?.numImages || 1,
+        modelVersion: accountSettings?.defaults?.modelVersion || 'v2'
       };
+
+      // Add optional parameters from account settings
+      if (accountSettings?.defaults?.resolution) {
+        imageOptions.resolution = accountSettings.defaults.resolution;
+      }
+      if (accountSettings?.defaults?.negativePrompt) {
+        imageOptions.negativePrompt = accountSettings.defaults.negativePrompt;
+      }
+
+      // Handle account color templates for automatic generation
+      if (accountSettings?.brandColors?.length > 0) {
+        // Use the first available brand color template for automatic generation
+        const firstColorTemplate = accountSettings.brandColors[0];
+        imageOptions.colorPalette = firstColorTemplate;
+        console.log(`🎨 Applied account brand colors: ${firstColorTemplate.name}`);
+      }
 
       console.log(`🎯 Ideogram options: ${JSON.stringify(imageOptions)}`);
 

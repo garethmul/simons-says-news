@@ -144,9 +144,11 @@ class JobWorker {
       }
 
       await jobManager.updateJobProgress(jobId, 30, 'Generating content for story...');
+      jobLogger.info(`📝 Starting content generation for story: "${story.title}" (ID: ${specificStoryId})`);
       
-      const generatedContent = await contentGenerator.generateContentForStory(story, accountId);
+      const generatedContent = await contentGenerator.generateContentForStory(story, accountId, jobLogger);
       
+      jobLogger.info(`✅ Content generation completed for story ${specificStoryId}`);
       await jobManager.updateJobProgress(jobId, 90, 'Content generation complete');
       
       results = {
@@ -159,9 +161,11 @@ class JobWorker {
     } else {
       // Generate content from top stories
       await jobManager.updateJobProgress(jobId, 20, 'Finding top stories...');
+      jobLogger.info(`📝 Starting content generation from top ${limit} stories`);
       
-      const generatedContent = await contentGenerator.generateContentFromTopStories(limit, accountId);
+      const generatedContent = await contentGenerator.generateContentFromTopStories(limit, accountId, jobLogger);
       
+      jobLogger.info(`✅ Generated ${generatedContent.length} content pieces from top stories`);
       await jobManager.updateJobProgress(jobId, 90, `Generated ${generatedContent.length} content pieces`);
       
       results = {
@@ -202,11 +206,13 @@ class JobWorker {
 
     // Step 3: Content Generation
     await jobManager.updateJobProgress(jobId, 70, 'Generating content from top stories...');
+    jobLogger.info('📝 Starting content generation phase of full cycle');
     
-    const generatedContent = await contentGenerator.generateContentFromTopStories(5, accountId);
+    const generatedContent = await contentGenerator.generateContentFromTopStories(5, accountId, jobLogger);
     results.contentGenerated = generatedContent.length;
     results.blogIds = generatedContent.map(c => c.blogId);
     
+    jobLogger.info(`✅ Content generation complete: ${generatedContent.length} pieces generated`);
     await jobManager.updateJobProgress(jobId, 95, `Generated ${generatedContent.length} content pieces`);
 
     results.completedAt = new Date();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -39,6 +39,7 @@ import {
   Wand2
 } from 'lucide-react';
 import HelpSection from './common/HelpSection';
+import PromptEditor from './editor/PromptEditor';
 
 /**
  * Sample Template Card Component
@@ -145,6 +146,12 @@ const PromptManagement = () => {
   const [newNotes, setNewNotes] = useState('');
   const [testVariables, setTestVariables] = useState('{"article_content": "Sample news article content here..."}');
 
+  // Unsaved changes tracking
+  const [originalPromptContent, setOriginalPromptContent] = useState('');
+  const [originalSystemMessage, setOriginalSystemMessage] = useState('');
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [pendingTemplate, setPendingTemplate] = useState(null);
+
   // New template creation states
   const [showNewTemplateForm, setShowNewTemplateForm] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
@@ -159,6 +166,114 @@ const PromptManagement = () => {
   const [dragging, setDragging] = useState(null);
 
   const { selectedAccount, selectedOrganization, withAccountContext } = useAccount();
+  
+  // Ref for the TipTap editor
+  const promptEditorRef = useRef(null);
+
+  // Helper function to check if there are unsaved changes
+  const hasUnsavedChanges = () => {
+    if (!editingVersion) return false;
+    return newPromptContent !== originalPromptContent || 
+           newSystemMessage !== originalSystemMessage;
+  };
+
+  // Safe template selection with unsaved changes check
+  const handleTemplateSelection = (template) => {
+    if (editingVersion && hasUnsavedChanges()) {
+      // Show confirmation dialog
+      setPendingTemplate(template);
+      setShowConfirmDialog(true);
+    } else {
+      // Safe to switch
+      setSelectedTemplate(template);
+      if (editingVersion) {
+        // Reset editing state when switching templates
+        setEditingVersion(null);
+        setNewPromptContent('');
+        setNewSystemMessage('');
+        setNewNotes('');
+        setOriginalPromptContent('');
+        setOriginalSystemMessage('');
+      }
+    }
+  };
+
+  // Handle confirmation dialog actions
+  const handleSaveAndSwitch = async () => {
+    setShowConfirmDialog(false);
+    
+    // Save current changes
+    await createNewVersion();
+    
+    // Switch to new template
+    setSelectedTemplate(pendingTemplate);
+    setPendingTemplate(null);
+    
+    // Reset editing state
+    setEditingVersion(null);
+    setNewPromptContent('');
+    setNewSystemMessage('');
+    setNewNotes('');
+    setOriginalPromptContent('');
+    setOriginalSystemMessage('');
+  };
+
+  const handleDiscardAndSwitch = () => {
+    setShowConfirmDialog(false);
+    
+    // Switch to new template without saving
+    setSelectedTemplate(pendingTemplate);
+    setPendingTemplate(null);
+    
+    // Reset editing state
+    setEditingVersion(null);
+    setNewPromptContent('');
+    setNewSystemMessage('');
+    setNewNotes('');
+    setOriginalPromptContent('');
+    setOriginalSystemMessage('');
+  };
+
+  const handleCancelSwitch = () => {
+    setShowConfirmDialog(false);
+    setPendingTemplate(null);
+    // Stay on current template
+  };
+
+  // Enhanced edit button handler
+  const handleEditPrompt = () => {
+    setEditingVersion('new');
+    const currentPrompt = selectedTemplate.current_prompt || '';
+    const currentSystem = selectedTemplate.current_system_message || '';
+    
+    setNewPromptContent(currentPrompt);
+    setNewSystemMessage(currentSystem);
+    
+    // Store original values for comparison
+    setOriginalPromptContent(currentPrompt);
+    setOriginalSystemMessage(currentSystem);
+  };
+
+  // Enhanced cancel edit handler
+  const handleCancelEdit = () => {
+    if (hasUnsavedChanges()) {
+      if (confirm('You have unsaved changes. Are you sure you want to discard them?')) {
+        setEditingVersion(null);
+        setNewPromptContent('');
+        setNewSystemMessage('');
+        setNewNotes('');
+        setOriginalPromptContent('');
+        setOriginalSystemMessage('');
+      }
+    } else {
+      setEditingVersion(null);
+      setNewPromptContent('');
+      setNewSystemMessage('');
+      setNewNotes('');
+      setOriginalPromptContent('');
+      setOriginalSystemMessage('');
+    }
+  };
 
   useEffect(() => {
     fetchTemplates();
@@ -183,6 +298,23 @@ const PromptManagement = () => {
       fetchTemplateDetails(selectedTemplate.template_id);
     }
   }, [selectedTemplate]);
+
+  // Protect against browser navigation when editing
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (editingVersion && hasUnsavedChanges()) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return 'You have unsaved changes. Are you sure you want to leave?';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [editingVersion, newPromptContent, newSystemMessage, originalPromptContent, originalSystemMessage]);
 
   const fetchTemplates = async () => {
     try {
@@ -267,12 +399,35 @@ const PromptManagement = () => {
 
       const data = await response.json();
       if (data.success) {
+        // Clear form state immediately
         setNewPromptContent('');
         setNewSystemMessage('');
         setNewNotes('');
         setEditingVersion(null);
-        fetchTemplateDetails(selectedTemplate.template_id);
-        fetchTemplates(); // Refresh to get updated current version
+        
+        // Reset change tracking
+        setOriginalPromptContent('');
+        setOriginalSystemMessage('');
+        
+        // Refresh all data and update the selected template to show the new version
+        await Promise.all([
+          fetchTemplateDetails(selectedTemplate.template_id),
+          fetchTemplates() // This updates the templates list with new current version
+        ]);
+        
+        // Force update the selected template with the latest data
+        const updatedTemplates = await fetch('/api/prompts/templates', withAccountContext());
+        if (updatedTemplates.ok) {
+          const templatesData = await updatedTemplates.json();
+          if (templatesData.success) {
+            const updatedTemplate = templatesData.templates.find(t => t.template_id === selectedTemplate.template_id);
+            if (updatedTemplate) {
+              setSelectedTemplate(updatedTemplate);
+            }
+          }
+        }
+        
+        console.log(`✅ Created new version ${data.versionNumber} for template ${selectedTemplate.name}`);
       }
     } catch (error) {
       console.error('Error creating new version:', error);
@@ -611,6 +766,13 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (newIndex < 0 || newIndex >= templateOrder.length) return;
     
+    // Validate the move before performing it
+    const validation = validateTemplateMove(templateId, newIndex);
+    if (!validation.valid) {
+      alert(`❌ Cannot move template ${direction}: ${validation.reason}\n\nRequired templates must come first: ${validation.requiredTemplates?.join(', ')}`);
+      return;
+    }
+    
     const newOrder = [...templateOrder];
     [newOrder[currentIndex], newOrder[newIndex]] = [newOrder[newIndex], newOrder[currentIndex]];
     
@@ -648,11 +810,29 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
   const handleDragStart = (e, templateId) => {
     setDragging(templateId);
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', templateId);
   };
 
-  const handleDragOver = (e) => {
+  const handleDragOver = (e, targetTemplateId) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    
+    if (!dragging || dragging === targetTemplateId) {
+      e.dataTransfer.dropEffect = 'none';
+      return;
+    }
+
+    // Calculate the new position if dropped here
+    const dragIndex = templateOrder.indexOf(dragging);
+    const dropIndex = templateOrder.indexOf(targetTemplateId);
+    
+    // Validate if this move would be valid
+    const validation = validateTemplateMove(dragging, dropIndex);
+    
+    if (validation.valid) {
+      e.dataTransfer.dropEffect = 'move';
+    } else {
+      e.dataTransfer.dropEffect = 'none';
+    }
   };
 
   const handleDrop = (e, targetTemplateId) => {
@@ -666,6 +846,15 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
     const dragIndex = templateOrder.indexOf(dragging);
     const dropIndex = templateOrder.indexOf(targetTemplateId);
     
+    // Final validation before performing the move
+    const validation = validateTemplateMove(dragging, dropIndex);
+    
+    if (!validation.valid) {
+      alert(`❌ Cannot move template: ${validation.reason}\n\nRequired templates must come first: ${validation.requiredTemplates?.join(', ')}`);
+      setDragging(null);
+      return;
+    }
+    
     const newOrder = [...templateOrder];
     newOrder.splice(dragIndex, 1);
     newOrder.splice(dropIndex, 0, dragging);
@@ -676,18 +865,94 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
   };
 
   const getAvailablePlaceholders = (currentTemplateId) => {
+    // Core system placeholders (always available)
+    const corePlaceholders = [
+      { name: 'article_content', displayName: 'Full Article Content', type: 'core', description: 'Complete article with title and content' },
+      { name: 'article.title', displayName: 'Article Title', type: 'core', description: 'Just the article title' },
+      { name: 'article.content', displayName: 'Article Text', type: 'core', description: 'Just the article content' },
+      { name: 'article.summary', displayName: 'Article Summary', type: 'core', description: 'AI-generated article summary' },
+      { name: 'article.source', displayName: 'Article Source', type: 'core', description: 'Name of the news source' },
+      { name: 'article.url', displayName: 'Article URL', type: 'core', description: 'Link to original article' },
+      { name: 'blog.id', displayName: 'Blog ID', type: 'core', description: 'Generated blog post ID' },
+      { name: 'account.id', displayName: 'Account ID', type: 'core', description: 'Current account identifier' }
+    ];
+
+    // Workflow placeholders (from previous templates)
     const currentIndex = templateOrder.indexOf(currentTemplateId);
     const previousTemplates = templateOrder.slice(0, currentIndex);
-    
-    return previousTemplates.map(templateId => {
+    const workflowPlaceholders = previousTemplates.map(templateId => {
       const template = templates.find(t => t.template_id === templateId);
       return {
-        id: templateId,
-        name: template?.name || 'Unknown',
-        category: template?.category || 'unknown',
-        placeholder: `{${template?.category || 'output'}_output}`
+        name: `${template?.category || 'output'}_output`,
+        displayName: `${template?.name || 'Unknown'} Output`,
+        type: 'workflow',
+        description: `Generated content from ${template?.name || 'Unknown'} template`
       };
     });
+
+    return [...corePlaceholders, ...workflowPlaceholders];
+  };
+
+  // Extract placeholder dependencies from template content
+  const getTemplateDependencies = (templateId) => {
+    const template = templates.find(t => t.template_id === templateId);
+    if (!template || !template.current_prompt) return [];
+
+    // Find all placeholders in the template's current prompt
+    const placeholderMatches = template.current_prompt.match(/\{[a-zA-Z][a-zA-Z0-9_]*\}/g) || [];
+    const uniquePlaceholders = [...new Set(placeholderMatches.map(p => p.slice(1, -1)))]; // Remove { and }
+    
+    // Filter out core placeholders (these are always available)
+    const corePlaceholders = [
+      'article_content', 'article.title', 'article.content', 'article.summary', 
+      'article.source', 'article.url', 'blog.id', 'account.id'
+    ];
+    
+    const workflowDependencies = uniquePlaceholders.filter(p => !corePlaceholders.includes(p));
+    return workflowDependencies;
+  };
+
+  // Validate if a template can be moved to a specific position
+  const validateTemplateMove = (templateId, newPosition) => {
+    const dependencies = getTemplateDependencies(templateId);
+    if (dependencies.length === 0) return { valid: true }; // No dependencies, can move anywhere
+
+    // Check if all dependencies would be available at the new position
+    const templatesBeforeNewPosition = templateOrder.slice(0, newPosition).filter(id => id !== templateId);
+    const availableOutputs = templatesBeforeNewPosition.map(id => {
+      const template = templates.find(t => t.template_id === id);
+      return `${template?.category || 'output'}_output`;
+    });
+
+    const missingDependencies = dependencies.filter(dep => !availableOutputs.includes(dep));
+    
+    if (missingDependencies.length > 0) {
+      // Find which templates provide the missing dependencies
+      const requiredTemplates = missingDependencies.map(dep => {
+        const requiredCategory = dep.replace('_output', '');
+        const provider = templates.find(t => t.category === requiredCategory);
+        return provider ? provider.name : `Template with category '${requiredCategory}'`;
+      });
+
+      return {
+        valid: false,
+        reason: `Missing dependencies: ${missingDependencies.join(', ')}`,
+        requiredTemplates
+      };
+    }
+
+    return { valid: true };
+  };
+
+  // Get valid drop positions for a template
+  const getValidDropPositions = (templateId) => {
+    const validPositions = [];
+    for (let i = 0; i <= templateOrder.length; i++) {
+      if (i === templateOrder.indexOf(templateId)) continue; // Skip current position
+      const validation = validateTemplateMove(templateId, i);
+      validPositions.push({ position: i, ...validation });
+    }
+    return validPositions;
   };
 
   const getCategoryIcon = (category) => {
@@ -765,20 +1030,78 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Prompt Management</h1>
           <p className="text-lg text-gray-600">Configure and manage AI prompts for content generation</p>
-          <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
-            <span>Currently viewing:</span>
-            <Badge variant="outline" className="text-blue-600 border-blue-200">
-              {selectedOrganization?.name}
-            </Badge>
-            <span>•</span>
-            <Badge variant="outline" className="text-green-600 border-green-200">
-              {selectedAccount?.name}
-            </Badge>
+          <div className="text-sm text-blue-600 mt-1">
+            Currently viewing: <span className="font-medium">{selectedAccount?.name}</span> • <span className="text-green-600 font-medium">Main Account</span>
           </div>
+        </div>
+
+        {/* Unsaved Changes Confirmation Dialog */}
+        {showConfirmDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <Card className="w-full max-w-md">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Edit className="w-5 h-5 text-orange-500" />
+                  Unsaved Changes
+                </CardTitle>
+                <CardDescription>
+                  You have unsaved changes to the current prompt template. What would you like to do?
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                    <div className="text-sm text-orange-800">
+                      <strong>Current template:</strong> {selectedTemplate?.name}
+                      <br />
+                      <strong>Switching to:</strong> {pendingTemplate?.name}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Button onClick={handleSaveAndSwitch} className="w-full">
+                      <Save className="w-4 h-4 mr-2" />
+                      Save Changes & Switch
+                    </Button>
+                    <Button variant="outline" onClick={handleDiscardAndSwitch} className="w-full">
+                      <X className="w-4 h-4 mr-2" />
+                      Discard Changes & Switch
+                    </Button>
+                    <Button variant="ghost" onClick={handleCancelSwitch} className="w-full">
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <Button
+              onClick={() => setShowWorkflowView(!showWorkflowView)}
+              variant={showWorkflowView ? "default" : "outline"}
+            >
+              <Workflow className="w-4 h-4 mr-2" />
+              {showWorkflowView ? 'Exit Workflow View' : 'Workflow View'}
+            </Button>
+            {!showWorkflowView && (
+              <Button onClick={() => setShowNewTemplateForm(!showNewTemplateForm)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create New Template
+              </Button>
+            )}
+          </div>
+          
+          {templates.length === 0 && !loading && (
+            <Button onClick={createDefaultTemplates}>
+              <Wand2 className="w-4 h-4 mr-2" />
+              Create Default Templates
+            </Button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -882,7 +1205,7 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                           onChange={(e) => setNewTemplatePrompt(e.target.value)}
                           rows={4}
                           placeholder="Enter the initial prompt content..."
-                          className="mt-1"
+                          className="mt-1 font-mono text-sm leading-relaxed"
                         />
                       </div>
                       <div>
@@ -893,7 +1216,7 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                           onChange={(e) => setNewTemplateSystemMessage(e.target.value)}
                           rows={2}
                           placeholder="Optional system message..."
-                          className="mt-1"
+                          className="mt-1 font-mono text-sm leading-relaxed"
                         />
                       </div>
                       <div className="flex gap-2 pt-2">
@@ -926,6 +1249,8 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                   <div className="space-y-2">
                     <div className="text-xs text-gray-500 mb-3 p-2 bg-blue-50 rounded">
                       💡 Templates execute in this order. Drag to reorder, or use ↑↓ buttons.
+                      <br />
+                      🔒 Dependencies are validated - you cannot move a template before its required inputs.
                     </div>
                     {templateOrder.map((templateId, index) => {
                       const template = templates.find(t => t.template_id === templateId);
@@ -941,7 +1266,7 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                           } ${dragging === template.template_id ? 'opacity-50' : ''}`}
                           draggable
                           onDragStart={(e) => handleDragStart(e, template.template_id)}
-                          onDragOver={handleDragOver}
+                          onDragOver={(e) => handleDragOver(e, template.template_id)}
                           onDrop={(e) => handleDrop(e, template.template_id)}
                         >
                           <div className="flex items-center gap-2 mb-2">
@@ -969,7 +1294,7 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                             <div className="bg-blue-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
                               {index + 1}
                             </div>
-                            <div className="flex-1" onClick={() => setSelectedTemplate(template)}>
+                            <div className="flex-1" onClick={() => handleTemplateSelection(template)}>
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                   {getCategoryIcon(template.category)}
@@ -980,12 +1305,50 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                                 </Badge>
                               </div>
                               <div className="text-sm text-gray-600 mt-1">{template.description}</div>
-                              {/* Show available inputs for this step */}
-                              {index > 0 && (
-                                <div className="mt-2 text-xs text-green-600">
-                                  📎 Can use: {getAvailablePlaceholders(template.template_id).map(p => p.placeholder).join(', ')}
-                                </div>
-                              )}
+                              
+                              {/* Show template dependencies */}
+                              {(() => {
+                                const dependencies = getTemplateDependencies(template.template_id);
+                                const availableWorkflowPlaceholders = getAvailablePlaceholders(template.template_id)
+                                  .filter(p => p.type === 'workflow')
+                                  .map(p => p.name);
+                                
+                                return (
+                                  <div className="mt-2 space-y-1">
+                                    {/* Show what this template requires */}
+                                    {dependencies.length > 0 && (
+                                      <div className="text-xs">
+                                        <span className="text-orange-600 font-medium">🔗 Requires:</span>{' '}
+                                        {dependencies.map(dep => {
+                                          const isAvailable = availableWorkflowPlaceholders.includes(dep);
+                                          return (
+                                            <span 
+                                              key={dep}
+                                              className={`font-mono ${isAvailable ? 'text-green-600' : 'text-red-600'}`}
+                                            >
+                                              {isAvailable ? '✅' : '❌'} {`{${dep}}`}
+                                            </span>
+                                          );
+                                        }).reduce((prev, curr) => [prev, ', ', curr])}
+                                      </div>
+                                    )}
+                                    
+                                    {/* Show what this template provides */}
+                                    <div className="text-xs text-blue-600">
+                                      <span className="font-medium">📤 Provides:</span>{' '}
+                                      <span className="font-mono">{`{${template.category}_output}`}</span>
+                                    </div>
+                                    
+                                    {/* Show available inputs for this step */}
+                                    {availableWorkflowPlaceholders.length > 0 && (
+                                      <div className="text-xs text-green-600">
+                                        <span className="font-medium">📎 Can use:</span>{' '}
+                                        {availableWorkflowPlaceholders.map(p => `{${p}}`).join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
@@ -1002,7 +1365,7 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                           ? 'border-blue-500 bg-blue-50'
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
-                      onClick={() => setSelectedTemplate(template)}
+                      onClick={() => handleTemplateSelection(template)}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
@@ -1046,6 +1409,11 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                           <CardTitle className="flex items-center gap-2">
                             {getCategoryIcon(selectedTemplate.category)}
                             {selectedTemplate.name}
+                            {editingVersion && hasUnsavedChanges() && (
+                              <Badge variant="secondary" className="text-orange-600 border-orange-200 bg-orange-50">
+                                Unsaved Changes
+                              </Badge>
+                            )}
                           </CardTitle>
                           <CardDescription>
                             Current version: v{selectedTemplate.current_version} • 
@@ -1053,11 +1421,7 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                           </CardDescription>
                         </div>
                         <Button
-                          onClick={() => {
-                            setEditingVersion('new');
-                            setNewPromptContent(selectedTemplate.current_prompt || '');
-                            setNewSystemMessage(selectedTemplate.current_system_message || '');
-                          }}
+                          onClick={handleEditPrompt}
                         >
                           <Edit className="w-4 h-4 mr-2" />
                           Edit Prompt
@@ -1069,41 +1433,60 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                         <div className="space-y-4">
                           <div>
                             <Label htmlFor="prompt-content">Prompt Content</Label>
-                            {showWorkflowView && (
-                              <div className="mb-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                <div className="text-sm font-medium text-yellow-800 mb-2">💡 Available Placeholders:</div>
-                                <div className="space-y-1 text-xs">
-                                  <div className="text-yellow-700">
-                                    <code className="bg-yellow-100 px-1 rounded">{`{article_content}`}</code> - Original article content
-                                  </div>
-                                  {getAvailablePlaceholders(selectedTemplate.template_id).map((placeholder, index) => (
-                                    <div key={index} className="text-green-700">
-                                      <code 
-                                        className="bg-green-100 px-1 rounded cursor-pointer hover:bg-green-200"
-                                        onClick={() => {
-                                          const cursorPos = document.getElementById('prompt-content').selectionStart;
-                                          const beforeCursor = newPromptContent.substring(0, cursorPos);
-                                          const afterCursor = newPromptContent.substring(cursorPos);
-                                          setNewPromptContent(beforeCursor + placeholder.placeholder + afterCursor);
-                                        }}
-                                      >
-                                        {placeholder.placeholder}
-                                      </code> - Output from {placeholder.name}
-                                    </div>
-                                  ))}
-                                </div>
-                                <div className="text-xs text-yellow-600 mt-2">
-                                  💡 Click a placeholder to insert it at cursor position
-                                </div>
+                            
+                            {/* ENHANCED: Always show placeholder selector during editing */}
+                            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                              <div className="text-sm font-medium text-blue-800 mb-2">
+                                💡 Available Placeholders - Click to Insert:
                               </div>
-                            )}
-                            <Textarea
-                              id="prompt-content"
-                              value={newPromptContent}
-                              onChange={(e) => setNewPromptContent(e.target.value)}
-                              rows={10}
-                              className="mt-1"
+                                                             <div className="flex flex-wrap gap-2">
+                                 {/* All available placeholders */}
+                                 {getAvailablePlaceholders(selectedTemplate.template_id).map((placeholder, index) => {
+                                   const isCore = placeholder.type === 'core';
+                                   const isWorkflow = placeholder.type === 'workflow';
+                                   
+                                   return (
+                                     <button
+                                       key={index}
+                                       type="button"
+                                       className={`inline-flex items-center px-2 py-1 text-xs rounded-md hover:opacity-80 transition-colors ${
+                                         isCore ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' :
+                                         isWorkflow ? 'bg-green-100 text-green-800 hover:bg-green-200' :
+                                         'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                                       }`}
+                                       onClick={() => {
+                                         // Use TipTap editor's insertPlaceholder method
+                                         if (promptEditorRef.current) {
+                                           promptEditorRef.current.insertPlaceholder(placeholder);
+                                         }
+                                       }}
+                                       title={placeholder.description}
+                                     >
+                                       <span className="font-mono">{`{${placeholder.name}}`}</span>
+                                       <span className={`ml-1 ${isCore ? 'text-blue-600' : 'text-green-600'}`}>
+                                         - {placeholder.displayName}
+                                       </span>
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                                                             <div className="text-xs text-blue-600 mt-2">
+                                 💡 Click any placeholder to insert it at your cursor position. Placeholders are highlighted in the text below.
+                                 <br />
+                                 🔵 <strong>Blue placeholders</strong>: Core system data (article content, blog info)
+                                 <br />
+                                 🟢 <strong>Green placeholders</strong>: Outputs from previous workflow steps
+                               </div>
+                            </div>
+
+                                                        {/* Enhanced TipTap editor with atomic placeholders */}
+                            <PromptEditor
+                              ref={promptEditorRef}
+                              content={newPromptContent}
+                              onChange={setNewPromptContent}
                               placeholder="Enter the prompt content..."
+                              className="mt-1"
+                              availablePlaceholders={getAvailablePlaceholders(selectedTemplate.template_id)}
                             />
                           </div>
                           <div>
@@ -1113,7 +1496,7 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                               value={newSystemMessage}
                               onChange={(e) => setNewSystemMessage(e.target.value)}
                               rows={3}
-                              className="mt-1"
+                              className="mt-1 font-mono text-sm leading-relaxed"
                               placeholder="Enter the system message..."
                             />
                           </div>
@@ -1128,11 +1511,15 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                             />
                           </div>
                           <div className="flex gap-2">
-                            <Button onClick={createNewVersion}>
+                            <Button 
+                              onClick={createNewVersion} 
+                              disabled={!hasUnsavedChanges() || !newPromptContent.trim()}
+                              className={hasUnsavedChanges() ? "bg-green-600 hover:bg-green-700" : ""}
+                            >
                               <Save className="w-4 h-4 mr-2" />
-                              Save New Version
+                              {hasUnsavedChanges() ? 'Save Changes' : 'No Changes'}
                             </Button>
-                            <Button variant="outline" onClick={() => setEditingVersion(null)}>
+                            <Button variant="outline" onClick={handleCancelEdit}>
                               <X className="w-4 h-4 mr-2" />
                               Cancel
                             </Button>
@@ -1142,14 +1529,14 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                         <div className="space-y-4">
                           <div>
                             <Label>Current Prompt Content</Label>
-                            <div className="mt-1 p-3 bg-gray-50 rounded-lg border">
+                            <div className="mt-1 p-3 bg-gray-50 rounded-lg border font-mono text-sm leading-relaxed">
                               <pre className="whitespace-pre-wrap text-sm">{selectedTemplate.current_prompt}</pre>
                             </div>
                           </div>
                           {selectedTemplate.current_system_message && (
                             <div>
                               <Label>System Message</Label>
-                              <div className="mt-1 p-3 bg-gray-50 rounded-lg border">
+                              <div className="mt-1 p-3 bg-gray-50 rounded-lg border font-mono text-sm leading-relaxed">
                                 <pre className="whitespace-pre-wrap text-sm">{selectedTemplate.current_system_message}</pre>
                               </div>
                             </div>
@@ -1176,8 +1563,8 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                           value={testVariables}
                           onChange={(e) => setTestVariables(e.target.value)}
                           rows={3}
-                          className="mt-1"
-                          placeholder='{"article_content": "Sample content..."}'
+                          className="mt-1 font-mono text-sm leading-relaxed"
+                          placeholder='{"article.title": "Sample Article", "article.content": "Sample content..."}'
                         />
                       </div>
                       <Button onClick={() => testPrompt(selectedTemplate.current_version_id)}>
@@ -1277,14 +1664,14 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                           )}
                           <div>
                             <Label>Prompt Content</Label>
-                            <div className="mt-1 p-3 bg-gray-50 rounded-lg border">
+                            <div className="mt-1 p-3 bg-gray-50 rounded-lg border font-mono text-sm leading-relaxed">
                               <pre className="whitespace-pre-wrap text-sm">{version.prompt_content}</pre>
                             </div>
                           </div>
                           {version.system_message && (
                             <div>
                               <Label>System Message</Label>
-                              <div className="mt-1 p-3 bg-gray-50 rounded-lg border">
+                              <div className="mt-1 p-3 bg-gray-50 rounded-lg border font-mono text-sm leading-relaxed">
                                 <pre className="whitespace-pre-wrap text-sm">{version.system_message}</pre>
                               </div>
                             </div>
@@ -1426,7 +1813,9 @@ A lone, weathered lighthouse stands firm against a stormy sea, its powerful beam
                             icon={<FileText className="w-5 h-5" />}
                             prompt={`Create an engaging blog post based on the following news article:
 
-Article: {{article_content}}
+Title: {article.title}
+Content: {article.content}
+Source: {article.source}
 
 Requirements:
 - Write a compelling headline that captures attention
@@ -1451,7 +1840,9 @@ Format the output as clean HTML with appropriate headings (h1, h2, h3) and parag
                             icon={<Share2 className="w-5 h-5" />}
                             prompt={`Create social media posts based on this article:
 
-Article: {{article_content}}
+Title: {article.title}
+Content: {article.content}
+Source: {article.source}
 
 Create 4 different posts:
 1. LinkedIn (professional, 150-200 words)
@@ -1479,7 +1870,9 @@ Format each post clearly with platform labels.`}
                             icon={<Heart className="w-5 h-5" />}
                             prompt={`Based on this news article, create thoughtful prayer points:
 
-Article: {{article_content}}
+Title: {article.title}
+Content: {article.content}
+Source: {article.source}
 
 Create 5-7 prayer points that:
 - Address the specific issues or people mentioned in the article
@@ -1503,8 +1896,10 @@ Format each prayer point as a separate paragraph, starting with a brief context 
                             icon={<Video className="w-5 h-5" />}
                             prompt={`Create a video script based on this article:
 
-Article: {{article_content}}
-Duration: {{duration}} minutes (default: 3-5 minutes)
+Title: {article.title}
+Content: {article.content}
+Source: {article.source}
+Duration: 3-5 minutes
 
 Script structure:
 1. HOOK (0-15 seconds): Compelling opening question or statement
@@ -1543,7 +1938,7 @@ Keep language conversational and engaging for video format.`}
                             <li>• Be specific about the desired output format</li>
                             <li>• Include clear examples when possible</li>
                             <li>• Define the tone and style you want</li>
-                            <li>• Use variables like {`{{article_content}}`} for dynamic content</li>
+                            <li>• Use variables like {`{article.content}`} for dynamic content</li>
                           </ul>
                         </div>
                         <div>

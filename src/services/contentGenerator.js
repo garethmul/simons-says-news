@@ -7,56 +7,74 @@ class ContentGenerator {
     this.maxConcurrentJobs = parseInt(process.env.MAX_CONCURRENT_JOBS) || 3;
   }
 
-  async generateContentFromTopStories(limit = 5, accountId = null) {
-    console.log(`🎨 Starting content generation from top stories... (accountId: ${accountId})`);
+  async generateContentFromTopStories(limit = 5, accountId = null, jobLogger = null) {
+    const logger = jobLogger || console;
+    logger.info(`🎨 Starting content generation from top stories... (accountId: ${accountId})`);
     
     try {
       // Get top stories with account filtering
+      logger.info(`📊 Finding top ${limit} stories with relevance score >= 0.6`);
       const topStories = await db.getTopArticlesByRelevance(limit, 0.6, accountId);
       
       if (topStories.length === 0) {
-        console.log('📰 No high-relevance stories found for content generation');
+        logger.warn('📰 No high-relevance stories found for content generation');
         return [];
       }
 
-      console.log(`📝 Generating content for ${topStories.length} top stories`);
+      logger.info(`📝 Found ${topStories.length} high-relevance stories for content generation`);
+      topStories.forEach((story, index) => {
+        logger.info(`📄 Story ${index + 1}: "${story.title}" (relevance: ${story.relevance_score})`);
+      });
       
       const generatedContent = [];
 
       // Process stories in batches to avoid overwhelming APIs
       for (let i = 0; i < topStories.length; i += this.maxConcurrentJobs) {
         const batch = topStories.slice(i, i + this.maxConcurrentJobs);
+        logger.info(`🔄 Processing batch ${Math.floor(i / this.maxConcurrentJobs) + 1} (${batch.length} stories)`);
         
-        const batchPromises = batch.map(story => this.generateContentForStory(story, accountId));
+        const batchPromises = batch.map((story, batchIndex) => {
+          logger.info(`🎯 Starting content generation for story ${i + batchIndex + 1}: "${story.title}"`);
+          return this.generateContentForStory(story, accountId, jobLogger);
+        });
         const batchResults = await Promise.allSettled(batchPromises);
         
         batchResults.forEach((result, index) => {
           if (result.status === 'fulfilled') {
             generatedContent.push(result.value);
+            logger.info(`✅ Content generated successfully for story: "${batch[index].title}"`);
           } else {
-            console.error(`❌ Failed to generate content for story ${batch[index].article_id}:`, result.reason);
+            logger.error(`❌ Failed to generate content for story ${batch[index].article_id} ("${batch[index].title}"):`, result.reason.message);
           }
         });
 
         // Small delay between batches
         if (i + this.maxConcurrentJobs < topStories.length) {
+          logger.info('⏱️ Waiting 2 seconds before processing next batch...');
           await this.delay(2000);
         }
       }
 
-      console.log(`🎉 Content generation complete: ${generatedContent.length} content pieces created`);
+      logger.info(`🎉 Content generation complete: ${generatedContent.length} content pieces created from ${topStories.length} stories`);
       return generatedContent;
     } catch (error) {
-      console.error('❌ Content generation failed:', error.message);
+      logger.error('❌ Content generation failed:', error.message);
       throw error;
     }
   }
 
-  async generateContentForStory(story, accountId = null) {
+  async generateContentForStory(story, accountId = null, jobLogger = null) {
+    const logger = jobLogger || console;
     let blogId = null;
     try {
-      console.log(`[Workflow START] -------------------------------------------------`);
-      console.log(`[Workflow] 1. Processing Story: ${story.title.substring(0, 50)}...`);
+      logger.info(`[Workflow START] -------------------------------------------------`);
+      logger.info(`[Workflow] 1. Processing Story: "${story.title}"`);
+      logger.info(`[Workflow] 1a. Story Details:`);
+      logger.info(`   - Article ID: ${story.article_id}`);
+      logger.info(`   - Source: ${story.source_name || 'Unknown'}`);
+      logger.info(`   - Relevance Score: ${story.relevance_score || 'N/A'}`);
+      logger.info(`   - Content Length: ${story.full_text?.length || 0} characters`);
+      logger.info(`   - URL: ${story.url || 'N/A'}`);
 
       const article = {
         title: story.title,
@@ -66,7 +84,7 @@ class ContentGenerator {
         url: story.url
       };
 
-      console.log(`[Workflow] 2. Creating initial article record...`);
+      logger.info(`[Workflow] 2. Creating initial article record in database...`);
       const mainArticleData = {
         based_on_scraped_article_id: story.article_id,
         title: story.title,
@@ -76,16 +94,20 @@ class ContentGenerator {
       };
       
       blogId = await db.insertWithAccount('ssnews_generated_articles', mainArticleData, accountId);
-      console.log(`[Workflow] 3. Main article record created (ID: ${blogId})`);
+      logger.info(`[Workflow] 3. Main article record created (Blog ID: ${blogId})`);
 
-      console.log(`[Workflow] 4. Starting full content generation workflow...`);
-      const generatedContent = await this.generateAllConfiguredContent(article, blogId, accountId);
-      console.log(`[Workflow] 5. Full workflow complete. Generated ${Object.keys(generatedContent).length - 3} content types.`); // -3 for metadata fields
+      logger.info(`[Workflow] 4. Starting full content generation workflow...`);
+      const generatedContent = await this.generateAllConfiguredContent(article, blogId, accountId, jobLogger);
+      const contentTypesGenerated = Object.keys(generatedContent).filter(key => !key.startsWith('_'));
+      logger.info(`[Workflow] 5. Content generation complete. Generated ${contentTypesGenerated.length} content types: ${contentTypesGenerated.join(', ')}`);
 
-      console.log(`[Workflow] 6. Updating main article with generated blog content...`);
+      logger.info(`[Workflow] 6. Updating main article with generated blog content...`);
       let blogPostContent = 'Content generation for blog post failed or was not configured.';
       if (generatedContent && generatedContent.blog_post && generatedContent.blog_post[0] && generatedContent.blog_post[0].content) {
         blogPostContent = generatedContent.blog_post[0].content;
+        logger.info(`[Workflow] 6a. Blog post content generated successfully (${this.countWords(blogPostContent)} words)`);
+      } else {
+        logger.warn(`[Workflow] 6a. No blog post content generated - using fallback message`);
       }
       
       const wordCount = this.countWords(blogPostContent);
@@ -95,14 +117,15 @@ class ContentGenerator {
         'gen_article_id = ?',
         [blogId]
       );
-      console.log(`[Workflow] 7. Main article record updated successfully.`);
+      logger.info(`[Workflow] 7. Main article record updated successfully (${wordCount} words)`);
       
-      console.log(`[Workflow END] --------------------------------------------------`);
+      logger.info(`[Workflow END] Complete for "${story.title}" (Blog ID: ${blogId}) --------------------------------------------------`);
       return { ...generatedContent, blogId, title: story.title };
 
     } catch (error) {
-      console.error(`❌❌ [Workflow FAIL] Top-level error in generateContentForStory for story ID ${story.article_id}, BlogID: ${blogId}`);
-      console.error(error.stack);
+      logger.error(`❌❌ [Workflow FAIL] Top-level error in generateContentForStory for story ID ${story.article_id}, BlogID: ${blogId}`);
+      logger.error(`❌❌ Error: ${error.message}`);
+      logger.error(`❌❌ Stack: ${error.stack}`);
       return { blogId: blogId, error: error.message };
     }
   }
@@ -111,71 +134,7 @@ class ContentGenerator {
   // These are now handled by the compatibility layer and legacy service.
   // Use compatibilityLayer.generateContent() for backwards-compatible generation.
 
-  async generateGenericPrayerPoints(article, blogId, config, accountId = null) {
-    try {
-      const prayerContent = await aiService.generatePrayerPoints(article, blogId);
-      
-      console.log(`🙏 Raw prayer content: ${prayerContent}`);
-      
-      // Parse the prayer points string into individual prayer objects
-      const prayerPointsData = [];
-      
-      if (typeof prayerContent === 'string' && prayerContent.length > 0) {
-        // Split the prayer points by double line breaks
-        const prayerTexts = prayerContent.split('\\n\\n').filter(text => text.trim().length > 0);
-        
-        for (let i = 0; i < prayerTexts.length && i < 5; i++) {
-          const prayerText = prayerTexts[i].trim();
-          if (prayerText.length > 10) {
-            prayerPointsData.push({
-              order_number: i + 1,
-              prayer_text: prayerText,
-              theme: this.extractThemeFromPrayer(prayerText)
-            });
-          }
-        }
-      }
 
-      // Convert to JSON strings for proper storage
-      const contentDataJson = JSON.stringify(prayerPointsData);
-      const metadataJson = JSON.stringify({
-        generation_model: 'gemini',
-        prayer_count: prayerPointsData.length,
-        generated_at: new Date().toISOString()
-      });
-
-      // Use raw SQL with explicit JSON casting to ensure proper storage
-      const insertSql = `
-        INSERT INTO ssnews_generated_content 
-        (account_id, based_on_gen_article_id, prompt_category, content_data, metadata, status, created_at, updated_at)
-        VALUES (?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), ?, NOW(), NOW())
-      `;
-      
-      const insertParams = [
-        accountId,
-        blogId,
-        'prayer_points',
-        contentDataJson,
-        metadataJson,
-        'draft'
-      ];
-
-      const [result] = await db.pool.execute(insertSql, insertParams);
-      const contentId = result.insertId;
-      
-      console.log(`🙏 Generated ${prayerPointsData.length} prayer points (Generic Content ID: ${contentId})`);
-      
-      return prayerPointsData.map((point, index) => ({
-        id: `${contentId}_${index}`,
-        order: point.order_number,
-        content: point.prayer_text,
-        theme: point.theme
-      }));
-    } catch (error) {
-      console.error('❌ Error generating generic prayer points:', error.message);
-      return [];
-    }
-  }
 
   async generateLegacyPrayerPoints(article, blogId, accountId = null) {
     try {
@@ -255,22 +214,27 @@ class ContentGenerator {
   // MODERN WORKFLOW SYSTEM METHODS
   // ============================================================================
 
-  async generateAllConfiguredContent(article, blogId, accountId = null) {
-    console.log(`🔧 Generating all configured content for blog ${blogId} (accountId: ${accountId})`);
+  async generateAllConfiguredContent(article, blogId, accountId = null, jobLogger = null) {
+    const logger = jobLogger || console;
+    logger.info(`🔧 Generating all configured content for blog ${blogId} (accountId: ${accountId})`);
     
     try {
       // Get all active content configurations for this account
+      logger.info(`📋 Fetching active content configurations for account ${accountId}...`);
       const contentConfigs = await db.getActiveContentConfigurations(accountId);
       
       if (contentConfigs.length === 0) {
-        console.log(`⚠️ No content configurations found for account: ${accountId}. Using compatibility layer.`);
+        logger.warn(`⚠️ No content configurations found for account: ${accountId}. Using compatibility layer.`);
         
         // Import compatibility layer dynamically to avoid circular dependencies
         const { default: compatibilityLayer } = await import('./compatibilityLayer.js');
         return await compatibilityLayer.generateContent(article, blogId, accountId);
       }
 
-      console.log(`📋 Found ${contentConfigs.length} content configurations`);
+      logger.info(`📋 Found ${contentConfigs.length} content configurations:`);
+      contentConfigs.forEach((config, index) => {
+        logger.info(`   ${index + 1}. ${config.name || config.display_name} (${config.category})`);
+      });
       
       const generatedContent = {};
       const metadata = {
@@ -281,21 +245,34 @@ class ContentGenerator {
       };
 
       // Process each content configuration
-      for (const config of contentConfigs) {
+      for (let i = 0; i < contentConfigs.length; i++) {
+        const config = contentConfigs[i];
         try {
-          console.log(`🔄 Processing ${config.category} configuration...`);
+          logger.info(`🔄 Processing configuration ${i + 1}/${contentConfigs.length}: ${config.name || config.display_name}`);
+          logger.info(`   - Category: ${config.category}`);
+          logger.info(`   - Display Name: ${config.name}`);
+          logger.info(`   - Execution Order: ${config.execution_order}`);
+          logger.info(`   - Template Output Type: ${config.template_output_type}`);
           
-          const content = await this.generateContentFromTemplate(config, article, blogId, accountId);
+          const startTime = Date.now();
+          const content = await this.generateContentFromTemplate(config, article, blogId, accountId, jobLogger);
+          const duration = Date.now() - startTime;
           
           if (content && content.length > 0) {
             generatedContent[config.category] = content;
-            console.log(`✅ Generated ${content.length} ${config.category} items`);
+            logger.info(`✅ Generated ${content.length} ${config.category} items in ${duration}ms`);
+            if (content[0] && content[0].content) {
+              const contentLength = typeof content[0].content === 'string' ? content[0].content.length : 0;
+              logger.info(`   - First item length: ${contentLength} characters`);
+            }
           } else {
-            console.log(`⚠️ No content generated for ${config.category}`);
+            logger.warn(`⚠️ No content generated for ${config.category} (${duration}ms)`);
+            generatedContent[config.category] = [];
           }
           
         } catch (error) {
-          console.error(`❌ Error generating ${config.category}:`, error.message);
+          logger.error(`❌ Error generating ${config.category}:`, error.message);
+          logger.error(`❌ Stack trace:`, error.stack);
           generatedContent[config.category] = [];
         }
       }
@@ -305,66 +282,201 @@ class ContentGenerator {
       generatedContent._system = 'modern';
       generatedContent._generatedTypes = Object.keys(generatedContent).filter(key => !key.startsWith('_'));
 
-      console.log(`🎉 Content generation complete: ${generatedContent._generatedTypes.length} types generated`);
+      logger.info(`🎉 Content generation complete: ${generatedContent._generatedTypes.length} types generated`);
+      logger.info(`   - Generated types: ${generatedContent._generatedTypes.join(', ')}`);
       return generatedContent;
       
     } catch (error) {
-      console.error('❌ Error in generateAllConfiguredContent:', error.message);
+      logger.error('❌ Error in generateAllConfiguredContent:', error.message);
+      logger.error('❌ Stack trace:', error.stack);
       
       // Fallback to compatibility layer on error
-      console.log('🔄 Falling back to compatibility layer...');
+      logger.info('🔄 Falling back to compatibility layer...');
       const { default: compatibilityLayer } = await import('./compatibilityLayer.js');
       return await compatibilityLayer.generateContent(article, blogId, accountId);
     }
   }
 
-  async generateContentFromTemplate(config, article, blogId, accountId = null) {
-    console.log(`📝 Generating content from template: ${config.category}`);
+  async generateContentFromTemplate(template, article, blogId, accountId = null, jobLogger = null) {
+    const logger = jobLogger || console;
+    logger.info(`📝 Generating content from template: ${template.category}`);
+    logger.info(`🔍 Template structure:`, { 
+      category: template.category,
+      name: template.name,
+      execution_order: template.execution_order,
+      template_output_type: template.template_output_type
+    });
     
     try {
-      // Get the latest version of the template
-      const template = JSON.parse(config.template_data);
-      const storageSchema = JSON.parse(config.storage_schema);
+      // Use the correct field names from the prompt templates table
+      const category = template.category;
       
-      if (template.type === 'ai_generation') {
-        return await this.generateAIContentFromTemplate(config.category, article, template.generation_config, blogId);
-      } else if (template.type === 'workflow') {
-        return await this.generateAIContentFromTemplateWithWorkflow(template.workflow, { article, blogId }, blogId, accountId);
+      if (!category) {
+        throw new Error('No category found in template');
+      }
+
+      logger.info(`🔄 Using template for ${category}...`);
+
+      // Generate content using generic template-based approach
+      logger.info(`🤖 Starting AI generation for category: ${category}`);
+      logger.info(`📋 Article context: "${article.title}" (${article.full_text?.length || 0} chars)`);
+      logger.info(`🔧 Using template: ${template.name}`);
+      
+      const startTime = Date.now();
+      let result = [];
+
+      // Handle image generation with special processing
+      if (category === 'image_generation') {
+        logger.info(`🖼️ Processing image generation...`);
+        // Let it proceed to normal generation - aiService will handle image generation
+      }
+
+      // Use generic content generation for ALL content types
+      logger.info(`📝 Generating content using template system for ${category}...`);
+      
+      // Create basic generation config for templates
+      const basicConfig = {
+        temperature: 0.7,
+        max_tokens: 2000, // Increased from 1000 to prevent truncation
+        model: 'gemini'
+      };
+      
+      const generatedContent = await aiService.generateGenericContent(category, article, basicConfig, blogId, accountId);
+      logger.info(`📝 Generated content: ${generatedContent?.length || 0} characters`);
+      
+      if (generatedContent && generatedContent.length > 0) {
+        // Parse content based on its structure
+        let parsedContent;
+        let contentData;
+        
+        // Try to parse as JSON for structured content (like social media)
+        try {
+          const parsed = JSON.parse(generatedContent);
+          if (typeof parsed === 'object' && parsed !== null) {
+            logger.info(`📊 Parsed structured content for ${category}`);
+            
+            // Handle different structured formats
+            if (Array.isArray(parsed)) {
+              contentData = parsed;
+            } else if (category === 'social_media' && (parsed.facebook || parsed.instagram || parsed.linkedin || parsed.twitter)) {
+              // Convert social media object to array format
+              const platforms = ['facebook', 'instagram', 'linkedin', 'twitter'];
+              contentData = platforms
+                .filter(platform => parsed[platform])
+                .map((platform, index) => ({
+                  platform,
+                  text: parsed[platform].text || parsed[platform],
+                  hashtags: parsed[platform].hashtags || [],
+                  order_number: index + 1
+                }));
+              logger.info(`📱 Converted social media content: ${contentData.length} posts`);
+            } else {
+              // Convert object to single item array
+              contentData = [{ ...parsed, type: category }];
+            }
+          } else {
+            // Fallback to text content
+            contentData = [{
+              content: generatedContent,
+              word_count: this.countWords(generatedContent),
+              type: category
+            }];
+          }
+        } catch (parseError) {
+          // Not JSON, treat as plain text
+          logger.info(`📝 Treating as plain text content for ${category}`);
+          
+          // Special handling for prayer points - split by lines
+          if (category === 'prayer_points' || category === 'prayer') {
+            const prayerLines = generatedContent.split('\n')
+              .map(line => line.trim())
+              .filter(line => line && !line.startsWith('#') && line.length > 10)
+              .slice(0, 5); // Limit to 5 prayer points
+            
+            contentData = prayerLines.map((line, index) => ({
+              order_number: index + 1,
+              prayer_text: line.replace(/^\d+\.?\s*/, '').replace(/^[-*]\s*/, '').trim(),
+              theme: this.extractThemeFromPrayer(line)
+            }));
+            logger.info(`🙏 Parsed ${contentData.length} prayer points`);
+          } else {
+            // Standard text content
+            contentData = [{
+              content: generatedContent,
+              word_count: this.countWords(generatedContent),
+              type: category
+            }];
+          }
+        }
+
+        // Save to ssnews_generated_content table
+        try {
+          const contentDataJson = JSON.stringify(contentData);
+          const metadataJson = JSON.stringify({
+            generation_model: 'gemini',
+            content_length: generatedContent.length,
+            item_count: contentData.length,
+            category: category,
+            generated_at: new Date().toISOString(),
+            generation_config: basicConfig
+          });
+
+          const insertSql = `
+            INSERT INTO ssnews_generated_content 
+            (account_id, based_on_gen_article_id, prompt_category, content_data, metadata, status, created_at, updated_at)
+            VALUES (?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), ?, NOW(), NOW())
+          `;
+          
+          const [insertResult] = await db.pool.execute(insertSql, [
+            accountId,
+            blogId,
+            category,
+            contentDataJson,
+            metadataJson,
+            'draft'
+          ]);
+          
+          logger.info(`💾 ${category} content saved to database (Content ID: ${insertResult.insertId})`);
+          
+          // Return content in expected format
+          result = contentData.map((item, index) => ({
+            id: `${insertResult.insertId}_${index}`,
+            ...item
+          }));
+          
+        } catch (saveError) {
+          logger.error(`❌ Failed to save ${category} content to database: ${saveError.message}`);
+          // Return content even if save failed
+          result = contentData.map((item, index) => ({
+            id: `${blogId}_${category}_${Date.now()}_${index}`,
+            ...item
+          }));
+        }
       } else {
-        throw new Error(`Unknown template type: ${template.type}`);
+        logger.warn(`⚠️ No content generated for ${category}`);
       }
       
+      const duration = Date.now() - startTime;
+      logger.info(`⏱️ Content generation for ${category} completed in ${duration}ms`);
+      
+      if (result && result.length > 0) {
+        logger.info(`✅ Successfully generated ${result.length} items for ${category}`);
+      } else {
+        logger.warn(`⚠️ No content generated for ${category}`);
+      }
+      
+      return result || [];
+      
     } catch (error) {
-      console.error(`❌ Error generating content from template ${config.category}:`, error.message);
+      logger.error(`❌ Error generating content from template ${template.category}:`, error.message);
+      logger.error(`❌ Stack trace:`, error.stack);
       return [];
     }
   }
 
-  async generateAIContentFromTemplate(category, article, generationConfig, blogId) {
-    console.log(`🤖 Generating AI content for category: ${category}`);
-    
-    try {
-      let content;
-      
-      // Use existing AI service methods based on category
-      switch (category) {
-        case 'prayer_points':
-          content = await aiService.generatePrayerPoints(article, blogId);
-          break;
-        default:
-          // Generic AI generation using prompt manager
-          return await aiService.generatePrayerPoints(article, blogId);
-      }
-      
-      return content;
-      
-    } catch (error) {
-      console.error(`❌ Error in AI generation for ${category}:`, error.message);
-      return null;
-    }
-  }
 
-  // ... existing code ...
+
+
 
   // Utility methods
   countWords(text) {
@@ -434,6 +546,77 @@ class ContentGenerator {
       };
     } catch (error) {
       console.error('❌ Error getting generation stats:', error.message);
+      throw error;
+    }
+  }
+
+  async updateContentStatus(contentId, contentType, status, finalContent = null, accountId = null) {
+    try {
+      console.log(`📝 Updating content status: ID ${contentId}, type ${contentType}, status ${status} (accountId: ${accountId})`);
+      
+      // Map content types to database table
+      let tableName;
+      let idColumn;
+      
+      switch (contentType.toLowerCase()) {
+        case 'blog':
+        case 'article':
+          tableName = 'ssnews_generated_articles';
+          idColumn = 'gen_article_id';
+          break;
+        case 'social':
+          tableName = 'ssnews_generated_social_media';
+          idColumn = 'social_media_id';
+          break;
+        case 'video':
+          tableName = 'ssnews_generated_video_scripts';
+          idColumn = 'video_script_id';
+          break;
+        default:
+          throw new Error(`Unknown content type: ${contentType}`);
+      }
+
+      // Build update data
+      const updateData = {
+        status: status,
+        updated_at: new Date()
+      };
+
+      // Add final content if provided
+      if (finalContent) {
+        if (contentType.toLowerCase() === 'blog' || contentType.toLowerCase() === 'article') {
+          updateData.body_draft = finalContent;
+          updateData.word_count = this.countWords(finalContent);
+        } else if (contentType.toLowerCase() === 'social') {
+          updateData.post_text = finalContent;
+        } else if (contentType.toLowerCase() === 'video') {
+          updateData.script_text = finalContent;
+        }
+      }
+
+      // Update the content
+      const whereClause = accountId 
+        ? `${idColumn} = ? AND account_id = ?`
+        : `${idColumn} = ?`;
+      
+      const whereParams = accountId 
+        ? [contentId, accountId]
+        : [contentId];
+
+      await db.update(tableName, updateData, whereClause, whereParams);
+      
+      console.log(`✅ Content status updated successfully: ${contentType} ${contentId} -> ${status}`);
+      
+      return {
+        success: true,
+        contentId,
+        contentType,
+        status,
+        message: `${contentType} ${contentId} status updated to ${status}`
+      };
+      
+    } catch (error) {
+      console.error(`❌ Error updating content status:`, error.message);
       throw error;
     }
   }

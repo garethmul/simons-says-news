@@ -254,6 +254,7 @@ const ProjectEden = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [showLogViewer, setShowLogViewer] = useState(false);
+  const [selectedJobIdForLogs, setSelectedJobIdForLogs] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [rejectedStories, setRejectedStories] = useState(new Set());
   
@@ -814,6 +815,9 @@ const ProjectEden = () => {
                 onRefresh={handleJobsRefresh}
                 onCancelJob={cancelJob}
                 onRetryJob={retryJob}
+                selectedJobIdForLogs={selectedJobIdForLogs}
+                onSelectJobForLogs={setSelectedJobIdForLogs}
+                onShowLogs={() => setShowLogViewer(true)}
               />
             </TabsContent>
 
@@ -880,7 +884,12 @@ const ProjectEden = () => {
 
         <LogViewer 
           isOpen={showLogViewer}
-          onClose={() => setShowLogViewer(false)}
+          onClose={() => {
+            setShowLogViewer(false);
+            // Clear job selection when closing log viewer
+            setSelectedJobIdForLogs(null);
+          }}
+          selectedJobId={selectedJobIdForLogs}
         />
       </div>
     </ErrorBoundary>

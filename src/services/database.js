@@ -351,33 +351,42 @@ class DatabaseService {
 
       // Get associated content and source article information for each article
       for (const article of uniqueArticles) {
-        // Get social posts
-        article.socialPosts = accountId
+        // Get all generated content from the unified system ONLY
+        const allGeneratedContent = accountId
           ? await this.findManyByAccount(
-              'ssnews_generated_social_posts',
+              'ssnews_generated_content',
               accountId,
               'based_on_gen_article_id = ?',
-              [article.gen_article_id]
+              [article.gen_article_id],
+              'prompt_category ASC, created_at ASC'
             )
           : await this.findMany(
-              'ssnews_generated_social_posts',
+              'ssnews_generated_content',
               'based_on_gen_article_id = ?',
-              [article.gen_article_id]
+              [article.gen_article_id],
+              'prompt_category ASC, created_at ASC'
             );
 
-        // Get video scripts
-        article.videoScripts = accountId
-          ? await this.findManyByAccount(
-              'ssnews_generated_video_scripts',
-              accountId,
-              'based_on_gen_article_id = ?',
-              [article.gen_article_id]
-            )
-          : await this.findMany(
-              'ssnews_generated_video_scripts',
-              'based_on_gen_article_id = ?',
-              [article.gen_article_id]
-            );
+        // Group content by category for UI compatibility
+        const contentByCategory = {};
+        allGeneratedContent.forEach(content => {
+          if (!contentByCategory[content.prompt_category]) {
+            contentByCategory[content.prompt_category] = [];
+          }
+          contentByCategory[content.prompt_category].push(content);
+        });
+
+        // Map to unified content structure (NO legacy tables)
+        article.allGeneratedContent = contentByCategory;
+        
+        // For backward compatibility with existing UI components that expect specific arrays
+        article.socialPosts = contentByCategory['social_media'] || [];
+        article.videoScripts = contentByCategory['video_script'] || [];
+        article.analysisContent = contentByCategory['analysis'] || [];
+        article.emailContent = contentByCategory['email'] || [];
+        article.blogContent = contentByCategory['blog_post'] || [];
+        article.letterContent = contentByCategory['letter'] || [];
+        article.generatedImages = contentByCategory['image_generation'] || [];
 
         // Get images (exclude archived images from content card display)
         article.images = accountId
@@ -447,29 +456,24 @@ class DatabaseService {
           }
         }
 
-        // Get prayer points from generic content system
-        try {
-          const prayerPoints = await this.getGenericContent(article.gen_article_id, 'prayer_points', accountId);
-          
-          if (prayerPoints && prayerPoints.length > 0) {
-            // Convert generic content to expected format
-            article.prayerPoints = prayerPoints.map(point => {
-              const data = point.content_data;
-              if (Array.isArray(data)) {
-                return data.map((item, index) => ({
-                  id: `${point.content_id}_${index}`,
-                  order: item.order_number || index + 1,
-                  content: item.prayer_text,
-                  theme: item.theme
-                }));
-              }
-              return [];
-            }).flat();
-          } else {
-            article.prayerPoints = [];
-          }
-        } catch (prayerError) {
-          console.warn(`⚠️ Could not fetch prayer points: ${prayerError.message}`);
+        // Handle prayer points from the already-fetched content
+        const prayerContent = [...(contentByCategory['prayer'] || []), ...(contentByCategory['prayer_points'] || [])];
+        
+        if (prayerContent.length > 0) {
+          // Convert generic content to expected format
+          article.prayerPoints = prayerContent.map(point => {
+            const data = point.content_data;
+            if (Array.isArray(data)) {
+              return data.map((item, index) => ({
+                id: `${point.content_id}_${index}`,
+                order: item.order_number || index + 1,
+                content: item.prayer_text,
+                theme: item.theme
+              }));
+            }
+            return [];
+          }).flat();
+        } else {
           article.prayerPoints = [];
         }
       }
@@ -554,7 +558,7 @@ class DatabaseService {
           created_at
         FROM ssnews_system_logs 
         WHERE ${whereClause}
-        ORDER BY timestamp ASC 
+        ORDER BY timestamp DESC 
         LIMIT ${limitValue}
       `, whereParams);
 
@@ -728,7 +732,8 @@ class DatabaseService {
       : 'is_active = ?';
     const whereParams = accountId ? [accountId, true] : [true];
     
-    return this.findMany('ssnews_prompt_configuration', whereClause, whereParams, 'ui_config->"$.order" ASC, prompt_category ASC');
+    // Query the correct table: ssnews_prompt_templates (not ssnews_prompt_configuration)
+    return this.findMany('ssnews_prompt_templates', whereClause, whereParams, 'execution_order ASC, category ASC');
   }
 
   async getGenericContent(articleId, category, accountId = null) {

@@ -29,17 +29,27 @@ const JobsTab = ({
   loading,
   onRefresh,
   onCancelJob,
-  onRetryJob
+  onRetryJob,
+  selectedJobIdForLogs,
+  onSelectJobForLogs,
+  onShowLogs
 }) => {
+  const [activeTab, setActiveTab] = useState('active');
+  const [selectedJobId, setSelectedJobId] = useState(null);
+
+  // Filter jobs by status
+  const activeJobs = jobs.filter(job => ['queued', 'processing'].includes(job.status));
+  const completedJobs = jobs.filter(job => ['completed', 'failed', 'cancelled'].includes(job.status));
+
   return (
     <ErrorBoundary>
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Job Queue & Background Tasks</CardTitle>
+              <CardTitle>Active Content Generation Jobs</CardTitle>
               <CardDescription>
-                Monitor content generation and automation jobs
+                Jobs waiting to be processed and currently processing jobs with real-time updates
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -47,8 +57,14 @@ const JobsTab = ({
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
+              <Badge variant="default" className="bg-blue-500 text-white">
+                📺 Live
+              </Badge>
               <Badge variant={workerStatus.isRunning ? 'success' : 'secondary'}>
-                Worker: {workerStatus.isRunning ? 'Running' : 'Stopped'}
+                {activeJobs.length} queued
+              </Badge>
+              <Badge variant="outline">
+                {activeJobs.filter(j => j.status === 'processing').length} processing
               </Badge>
             </div>
           </div>
@@ -60,17 +76,72 @@ const JobsTab = ({
           {workerStatus.currentJob && (
             <CurrentJobIndicator currentJob={workerStatus.currentJob} />
           )}
+
+          {/* Tab Navigation */}
+          <div className="flex items-center gap-4 mt-4 border-b">
+            <Button
+              variant={activeTab === 'active' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('active')}
+              className="h-8 px-4"
+            >
+              Active ({activeJobs.length})
+            </Button>
+            <Button
+              variant={activeTab === 'completed' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('completed')}
+              className="h-8 px-4"
+            >
+              Recent Completed ({completedJobs.length})
+            </Button>
+            {selectedJobId && (
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="text-xs text-gray-600">Viewing logs for Job #{selectedJobId}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelectedJobId(null)}
+                  className="h-6 px-2 text-xs"
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+              </div>
+            )}
+          </div>
         </CardHeader>
 
         <CardContent>
           {loading ? (
             <LoadingState message="Loading jobs..." count={4} />
           ) : (
-            <RecentJobsList 
-              jobs={jobs}
-              onCancelJob={onCancelJob}
-              onRetryJob={onRetryJob}
-            />
+            <>
+              {activeTab === 'active' ? (
+                <JobsList 
+                  jobs={activeJobs}
+                  onCancelJob={onCancelJob}
+                  onRetryJob={onRetryJob}
+                  selectedJobId={selectedJobId}
+                  onSelectJob={setSelectedJobId}
+                  selectedJobIdForLogs={selectedJobIdForLogs}
+                  onSelectJobForLogs={onSelectJobForLogs}
+                  onShowLogs={onShowLogs}
+                  showActiveHelp={true}
+                />
+              ) : (
+                <JobsList 
+                  jobs={completedJobs}
+                  onCancelJob={onCancelJob}
+                  onRetryJob={onRetryJob}
+                  selectedJobId={selectedJobId}
+                  onSelectJob={setSelectedJobId}
+                  selectedJobIdForLogs={selectedJobIdForLogs}
+                  onSelectJobForLogs={onSelectJobForLogs}
+                  onShowLogs={onShowLogs}
+                  showArticleIds={true}
+                />
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -142,15 +213,25 @@ const CurrentJobIndicator = ({ currentJob }) => (
 );
 
 /**
- * Recent Jobs List Component
+ * Jobs List Component
  */
-const RecentJobsList = ({ jobs, onCancelJob, onRetryJob }) => {
+const JobsList = ({ jobs, onCancelJob, onRetryJob, selectedJobId, onSelectJob, selectedJobIdForLogs, onSelectJobForLogs, onShowLogs, showActiveHelp = false, showArticleIds = false }) => {
   if (jobs.length === 0) {
     return (
       <div className="text-center py-8 text-gray-500">
         <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
-        <p>No jobs found</p>
-        <p className="text-sm">Create content generation or full cycle jobs to see them here</p>
+        {showActiveHelp ? (
+          <>
+            <p>No active jobs</p>
+            <p className="text-sm">Generate content from stories to see queued and processing jobs here</p>
+            <p className="text-xs text-muted-foreground mt-2">This page shows real-time updates as jobs are processed</p>
+          </>
+        ) : (
+          <>
+            <p>No completed jobs found</p>
+            <p className="text-sm">Complete some content generation jobs to see their results and article mappings here</p>
+          </>
+        )}
       </div>
     );
   }
@@ -158,7 +239,10 @@ const RecentJobsList = ({ jobs, onCancelJob, onRetryJob }) => {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-medium">Recent Jobs</h3>
+        <h3 className="font-medium">
+          {showActiveHelp ? 'Active Jobs' : 'Completed Jobs'}
+          {showArticleIds && <span className="text-xs text-muted-foreground ml-2">(with Article IDs)</span>}
+        </h3>
         <span className="text-sm text-muted-foreground">{jobs.length} jobs</span>
       </div>
 
@@ -169,6 +253,12 @@ const RecentJobsList = ({ jobs, onCancelJob, onRetryJob }) => {
             job={job}
             onCancelJob={onCancelJob}
             onRetryJob={onRetryJob}
+            isSelected={selectedJobId === job.job_id}
+            onSelect={() => onSelectJob(job.job_id)}
+            selectedJobIdForLogs={selectedJobIdForLogs}
+            onSelectJobForLogs={onSelectJobForLogs}
+            onShowLogs={onShowLogs}
+            showArticleIds={showArticleIds}
           />
         ))}
       </div>
@@ -179,12 +269,12 @@ const RecentJobsList = ({ jobs, onCancelJob, onRetryJob }) => {
 /**
  * Job Card Component
  */
-const JobCard = ({ job, onCancelJob, onRetryJob }) => {
+const JobCard = ({ job, onCancelJob, onRetryJob, isSelected, onSelect, selectedJobIdForLogs, onSelectJobForLogs, onShowLogs, showArticleIds }) => {
   const [showLogs, setShowLogs] = useState(false);
 
   return (
     <div className="space-y-2">
-      <Card className="border">
+      <Card className={`border ${isSelected ? 'ring-2 ring-blue-500 border-blue-300' : ''}`}>
         <CardContent className="pt-4">
           <div className="flex items-start justify-between">
             <div className="flex-1">
@@ -194,6 +284,13 @@ const JobCard = ({ job, onCancelJob, onRetryJob }) => {
                   {job.job_type.replace('_', ' ')}
                 </Badge>
                 <StatusBadge status={job.status} type="job" />
+                
+                {/* Article ID Badge */}
+                {showArticleIds && job.payload && job.payload.specificStoryId && (
+                  <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                    📄 Story #{job.payload.specificStoryId}
+                  </Badge>
+                )}
               </div>
 
               <JobTimestamps job={job} />
@@ -204,11 +301,11 @@ const JobCard = ({ job, onCancelJob, onRetryJob }) => {
               )}
 
               {/* Job Payload */}
-              {job.payload && <JobPayload payload={job.payload} />}
+              {job.payload && <JobPayload payload={job.payload} showArticleIds={showArticleIds} />}
 
               {/* Job Results */}
               {job.results && job.status === 'completed' && (
-                <JobResults results={job.results} />
+                <JobResults results={job.results} job={job} />
               )}
 
               {/* Error Message */}
@@ -217,6 +314,20 @@ const JobCard = ({ job, onCancelJob, onRetryJob }) => {
 
             {/* Job Actions */}
             <div className="flex items-center gap-2 ml-4">
+              {/* Filter Logs Button */}
+              <Button
+                size="sm"
+                variant={selectedJobIdForLogs === job.job_id ? "default" : "outline"}
+                onClick={() => {
+                  onSelectJobForLogs(job.job_id);
+                  onShowLogs();
+                }}
+                className="h-7 px-2 text-xs"
+                title="Open log viewer filtered to this job"
+              >
+                🔍 View Logs
+              </Button>
+              
               <Button
                 size="sm"
                 variant="outline"
@@ -316,13 +427,24 @@ const JobProgress = ({ job }) => (
 /**
  * Job Payload Component
  */
-const JobPayload = ({ payload }) => (
+const JobPayload = ({ payload, showArticleIds }) => (
   <div className="mb-2">
     <span className="text-xs font-medium text-gray-700">Parameters: </span>
     <span className="text-xs text-gray-600">
-      {payload.specificStoryId && `Story #${payload.specificStoryId}`}
-      {payload.limit && `, Limit: ${payload.limit}`}
-      {Object.keys(payload).length === 0 && 'None'}
+      {payload.specificStoryId ? (
+        showArticleIds ? (
+          <>
+            <span className="font-medium text-blue-700">Story #{payload.specificStoryId}</span>
+            {payload.limit && `, Limit: ${payload.limit}`}
+          </>
+        ) : (
+          `Story #${payload.specificStoryId}${payload.limit ? `, Limit: ${payload.limit}` : ''}`
+        )
+      ) : payload.limit ? (
+        `Top ${payload.limit} stories`
+      ) : (
+        Object.keys(payload).length === 0 ? 'None' : JSON.stringify(payload)
+      )}
     </span>
   </div>
 );
@@ -330,14 +452,32 @@ const JobPayload = ({ payload }) => (
 /**
  * Job Results Component
  */
-const JobResults = ({ results }) => (
+const JobResults = ({ results, job }) => (
   <div className="mb-2 p-2 bg-green-50 rounded border border-green-200">
     <span className="text-xs font-medium text-green-800">Results: </span>
-    <span className="text-xs text-green-700">
-      {results.contentGenerated && `${results.contentGenerated} content pieces generated`}
-      {results.articlesAggregated && `${results.articlesAggregated} articles aggregated`}
-      {results.articlesAnalyzed && `, ${results.articlesAnalyzed} analyzed`}
-    </span>
+    <div className="text-xs text-green-700 mt-1">
+      {results.contentGenerated && (
+        <div>✅ {results.contentGenerated} content pieces generated</div>
+      )}
+      {results.blogId && (
+        <div>📝 Generated Blog ID: <span className="font-medium">#{results.blogId}</span></div>
+      )}
+      {results.blogIds && results.blogIds.length > 0 && (
+        <div>📝 Generated Blog IDs: {results.blogIds.map(id => `#${id}`).join(', ')}</div>
+      )}
+      {results.specificStoryId && (
+        <div>📄 Source Story: <span className="font-medium">#{results.specificStoryId}</span></div>
+      )}
+      {results.storyTitle && (
+        <div className="text-xs text-green-600 italic mt-1">"{results.storyTitle}"</div>
+      )}
+      {results.articlesAggregated && (
+        <div>📰 {results.articlesAggregated} articles aggregated</div>
+      )}
+      {results.articlesAnalyzed && (
+        <div>🧠 {results.articlesAnalyzed} articles analyzed</div>
+      )}
+    </div>
   </div>
 );
 

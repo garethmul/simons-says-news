@@ -87,6 +87,11 @@ class PromptManager {
   // Get all versions for a template (account-aware)
   async getTemplateVersions(templateId, accountId = null) {
     try {
+      // Ensure database is initialized
+      if (!this.db.pool) {
+        await this.db.initialize();
+      }
+      
       // First verify the template belongs to the account
       if (accountId) {
         const template = await this.getTemplate(templateId, accountId);
@@ -224,6 +229,11 @@ class PromptManager {
   // Log content generation (account-aware)
   async logGeneration(generatedArticleId, templateId, versionId, aiService, modelUsed, tokensUsed, generationTimeMs, success = true, errorMessage = null, accountId = null) {
     try {
+      // Ensure database is initialized
+      if (!this.db.pool) {
+        await this.db.initialize();
+      }
+      
       // Verify template belongs to account if accountId provided
       if (accountId) {
         const template = await this.getTemplate(templateId, accountId);
@@ -313,6 +323,11 @@ class PromptManager {
   // Get template by category (account-aware)
   async getTemplateByCategory(category, accountId = null) {
     try {
+      // Ensure database is initialized
+      if (!this.db.pool) {
+        await this.db.initialize();
+      }
+      
       let query = `
         SELECT 
           pt.*,

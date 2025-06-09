@@ -19,7 +19,9 @@ import {
   RotateCcw,
   ArrowLeft,
   Heart,
-  Archive
+  Archive,
+  BarChart3,
+  Mail
 } from 'lucide-react';
 import { formatDate, getDaysAgo, parseKeywords, truncateText } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
@@ -35,7 +37,9 @@ const ICON_COMPONENTS = {
   Clock,
   Eye,
   Check,
-  X
+  X,
+  BarChart3,
+  Mail
 };
 
 /**
@@ -265,49 +269,75 @@ const SourceArticleInfo = ({ sourceArticle }) => (
 );
 
 /**
- * Associated Content Component - Dynamic content type support
+ * Associated Content Component - Fully unified and scalable
  */
 const AssociatedContent = ({ content }) => {
-  const { contentTypes } = useContentTypes();
+  // EXTENSIBLE: Use content types from API instead of hardcoded mappings
+  const { contentTypes, getContentTypeIcon, getContentTypeName } = useContentTypes();
+  
+  // Fallback icon mapping for when content types aren't loaded yet
+  const getFallbackIcon = (category) => {
+    const iconMap = {
+      'analysis': BarChart3,
+      'blog_post': FileText,
+      'social_media': Share2,
+      'video_script': Video,
+      'email': Mail,
+      'letter': FileText,
+      'prayer': Heart,
+      'prayer_points': Heart,
+      'image_generation': Image,
+      'audio_script': Video,
+      'podcast': Video,
+      'devotional': Heart,
+      'newsletter': Mail,
+      'sermon': FileText
+    };
+    return iconMap[category] || FileText;
+  };
+
+  // Fallback display name for when content types aren't loaded yet
+  const getFallbackName = (category) => {
+    const nameMap = {
+      'analysis': 'Analysis',
+      'blog_post': 'Blog Post',
+      'social_media': 'Social Media',
+      'video_script': 'Video Script',
+      'email': 'Email',
+      'letter': 'Letter',
+      'prayer': 'Prayer',
+      'prayer_points': 'Prayer Points',
+      'image_generation': 'AI Images',
+      'audio_script': 'Audio Script',
+      'podcast': 'Podcast',
+      'devotional': 'Devotional',
+      'newsletter': 'Newsletter',
+      'sermon': 'Sermon'
+    };
+    return nameMap[category] || category.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  };
   
   return (
     <div className="flex flex-wrap gap-2 mb-4">
-      {/* Dynamic content type badges based on available types */}
-      {contentTypes.map(type => {
-        const count = content[`${type.id}s`]?.length || 
-                     content[type.id]?.length || 
-                     (content[`${type.id}_count`] || 0);
-        
-        if (count > 0) {
+      {/* Display all generated content from unified system - EXTENSIBLE */}
+      {content.allGeneratedContent && Object.entries(content.allGeneratedContent).map(([category, items]) => {
+        if (items && items.length > 0) {
+          // Use extensible system first, fallback to hardcoded for backwards compatibility
+          const iconName = getContentTypeIcon ? getContentTypeIcon(category) : null;
+          const IconComponent = iconName ? ICON_COMPONENTS[iconName] : getFallbackIcon(category);
+          const displayName = getContentTypeName ? getContentTypeName(category) : getFallbackName(category);
+          
           return (
-            <Badge key={type.id} variant="outline">
-              <DynamicIcon iconName={type.icon} />
-              {count} {type.name}
+            <Badge key={category} variant="outline">
+              <IconComponent className="w-3 h-3 mr-1" />
+              {items.length} {displayName}
             </Badge>
           );
         }
         return null;
       })}
       
-      {/* Legacy support for existing content structure */}
-      {content.socialPosts?.length > 0 && (
-        <Badge variant="outline">
-          <Share2 className="w-3 h-3 mr-1" />
-          {content.socialPosts.length} Social Posts
-        </Badge>
-      )}
-      {content.videoScripts?.length > 0 && (
-        <Badge variant="outline">
-          <Video className="w-3 h-3 mr-1" />
-          {content.videoScripts.length} Video Scripts
-        </Badge>
-      )}
-      {content.prayerPoints?.length > 0 && (
-        <Badge variant="outline">
-          <Heart className="w-3 h-3 mr-1" />
-          {content.prayerPoints.length} Prayer Points
-        </Badge>
-      )}
+      {/* Legacy image support (from image generation system) */}
       {content.images?.length > 0 && (
         <Badge variant="outline">
           <Image className="w-3 h-3 mr-1" />

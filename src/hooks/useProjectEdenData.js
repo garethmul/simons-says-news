@@ -315,20 +315,43 @@ export const useProjectEdenData = () => {
     }
 
     try {
-      const [jobsResponse, statsResponse] = await Promise.all([
-        fetchWithAccountContext(`${API_ENDPOINTS.JOBS_RECENT}?limit=20`),
+      // Fetch active jobs (queued + processing) and recent completed jobs in parallel
+      const [activeJobsResponse, completedJobsResponse, statsResponse] = await Promise.all([
+        fetchWithAccountContext(`${API_ENDPOINTS.JOBS_RECENT}?limit=10`), // Recent jobs (includes active)
+        fetchWithAccountContext(`/api/eden/jobs/status/completed?limit=50`), // Recent completed jobs
         fetchWithAccountContext(API_ENDPOINTS.JOBS_STATS)
       ]);
       
-      if (jobsResponse.ok && statsResponse.ok) {
-        const jobsData = await jobsResponse.json();
+      if (statsResponse.ok) {
         const statsData = await statsResponse.json();
-        
         setJobStats(statsData.stats || { summary: {}, details: [] });
         setWorkerStatus(statsData.worker || { isRunning: false });
-        
-        return jobsData.jobs || [];
       }
+
+      // Combine active and completed jobs
+      let allJobs = [];
+      
+      if (activeJobsResponse.ok) {
+        const activeData = await activeJobsResponse.json();
+        allJobs = [...(activeData.jobs || [])];
+      }
+      
+      if (completedJobsResponse.ok) {
+        const completedData = await completedJobsResponse.json();
+        const completedJobs = completedData.jobs || [];
+        
+        // Add completed jobs, avoiding duplicates (in case recent jobs includes some completed ones)
+        const existingJobIds = new Set(allJobs.map(job => job.job_id));
+        const newCompletedJobs = completedJobs.filter(job => !existingJobIds.has(job.job_id));
+        allJobs = [...allJobs, ...newCompletedJobs];
+      }
+      
+      // Sort jobs by creation date (most recent first)
+      allJobs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      
+      console.log(`📋 Fetched ${allJobs.length} jobs total (${allJobs.filter(j => ['queued', 'processing'].includes(j.status)).length} active, ${allJobs.filter(j => ['completed', 'failed', 'cancelled'].includes(j.status)).length} completed)`);
+      
+      return allJobs;
     } catch (err) {
       console.error('Error fetching jobs:', err);
       throw new Error(ERROR_MESSAGES.FETCH_FAILED);

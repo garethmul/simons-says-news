@@ -23,7 +23,7 @@ import {
   Database
 } from 'lucide-react';
 
-const LogViewer = ({ isOpen, onClose }) => {
+const LogViewer = ({ isOpen, onClose, selectedJobId = null }) => {
   const { withAccountContext } = useAccount();
   const [logs, setLogs] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -31,6 +31,7 @@ const LogViewer = ({ isOpen, onClose }) => {
   const [filter, setFilter] = useState('');
   const [levelFilter, setLevelFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [jobIdFilter, setJobIdFilter] = useState(selectedJobId || '');
   const [autoScroll, setAutoScroll] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [logStats, setLogStats] = useState(null);
@@ -38,6 +39,13 @@ const LogViewer = ({ isOpen, onClose }) => {
   
   const logsEndRef = useRef(null);
   const logContainerRef = useRef(null);
+
+  // Update job ID filter when selectedJobId prop changes
+  useEffect(() => {
+    if (selectedJobId !== null) {
+      setJobIdFilter(selectedJobId.toString());
+    }
+  }, [selectedJobId]);
 
   // Scroll to bottom when new logs arrive
   useEffect(() => {
@@ -64,7 +72,7 @@ const LogViewer = ({ isOpen, onClose }) => {
   const fetchLogHistory = async () => {
     try {
       const params = new URLSearchParams({
-        limit: '100'
+        limit: jobIdFilter ? '200' : '100' // Get more logs when filtering by job ID
       });
       
       if (levelFilter !== 'all') {
@@ -75,14 +83,20 @@ const LogViewer = ({ isOpen, onClose }) => {
         params.append('source', sourceFilter);
       }
 
-      const response = await fetch(`/api/eden/logs/history?${params}`, {
+      // If filtering by job ID, use the job logs endpoint instead
+      const endpoint = jobIdFilter ? 
+        `/api/eden/jobs/${jobIdFilter}/logs` : 
+        `/api/eden/logs/history?${params}`;
+
+      const response = await fetch(endpoint, {
         ...withAccountContext()
       });
       const data = await response.json();
       
       if (data.success) {
         // Reverse logs to show chronological order (oldest first, newest last)
-        setLogs(data.logs.reverse());
+        const logsToSet = jobIdFilter ? data.logs : data.logs.reverse();
+        setLogs(logsToSet);
       }
     } catch (error) {
       console.error('Failed to fetch log history:', error);
@@ -110,7 +124,7 @@ const LogViewer = ({ isOpen, onClose }) => {
     if (isOpen) {
       fetchLogHistory();
     }
-  }, [levelFilter, sourceFilter]);
+  }, [levelFilter, sourceFilter, jobIdFilter]);
 
   const connectToLogStream = () => {
     try {
@@ -280,7 +294,9 @@ const LogViewer = ({ isOpen, onClose }) => {
       (log.message || '').toLowerCase().includes(filter.toLowerCase());
     const matchesLevel = levelFilter === 'all' || (log.level || 'info') === levelFilter;
     const matchesSource = sourceFilter === 'all' || (log.source || '') === sourceFilter;
-    return matchesFilter && matchesLevel && matchesSource;
+    const matchesJobId = jobIdFilter === '' || 
+      (log.job_id && log.job_id.toString() === jobIdFilter);
+    return matchesFilter && matchesLevel && matchesSource && matchesJobId;
   });
 
   const getConnectionStatusBadge = () => {
@@ -390,6 +406,24 @@ const LogViewer = ({ isOpen, onClose }) => {
                   className="pl-10 w-48"
                 />
               </div>
+
+              <Input
+                placeholder="Job ID..."
+                value={jobIdFilter}
+                onChange={(e) => setJobIdFilter(e.target.value)}
+                className="w-24"
+                type="number"
+              />
+              {jobIdFilter && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setJobIdFilter('')}
+                  className="px-2"
+                >
+                  Clear
+                </Button>
+              )}
               
               <Select value={levelFilter} onValueChange={setLevelFilter}>
                 <SelectTrigger className="w-32">
@@ -457,8 +491,15 @@ const LogViewer = ({ isOpen, onClose }) => {
                       {getLogIcon(log.level || 'info')}
                     </div>
                     
-                    <div className="flex-shrink-0 text-xs text-gray-500 mt-0.5 w-20">
-                      {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '--:--:--'}
+                    <div className="flex-shrink-0 text-xs text-gray-500 mt-0.5 w-40">
+                      {log.timestamp ? new Date(log.timestamp).toLocaleString('en-GB', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                      }) : '--/-- --:--:--'}
                     </div>
                     
                     <Badge 
@@ -470,6 +511,12 @@ const LogViewer = ({ isOpen, onClose }) => {
                     {log.source && (
                       <Badge variant="outline" className="flex-shrink-0 text-xs">
                         {log.source}
+                      </Badge>
+                    )}
+
+                    {log.job_id && (
+                      <Badge variant="secondary" className="flex-shrink-0 text-xs bg-blue-100 text-blue-800">
+                        Job #{log.job_id}
                       </Badge>
                     )}
                     
