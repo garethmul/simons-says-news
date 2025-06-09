@@ -1,10 +1,13 @@
 import db from './database.js';
 import aiService from './aiService.js';
 import imageService from './imageService.js';
+import contentQualityService from './contentQualityService.js';
+import accountSettingsService from './accountSettingsService.js';
 
 class ContentGenerator {
   constructor() {
     this.maxConcurrentJobs = parseInt(process.env.MAX_CONCURRENT_JOBS) || 3;
+    this.jobCache = new Map();
   }
 
   async generateContentFromTopStories(limit = 5, accountId = null, jobLogger = null) {
@@ -12,36 +15,88 @@ class ContentGenerator {
     logger.info(`🎨 Starting content generation from top stories... (accountId: ${accountId})`);
     
     try {
+      // Import content quality service
+      const { default: contentQualityService } = await import('./contentQualityService.js');
+      
       // Get top stories with account filtering
       logger.info(`📊 Finding top ${limit} stories with relevance score >= 0.6`);
-      const topStories = await db.getTopArticlesByRelevance(limit, 0.6, accountId);
+      const topStories = await db.getTopArticlesByRelevance(limit * 3, 0.6, accountId); // Get more stories to account for quality filtering
       
       if (topStories.length === 0) {
         logger.warn('📰 No high-relevance stories found for content generation');
         return [];
       }
 
-      logger.info(`📝 Found ${topStories.length} high-relevance stories for content generation`);
-      topStories.forEach((story, index) => {
-        logger.info(`📄 Story ${index + 1}: "${story.title}" (relevance: ${story.relevance_score})`);
+      logger.info(`📝 Found ${topStories.length} high-relevance stories, applying content quality filter...`);
+      
+      // Filter stories by content quality
+      const qualityStories = [];
+      const skippedStories = [];
+      
+      for (const story of topStories) {
+        const isEligible = contentQualityService.isEligibleForGeneration(story);
+        const qualityScore = contentQualityService.getQualityScore(story);
+        
+        if (isEligible) {
+          qualityStories.push({
+            ...story,
+            _qualityScore: qualityScore
+          });
+        } else {
+          skippedStories.push({
+            title: story.title,
+            qualityScore,
+            contentLength: story.full_text?.length || 0,
+            reason: qualityScore < 0.3 ? 'Low quality score' : 'Insufficient content'
+          });
+        }
+      }
+      
+      // Take only the requested limit from quality stories
+      const selectedStories = qualityStories.slice(0, limit);
+      
+      logger.info(`📊 Content Quality Filter Results:`);
+      logger.info(`   - High-relevance stories found: ${topStories.length}`);
+      logger.info(`   - Stories passing quality filter: ${qualityStories.length}`);
+      logger.info(`   - Stories selected for generation: ${selectedStories.length}`);
+      logger.info(`   - Stories skipped due to quality: ${skippedStories.length}`);
+      
+      if (skippedStories.length > 0) {
+        logger.warn(`⚠️ Skipped stories due to insufficient content quality:`);
+        skippedStories.forEach((skipped, index) => {
+          logger.warn(`   ${index + 1}. "${skipped.title}" (${skipped.contentLength} chars, score: ${skipped.qualityScore}, reason: ${skipped.reason})`);
+        });
+      }
+      
+      if (selectedStories.length === 0) {
+        logger.warn('📰 No stories passed content quality filter for generation');
+        return [];
+      }
+
+      logger.info(`📝 Proceeding with ${selectedStories.length} quality-approved stories:`);
+      selectedStories.forEach((story, index) => {
+        logger.info(`📄 Story ${index + 1}: "${story.title}" (relevance: ${story.relevance_score}, quality: ${story._qualityScore})`);
       });
       
       const generatedContent = [];
 
-      // Process stories in batches to avoid overwhelming APIs
-      for (let i = 0; i < topStories.length; i += this.maxConcurrentJobs) {
-        const batch = topStories.slice(i, i + this.maxConcurrentJobs);
-        logger.info(`🔄 Processing batch ${Math.floor(i / this.maxConcurrentJobs) + 1} (${batch.length} stories)`);
+      // Process quality-approved stories in batches to avoid overwhelming APIs
+      for (let i = 0; i < selectedStories.length; i += this.maxConcurrentJobs) {
+        const batch = selectedStories.slice(i, i + this.maxConcurrentJobs);
+        logger.info(`🔄 Processing batch ${Math.floor(i / this.maxConcurrentJobs) + 1} (${batch.length} quality-approved stories)`);
         
         const batchPromises = batch.map((story, batchIndex) => {
-          logger.info(`🎯 Starting content generation for story ${i + batchIndex + 1}: "${story.title}"`);
+          logger.info(`🎯 Starting content generation for story ${i + batchIndex + 1}: "${story.title}" (Quality: ${story._qualityScore})`);
           return this.generateContentForStory(story, accountId, jobLogger);
         });
         const batchResults = await Promise.allSettled(batchPromises);
         
         batchResults.forEach((result, index) => {
           if (result.status === 'fulfilled') {
-            generatedContent.push(result.value);
+            generatedContent.push({
+              ...result.value,
+              qualityScore: batch[index]._qualityScore
+            });
             logger.info(`✅ Content generated successfully for story: "${batch[index].title}"`);
           } else {
             logger.error(`❌ Failed to generate content for story ${batch[index].article_id} ("${batch[index].title}"):`, result.reason.message);
@@ -49,13 +104,13 @@ class ContentGenerator {
         });
 
         // Small delay between batches
-        if (i + this.maxConcurrentJobs < topStories.length) {
+        if (i + this.maxConcurrentJobs < selectedStories.length) {
           logger.info('⏱️ Waiting 2 seconds before processing next batch...');
           await this.delay(2000);
         }
       }
 
-      logger.info(`🎉 Content generation complete: ${generatedContent.length} content pieces created from ${topStories.length} stories`);
+      logger.info(`🎉 Content generation complete: ${generatedContent.length} content pieces created from ${selectedStories.length} quality-approved stories (${skippedStories.length} stories skipped due to quality)`);
       return generatedContent;
     } catch (error) {
       logger.error('❌ Content generation failed:', error.message);
@@ -618,6 +673,149 @@ class ContentGenerator {
     } catch (error) {
       console.error(`❌ Error updating content status:`, error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Get eligible articles for content generation using account-specific settings
+   * @param {string} accountId - Account ID
+   * @param {number} limit - Number of articles to return
+   * @param {Object} options - Additional filtering options
+   * @returns {Promise<Array>} Array of eligible articles
+   */
+  async getEligibleArticles(accountId, limit = 10, options = {}) {
+    try {
+      // Get account-specific quality settings
+      const qualitySettings = await accountSettingsService.getContentQualitySettings(accountId);
+      const { thresholds } = qualitySettings;
+
+      console.log(`🔍 Fetching eligible articles for account ${accountId}:`);
+      console.log(`  - Min content length: ${thresholds.min_content_length} chars`);
+      console.log(`  - Min quality score: ${thresholds.min_quality_score}`);
+      console.log(`  - Requested limit: ${limit}`);
+
+      // Fetch 3x the requested amount to account for filtering
+      const fetchLimit = Math.max(limit * 3, 50);
+
+      const baseQuery = `
+        SELECT 
+          article_id,
+          title,
+          body_final,
+          body_draft,
+          publish_date,
+          source_url,
+          news_source_id,
+          content_quality_score,
+          min_content_length_met,
+          content_generation_eligible,
+          content_issues,
+          CHAR_LENGTH(COALESCE(body_final, body_draft, '')) as content_length
+        FROM ssnews_scraped_articles 
+        WHERE publish_date >= DATE_SUB(NOW(), INTERVAL 7 DAYS)
+          AND (body_final IS NOT NULL OR body_draft IS NOT NULL)
+        ORDER BY publish_date DESC 
+        LIMIT ?
+      `;
+
+      const articles = await db.query(baseQuery, [fetchLimit]);
+      console.log(`📊 Retrieved ${articles.length} candidate articles for filtering`);
+
+      // Filter articles using account-specific quality requirements
+      const eligibleArticles = [];
+      const skippedReasons = {
+        'insufficient_length': 0,
+        'poor_quality_score': 0,
+        'title_only': 0,
+        'no_content': 0,
+        'other_issues': 0
+      };
+
+      for (const article of articles) {
+        if (eligibleArticles.length >= limit) break;
+
+        // Quick quality check using account settings
+        const contentLength = article.content_length || 0;
+        
+        // Check minimum length requirement
+        if (contentLength < thresholds.min_content_length) {
+          skippedReasons.insufficient_length++;
+          continue;
+        }
+
+        // Check quality score if available
+        if (article.content_quality_score !== null && 
+            article.content_quality_score < thresholds.min_quality_score) {
+          skippedReasons.poor_quality_score++;
+          continue;
+        }
+
+        // Check if marked as ineligible
+        if (article.content_generation_eligible === false) {
+          if (article.content_issues) {
+            try {
+              const issues = JSON.parse(article.content_issues);
+              if (issues.includes('title_only')) {
+                skippedReasons.title_only++;
+              } else if (issues.includes('no_content')) {
+                skippedReasons.no_content++;
+              } else {
+                skippedReasons.other_issues++;
+              }
+            } catch (e) {
+              skippedReasons.other_issues++;
+            }
+          } else {
+            skippedReasons.other_issues++;
+          }
+          continue;
+        }
+
+        // If no quality assessment exists, perform one
+        if (article.content_quality_score === null) {
+          const assessment = await contentQualityService.assessContentQuality(article, accountId);
+          
+          if (!assessment.content_generation_eligible) {
+            if (assessment.content_issues.includes('title_only')) {
+              skippedReasons.title_only++;
+            } else if (assessment.content_issues.includes('no_content')) {
+              skippedReasons.no_content++;
+            } else {
+              skippedReasons.other_issues++;
+            }
+            
+            // Update the article with the assessment
+            await contentQualityService.updateArticleQuality(article.article_id, assessment);
+            continue;
+          }
+
+          // Update article with positive assessment
+          await contentQualityService.updateArticleQuality(article.article_id, assessment);
+          article.content_quality_score = assessment.content_quality_score;
+        }
+
+        eligibleArticles.push(article);
+      }
+
+      // Log filtering results
+      console.log(`✅ Content Generation Filtering Results:`);
+      console.log(`  📝 Eligible articles: ${eligibleArticles.length}/${articles.length}`);
+      console.log(`  ❌ Skipped reasons:`);
+      console.log(`     - Insufficient length (< ${thresholds.min_content_length} chars): ${skippedReasons.insufficient_length}`);
+      console.log(`     - Poor quality score (< ${thresholds.min_quality_score}): ${skippedReasons.poor_quality_score}`);
+      console.log(`     - Title-only content: ${skippedReasons.title_only}`);
+      console.log(`     - No content: ${skippedReasons.no_content}`);
+      console.log(`     - Other quality issues: ${skippedReasons.other_issues}`);
+
+      if (eligibleArticles.length === 0) {
+        console.log(`⚠️ No eligible articles found with current account settings`);
+        console.log(`💡 Consider adjusting content quality thresholds in Account Settings`);
+      }
+
+      return eligibleArticles;
+    } catch (error) {
+      console.error('❌ Error getting eligible articles:', error);
+      return [];
     }
   }
 }

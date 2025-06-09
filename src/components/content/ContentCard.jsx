@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -25,6 +25,9 @@ import {
 } from 'lucide-react';
 import { formatDate, getDaysAgo, parseKeywords, truncateText } from '../../utils/helpers';
 import { useContentTypes } from '../../hooks/useContentTypes';
+import RegenerateButton from './RegenerateButton';
+import ContentQualityWarning from './ContentQualityWarning';
+import { useAccountSettings } from '../../hooks/useAccountSettings';
 
 // Icon mapping for dynamic content types
 const ICON_COMPONENTS = {
@@ -73,10 +76,22 @@ const ContentCard = ({
   showArchivedActions = false,
   loading = false,
   isActionLoading,
-  className = ""
+  className = "",
+  accountId
 }) => {
   const { getContentTypeName, getContentTypeIcon } = useContentTypes();
+  const { settings: accountSettings, loading: settingsLoading } = useAccountSettings(accountId);
   
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  // Get UI display settings for this account
+  const uiDisplaySettings = accountSettings?.contentQuality?.uiDisplay || {
+    show_quality_warnings: true,
+    show_content_length: true,
+    show_quality_score: true,
+    disable_regenerate_on_poor_quality: true
+  };
+
   // Check specific loading states
   const isArchiving = isActionLoading && isActionLoading(`update-article-${content.gen_article_id}`);
   const isApproving = isActionLoading && isActionLoading(`approve-${content.content_type}-${content.gen_article_id}`);
@@ -92,6 +107,48 @@ const ContentCard = ({
 
   const contentTypeName = getContentTypeName(content.content_type);
   const contentTypeIcon = getContentTypeIcon(content.content_type);
+
+  const getQualityColor = (score) => {
+    if (score >= 0.8) return 'text-green-600';
+    if (score >= 0.6) return 'text-yellow-600';
+    if (score >= 0.3) return 'text-orange-600';
+    return 'text-red-600';
+  };
+
+  const getQualityTier = (score, contentLength) => {
+    const thresholds = accountSettings?.contentQuality?.thresholds || {
+      excellent_content_length: 2000,
+      good_content_length: 1000,
+      min_content_length: 500
+    };
+
+    if (score >= 0.8 && contentLength >= thresholds.excellent_content_length) return 'Excellent';
+    if (score >= 0.6 && contentLength >= thresholds.good_content_length) return 'Good';
+    if (score >= 0.3 && contentLength >= thresholds.min_content_length) return 'Fair';
+    return 'Poor';
+  };
+
+  const shouldShowQualityWarning = () => {
+    if (!uiDisplaySettings.show_quality_warnings) return false;
+    
+    return content.content_quality_score < 0.5 || 
+           !content.content_generation_eligible ||
+           (content.content_issues && content.content_issues.includes('title_only'));
+  };
+
+  const shouldDisableRegenerate = () => {
+    if (!uiDisplaySettings.disable_regenerate_on_poor_quality) return false;
+    
+    return !content.content_generation_eligible ||
+           (content.content_issues && (
+             content.content_issues.includes('title_only') ||
+             content.content_issues.includes('no_content')
+           ));
+  };
+
+  const contentLength = content.body_final?.length || content.body_draft?.length || 0;
+  const qualityTier = content.content_quality_score ? 
+    getQualityTier(content.content_quality_score, contentLength) : 'Unknown';
 
   return (
     <Card className={`${getBorderColor()} border-l-4 transition-all duration-500 ease-in-out ${
@@ -167,6 +224,29 @@ const ContentCard = ({
             {content.sourceArticle && (
               <SourceArticleInfo sourceArticle={content.sourceArticle} />
             )}
+            
+            {/* Content Quality Indicators - only show if enabled in account settings */}
+            {!settingsLoading && (
+              <div className="flex items-center gap-4 text-sm">
+                {uiDisplaySettings.show_content_length && (
+                  <span className="text-gray-600">
+                    📝 {contentLength.toLocaleString()} chars
+                  </span>
+                )}
+                
+                {uiDisplaySettings.show_quality_score && content.content_quality_score !== null && (
+                  <span className={`font-medium ${getQualityColor(content.content_quality_score)}`}>
+                    ⭐ {(content.content_quality_score * 100).toFixed(0)}% ({qualityTier})
+                  </span>
+                )}
+                
+                {content.content_generation_eligible && (
+                  <span className="text-green-600 text-xs bg-green-50 px-2 py-1 rounded">
+                    ✅ Generation Ready
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <StatusBadge status={showRejectedActions ? 'rejected' : showArchivedActions ? 'archived' : content.status} />
@@ -177,11 +257,20 @@ const ContentCard = ({
         {/* Content Preview */}
         <div className="prose max-w-none mb-4">
           <div 
-            className="text-sm text-gray-700 line-clamp-3"
+            className={`text-gray-700 ${isExpanded ? '' : 'line-clamp-3'}`}
             dangerouslySetInnerHTML={{ 
               __html: truncateText(content.body_draft, 300)
             }}
           />
+          
+          {(content.body_final?.length > 200 || content.body_draft?.length > 200) && (
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-blue-600 hover:text-blue-800 text-sm font-medium mt-2"
+            >
+              {isExpanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
         </div>
         
         {/* Associated Content */}
@@ -215,7 +304,17 @@ const ContentCard = ({
           loading={loading}
           isUpdating={isUpdating}
           isArchiving={isArchiving}
+          accountSettings={accountSettings}
         />
+
+        {/* Quality Warning - only show if enabled in account settings */}
+        {shouldShowQualityWarning() && (
+          <ContentQualityWarning 
+            article={content}
+            accountSettings={accountSettings}
+            className="mt-4"
+          />
+        )}
       </CardContent>
     </Card>
   );
@@ -431,7 +530,8 @@ const ActionButtons = ({
   showArchivedActions,
   loading,
   isUpdating,
-  isArchiving
+  isArchiving,
+  accountSettings
 }) => (
   <div className="flex gap-2">
     <Button 
@@ -466,16 +566,13 @@ const ActionButtons = ({
           Reject
         </Button>
         {onRegenerate && (
-          <Button 
-            size="sm" 
-            variant="secondary"
-            onClick={() => onRegenerate(content)}
-            disabled={loading || isUpdating}
-            className="text-gray-700 hover:text-gray-900"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Regenerate
-          </Button>
+          <RegenerateButton 
+            content={content}
+            onRegenerate={onRegenerate}
+            loading={loading}
+            isUpdating={isUpdating}
+            accountSettings={accountSettings}
+          />
         )}
       </>
     )}

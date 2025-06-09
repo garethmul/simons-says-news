@@ -253,10 +253,10 @@ class FlexibleContentGenerator {
     let populatedPrompt = promptTemplate;
     
     const variables = {
-      'article_content': `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+      'article_content': `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
       'article.title': article.title || 'No title',
-      'article.content': article.full_text || article.summary_ai || 'No content available',
-      'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+      'article.content': article.body_final || article.body_draft || 'No content available',
+      'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
       'article.source': article.source_name || 'Unknown',
       'article.url': article.url || ''
     };

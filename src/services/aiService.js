@@ -194,11 +194,11 @@ class AIService {
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('analysis', {
         // Underscore format (legacy)
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
+        article_content: `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
         // Dot notation format (modern)
         'article.title': article.title || 'No title available',
-        'article.content': article.full_text || article.summary_ai || 'No content available',
-        'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+        'article.content': article.body_final || article.body_draft || 'No content available',
+        'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
         'article.source': article.source_name || 'Unknown',
         'article.url': article.url || ''
       });
@@ -487,11 +487,11 @@ class AIService {
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('blog_post', {
         // Underscore format (legacy)
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
+        article_content: `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
         // Dot notation format (modern)
         'article.title': article.title || 'No title available',
-        'article.content': article.full_text || article.summary_ai || 'No content available',
-        'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+        'article.content': article.body_final || article.body_draft || 'No content available',
+        'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
         'article.source': article.source_name || 'Unknown',
         'article.url': article.url || ''
       });
@@ -591,11 +591,11 @@ class AIService {
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('social_media', {
         // Underscore format (legacy)
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+        article_content: `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
         // Dot notation format (modern)
         'article.title': article.title || 'No title available',
-        'article.content': article.full_text || article.summary_ai || 'No content available',
-        'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+        'article.content': article.body_final || article.body_draft || 'No content available',
+        'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
         'article.source': article.source_name || 'Unknown',
         'article.url': article.url || ''
       });
@@ -701,11 +701,11 @@ class AIService {
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('video_script', {
         // Underscore format (legacy)
-        article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+        article_content: `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
         // Dot notation format (modern)
         'article.title': article.title || 'No title available',
-        'article.content': article.full_text || article.summary_ai || 'No content available',
-        'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+        'article.content': article.body_final || article.body_draft || 'No content available',
+        'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
         'article.source': article.source_name || 'Unknown',
         'article.url': article.url || '',
         duration: duration
@@ -808,11 +808,11 @@ class AIService {
       try {
         promptData = await promptManager.getPromptForGeneration('prayer', {
           // Underscore format (legacy)
-          article_content: `Title: ${article.title}\\n\\nContent: ${article.full_text || article.summary_ai || 'No content available'}\\n\\nSource: ${article.source_name || 'Unknown'}`,
+          article_content: `Title: ${article.title}\\n\\nContent: ${article.body_final || article.body_draft || 'No content available'}\\n\\nSource: ${article.source_name || 'Unknown'}`,
           // Dot notation format (modern)
           'article.title': article.title || 'No title available',
-          'article.content': article.full_text || article.summary_ai || 'No content available',
-          'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+          'article.content': article.body_final || article.body_draft || 'No content available',
+          'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
           'article.source': article.source_name || 'Unknown',
           'article.url': article.url || ''
         });
@@ -958,7 +958,7 @@ class AIService {
 
   extractPrayerThemes(article) {
     const title = (article.title || '').toLowerCase();
-    const content = (article.full_text || article.summary_ai || '').toLowerCase();
+    const content = (article.body_final || article.body_draft || '').toLowerCase();
     const allText = `${title} ${content}`;
     
     const themes = [
@@ -1097,13 +1097,15 @@ class AIService {
       let promptData;
       try {
         // Pass all article fields to support both underscore and dot notation placeholders
+        // Fixed: Use correct database field names (body_final, body_draft) instead of non-existent fields
+        const articleContent = article.body_final || article.body_draft || 'No content available';
         promptData = await promptManager.getPromptForGeneration(category, {
           // Underscore format (legacy)
-          article_content: `Title: ${article.title}\n\nContent: ${article.full_text || article.summary_ai || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+          article_content: `Title: ${article.title}\n\nContent: ${articleContent}\n\nSource: ${article.source_name || 'Unknown'}`,
           // Dot notation format (modern)
           'article.title': article.title || 'No title available',
-          'article.content': article.full_text || article.summary_ai || 'No content available',
-          'article.summary': article.summary_ai || article.full_text?.substring(0, 300) || 'No summary available',
+          'article.content': articleContent,
+          'article.summary': articleContent.substring(0, 300) || 'No summary available',
           'article.source': article.source_name || 'Unknown',
           'article.url': article.url || ''
         }, accountId);
@@ -1553,27 +1555,24 @@ class AIService {
 
   /**
    * Extract a specific image prompt from the AI-generated response
-   * The image generation template creates multiple prompts, we need to extract one
+   * Now uses the ACTUAL AI response instead of falling back to generic Christian content
    */
   extractImagePromptFromResponse(aiResponse) {
     try {
-      // Try to extract the first (hero) image prompt from the AI response
       const response = aiResponse.trim();
       console.log(`🖼️ DEBUG: Full AI response for image generation:`, response);
+      
+      // If the response is substantial and looks like an image description, use it directly
+      if (response.length > 20 && !response.toLowerCase().includes('generate an image')) {
+        console.log(`🎯 Using full AI response as image prompt: ${response.substring(0, 100)}...`);
+        return response;
+      }
       
       // Look for numbered lists (1. Hero image, 2. Social media, 3. Background)
       const heroImageMatch = response.match(/1\.\s*(?:Hero image[^:]*:?\s*)(.+?)(?:\n(?:2\.|$))/is);
       if (heroImageMatch && heroImageMatch[1]) {
         const heroPrompt = heroImageMatch[1].trim();
         console.log(`🎯 Extracted hero image prompt: ${heroPrompt}`);
-        return heroPrompt;
-      }
-
-      // Look for "Hero image" section specifically with more flexible matching
-      const heroSectionMatch = response.match(/(?:Hero image|1\.\s*Hero)[^:]*:?\s*([^\n\d]{20,})/i);
-      if (heroSectionMatch && heroSectionMatch[1]) {
-        const heroPrompt = heroSectionMatch[1].trim();
-        console.log(`🎯 Extracted hero section prompt: ${heroPrompt}`);
         return heroPrompt;
       }
 
@@ -1585,59 +1584,32 @@ class AIService {
         return firstPrompt;
       }
 
-      // Look for any content between "1." and "2." more aggressively  
-      const betweenNumbersMatch = response.match(/1\.(.+?)2\./s);
-      if (betweenNumbersMatch && betweenNumbersMatch[1]) {
-        const betweenPrompt = betweenNumbersMatch[1].trim().replace(/\s+/g, ' ');
-        if (betweenPrompt.length > 20) {
-          console.log(`🎯 Extracted prompt between numbers: ${betweenPrompt}`);
-          return betweenPrompt;
+      // Try to extract the first meaningful sentence that could be an image description
+      const sentences = response.split(/[.!?]+/).filter(s => s.trim().length > 20);
+      for (const sentence of sentences) {
+        const cleaned = sentence.trim();
+        if (cleaned.length > 20 && cleaned.length < 500 && 
+            !cleaned.toLowerCase().includes('generate') && 
+            !cleaned.toLowerCase().includes('create') &&
+            !cleaned.toLowerCase().includes('based on')) {
+          console.log(`🎯 Extracted meaningful sentence: ${cleaned}`);
+          return cleaned;
         }
       }
 
-      // Try to extract the first meaningful line (fallback)
-      const lines = response.split('\n').filter(line => line.trim().length > 10);
-      if (lines.length > 0) {
-        // Skip header lines and find the first descriptive prompt
-        for (const line of lines) {
-          const cleanLine = line.replace(/^[\d\.\-\*\s]*/, '').trim();
-          if (cleanLine.length > 30 && 
-              !cleanLine.toLowerCase().includes('generate') && 
-              !cleanLine.toLowerCase().includes('create') &&
-              !cleanLine.toLowerCase().includes('based on')) {
-            console.log(`🎯 Extracted first meaningful line: ${cleanLine}`);
-            return cleanLine;
-          }
-        }
+      // If we have ANY substantial response, use it (even if not perfectly formatted)
+      if (response.length > 15) {
+        console.log(`🎯 Using full response as fallback: ${response.substring(0, 100)}...`);
+        return response;
       }
 
-      // If we have a substantial response, try to extract a meaningful portion
-      if (response.length > 50) {
-        // Look for the first sentence that seems like an image description
-        const sentences = response.split(/[.!?]+/).filter(s => s.trim().length > 20);
-        for (const sentence of sentences) {
-          const cleaned = sentence.trim();
-          if (cleaned.length > 30 && cleaned.length < 200) {
-            console.log(`🎯 Extracted meaningful sentence: ${cleaned}`);
-            return cleaned;
-          }
-        }
-      }
-
-      // Ultimate fallback - use a contextual prompt if response exists but can't be parsed
-      if (response.length > 10) {
-        console.warn(`⚠️ Could not parse structured prompts from response: "${response.substring(0, 100)}..."`);
-        return 'A warm, inspiring Christian image with natural lighting, hope, and human connection suitable for accompanying news content about faith and community';
-      }
-
-      // Final fallback for empty responses
+      // Only use fallback if we truly have no response
       console.error(`❌ Empty or very short response for image generation: "${response}"`);
-      return 'A warm, inspirational image with natural lighting and hopeful atmosphere suitable for Christian content';
+      return 'A professional image with good lighting and composition relevant to the article content';
 
     } catch (error) {
       console.error('❌ Error extracting image prompt:', error);
-      // Return a safe fallback prompt
-      return 'A warm, inspirational image with natural lighting and hopeful atmosphere suitable for Christian content';
+      return 'A professional image with good lighting and composition relevant to the article content';
     }
   }
 
