@@ -21,6 +21,7 @@ import jobWorker from './src/services/jobWorker.js';
 import organizationRoutes from './src/routes/organizationRoutes.js';
 import promptRoutes from './src/routes/promptRoutes.js';
 import userManagementRoutes from './src/routes/userManagementRoutes.js';
+import accountSettingsRoutes from './src/routes/accountSettings.js';
 import { accountContext, optionalAccountContext } from './src/middleware/accountContext.js';
 
 // Load environment variables
@@ -278,6 +279,9 @@ app.use('/api', promptRoutes);
 
 // Mount user management routes
 app.use('/api/user-management', userManagementRoutes);
+
+// Mount account settings routes
+app.use('/api/account-settings', accountSettingsRoutes);
 
 // Project Eden API endpoints
 
