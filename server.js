@@ -3702,6 +3702,8 @@ app.post('/api/debug/optimize-database', async (req, res) => {
 // Get comprehensive AI tracking data for content
 app.get('/api/eden/ai-tracking', accountContext, async (req, res) => {
   try {
+    console.log('🔍 AI tracking endpoint called - debugging production deployment');
+    
     if (!isSystemReady) {
       return res.status(503).json({ error: 'System not ready' });
     }
