@@ -371,6 +371,29 @@ class ContentQualityService {
   }
 
   /**
+   * Check if a story/article is eligible for content generation
+   * @param {Object} story - Story object with content to assess
+   * @param {string} accountId - Account ID for specific settings (optional)
+   * @returns {Promise<boolean>} True if eligible for generation
+   */
+  async isEligibleForGeneration(story, accountId = null) {
+    try {
+      // If no account ID provided, try to get it from the story
+      const storyAccountId = accountId || story.account_id;
+      
+      // Assess the content quality
+      const assessment = await this.assessContentQuality(story, storyAccountId);
+      
+      // Return eligibility status
+      return assessment.content_generation_eligible;
+    } catch (error) {
+      console.error('❌ Error checking generation eligibility:', error);
+      // Default to false if there's an error
+      return false;
+    }
+  }
+
+  /**
    * Clear quality assessment cache
    */
   clearCache() {
