@@ -34,8 +34,8 @@ class ContentGenerator {
       const skippedStories = [];
       
       for (const story of topStories) {
-        const isEligible = contentQualityService.isEligibleForGeneration(story);
-        const qualityScore = contentQualityService.getQualityScore(story);
+        const isEligible = await contentQualityService.isEligibleForGeneration(story, accountId);
+        const qualityScore = await contentQualityService.getQualityScore(story, accountId);
         
         if (isEligible) {
           qualityStories.push({
