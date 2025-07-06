@@ -188,13 +188,13 @@ class EnhancedScraper {
       });
 
       // Wait for potential dynamic content
-      await page.waitForTimeout(2000);
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Try to trigger any lazy loading
       await page.evaluate(() => {
         window.scrollTo(0, document.body.scrollHeight / 2);
       });
-      await page.waitForTimeout(1000);
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Extract content
       const result = await page.evaluate(() => {
