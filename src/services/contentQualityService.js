@@ -394,6 +394,29 @@ class ContentQualityService {
   }
 
   /**
+   * Get the quality score for a story/article
+   * @param {Object} story - Story object with content to assess
+   * @param {string} accountId - Account ID for specific settings (optional)
+   * @returns {Promise<number>} Quality score (0-1)
+   */
+  async getQualityScore(story, accountId = null) {
+    try {
+      // If no account ID provided, try to get it from the story
+      const storyAccountId = accountId || story.account_id;
+      
+      // Assess the content quality
+      const assessment = await this.assessContentQuality(story, storyAccountId);
+      
+      // Return the quality score
+      return assessment.content_quality_score;
+    } catch (error) {
+      console.error('❌ Error getting quality score:', error);
+      // Default to 0 if there's an error
+      return 0;
+    }
+  }
+
+  /**
    * Clear quality assessment cache
    */
   clearCache() {
