@@ -7,6 +7,13 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "heroku": {
+    "buildpacks": [
+      "https://github.com/heroku/heroku-buildpack-apt",
+      "https://github.com/heroku/heroku-buildpack-chrome-for-testing",
+      "heroku/nodejs"
+    ]
+  },
   "scripts": {
     "start": "node server.js",
     "server": "nodemon --config nodemon.json server.js",
@@ -75,6 +82,7 @@
     "mysql2": "^3.14.1",
     "node-cron": "^4.0.7",
     "openai": "^4.103.0",
+    "puppeteer": "^22.15.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.1.1",

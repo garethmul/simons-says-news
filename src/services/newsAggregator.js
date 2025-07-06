@@ -3,6 +3,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import db from './database.js';
 import aiService from './aiService.js';
+import enhancedScraper from './enhancedScraper.js';
 
 class NewsAggregator {
   constructor() {
@@ -333,6 +334,44 @@ class NewsAggregator {
       console.error(`   URL: ${source.url}`);
       console.error(`   Error type: ${error.code || 'Unknown'}`);
       return [];
+    }
+  }
+
+  // Enhanced content scraping for individual article URLs
+  async enhancedScrapeContent(url, jobLogger = null) {
+    const logger = jobLogger || console;
+    try {
+      logger.info(`🔍 Enhanced scraping for URL: ${url}`);
+      
+      const result = await enhancedScraper.scrapeContent(url);
+      
+      if (result && result.content && result.content.length > 100) {
+        logger.info(`✅ Enhanced scraping successful: ${result.content.length} chars via ${result.method}`);
+        return {
+          title: result.title,
+          content: result.content,
+          description: result.description,
+          method: result.method,
+          success: true
+        };
+      } else {
+        logger.warn(`⚠️ Enhanced scraping yielded insufficient content: ${result?.content?.length || 0} chars`);
+        return {
+          title: result?.title || '',
+          content: result?.content || '',
+          method: result?.method || 'none',
+          success: false
+        };
+      }
+    } catch (error) {
+      logger.error(`❌ Enhanced scraping failed: ${error.message}`);
+      return {
+        title: '',
+        content: '',
+        method: 'failed',
+        success: false,
+        error: error.message
+      };
     }
   }
 

@@ -1,1 +1,1 @@
-web: node server.js 
+web: node --expose-gc --max-old-space-size=2048 --gc-interval=2000 --optimize-for-size server.js 

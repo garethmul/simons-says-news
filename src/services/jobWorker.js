@@ -376,85 +376,98 @@ class JobWorker {
       await jobManager.updateJobProgress(jobId, 40, 'Scraping article content...');
       
       try {
-        const response = await axios.get(url, {
-          timeout: 30000,
-          headers: {
-            'User-Agent': 'Eden Content Bot 1.0 (https://eden.co.uk)'
-          }
-        });
+        // Use enhanced scraper for better content extraction
+        const scrapeResult = await newsAggregator.enhancedScrapeContent(url, jobLogger);
         
-        const $ = cheerio.load(response.data);
-        
-        // Extract title, content, and other metadata
-        let title = $('h1').first().text().trim() || 
-                   $('title').text().trim() || 
-                   'Untitled Article';
-        
-        // Clean up title by removing site name suffixes
-        title = title.replace(/ - [^-]+$/, '').trim();
-        
-        // Extract content from various selectors
-        const contentSelectors = [
-          'article',
-          '.content',
-          '.post-content',
-          '.entry-content',
-          '.article-content',
-          '[class*="content"]',
-          'main',
-          '.main'
-        ];
-        
-        let content = '';
-        for (const selector of contentSelectors) {
-          const contentEl = $(selector);
-          if (contentEl.length > 0) {
-            // Remove script, style, nav, footer elements
-            contentEl.find('script, style, nav, footer, .nav, .navigation, .sidebar').remove();
-            content = contentEl.text().trim();
-            if (content.length > 500) { // Use this selector if we get substantial content
-              break;
+        if (scrapeResult.success) {
+          await jobManager.updateJobProgress(jobId, 60, 'Updating article with scraped content...');
+          
+          await db.update(
+            'ssnews_scraped_articles',
+            {
+              title: scrapeResult.title ? scrapeResult.title.substring(0, 255) : 'Untitled Article',
+              full_text: scrapeResult.content.substring(0, 10000), // Limit content length
+              publication_date: new Date(), // Set to current date since we don't have extracted date
+              updated_at: new Date()
+            },
+            'article_id = ? AND account_id = ?',
+            [articleId, accountId]
+          );
+          
+          jobLogger.info(`✅ Content scraped successfully via ${scrapeResult.method} for ${url}`);
+        } else {
+          jobLogger.warn(`⚠️ Enhanced scraping failed for ${url}: ${scrapeResult.error || 'No content found'}`);
+          
+          // Fallback: Try basic axios scraping
+          try {
+            const response = await axios.get(url, {
+              timeout: 30000,
+              headers: {
+                'User-Agent': 'Eden Content Bot 1.0 (https://eden.co.uk)'
+              }
+            });
+            
+            const $ = cheerio.load(response.data);
+            
+            // Extract title, content, and other metadata
+            let title = $('h1').first().text().trim() || 
+                       $('title').text().trim() || 
+                       'Untitled Article';
+            
+            // Clean up title by removing site name suffixes
+            title = title.replace(/ - [^-]+$/, '').trim();
+            
+            // Extract content from various selectors
+            const contentSelectors = [
+              'article',
+              '.content',
+              '.post-content',
+              '.entry-content',
+              '.article-content',
+              '[class*="content"]',
+              'main',
+              '.main'
+            ];
+            
+            let content = '';
+            for (const selector of contentSelectors) {
+              const contentEl = $(selector);
+              if (contentEl.length > 0) {
+                // Remove script, style, nav, footer elements
+                contentEl.find('script, style, nav, footer, .nav, .navigation, .sidebar').remove();
+                content = contentEl.text().trim();
+                if (content.length > 500) { // Use this selector if we get substantial content
+                  break;
+                }
+              }
             }
+            
+            // Fallback to body content if no specific content area found
+            if (content.length < 200) {
+              $('script, style, nav, footer, header, .nav, .navigation, .sidebar').remove();
+              content = $('body').text().trim();
+            }
+            
+            await jobManager.updateJobProgress(jobId, 60, 'Updating article with scraped content...');
+            
+            await db.update(
+              'ssnews_scraped_articles',
+              {
+                title: title.substring(0, 255), // Ensure it fits in the column
+                full_text: content.substring(0, 10000), // Limit content length
+                publication_date: new Date(),
+                updated_at: new Date()
+              },
+              'article_id = ? AND account_id = ?',
+              [articleId, accountId]
+            );
+            
+            jobLogger.info(`✅ Fallback scraping successful for ${url}`);
+          } catch (fallbackError) {
+            jobLogger.warn(`⚠️ All scraping methods failed for ${url}: ${fallbackError.message}`);
+            // Still continue with AI analysis even if scraping fails
           }
         }
-        
-        // Fallback to body content if no specific content area found
-        if (content.length < 200) {
-          $('script, style, nav, footer, header, .nav, .navigation, .sidebar').remove();
-          content = $('body').text().trim();
-        }
-        
-        // Extract publication date
-        let pubDate = $('meta[property="article:published_time"]').attr('content') ||
-                     $('meta[name="publish-date"]').attr('content') ||
-                     $('time').attr('datetime') ||
-                     $('[class*="date"]').first().text().trim();
-        
-        // Try to parse the date
-        let publicationDate = new Date();
-        if (pubDate) {
-          const parsedDate = new Date(pubDate);
-          if (!isNaN(parsedDate.getTime())) {
-            publicationDate = parsedDate;
-          }
-        }
-        
-        // Update the article with scraped content
-        await jobManager.updateJobProgress(jobId, 60, 'Updating article with scraped content...');
-        
-        await db.update(
-          'ssnews_scraped_articles',
-          {
-            title: title.substring(0, 255), // Ensure it fits in the column
-            full_text: content.substring(0, 10000), // Limit content length
-            publication_date: publicationDate,
-            updated_at: new Date()
-          },
-          'article_id = ? AND account_id = ?',
-          [articleId, accountId]
-        );
-        
-        jobLogger.info(`✅ Content scraped successfully for ${url}`);
         
       } catch (scrapingError) {
         jobLogger.warn(`⚠️ Failed to scrape content from ${url}: ${scrapingError.message}`);
