@@ -252,11 +252,14 @@ class FlexibleContentGenerator {
   populatePromptVariables(promptTemplate, article) {
     let populatedPrompt = promptTemplate;
     
+    // Get content from either field naming convention (scraped vs generated articles)
+    const articleContent = article.body_final || article.body_draft || article.full_text || 'No content available';
+    
     const variables = {
-      'article_content': `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+      'article_content': `Title: ${article.title}\n\nContent: ${articleContent}\n\nSource: ${article.source_name || 'Unknown'}`,
       'article.title': article.title || 'No title',
-      'article.content': article.body_final || article.body_draft || 'No content available',
-      'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
+      'article.content': articleContent,
+      'article.summary': articleContent.substring(0, 300) || 'No summary available',
       'article.source': article.source_name || 'Unknown',
       'article.url': article.url || ''
     };

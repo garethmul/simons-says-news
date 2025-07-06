@@ -191,14 +191,17 @@ class AIService {
       // Ensure prompt manager is available
       const promptManager = await this.ensurePromptManager();
       
+      // Get content from either field naming convention (scraped vs generated articles)
+      const articleContent = article.body_final || article.body_draft || article.full_text || 'No content available';
+      
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('analysis', {
         // Underscore format (legacy)
-        article_content: `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
+        article_content: `Title: ${article.title}\n\nContent: ${articleContent}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
         // Dot notation format (modern)
         'article.title': article.title || 'No title available',
-        'article.content': article.body_final || article.body_draft || 'No content available',
-        'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
+        'article.content': articleContent,
+        'article.summary': articleContent.substring(0, 300) || 'No summary available',
         'article.source': article.source_name || 'Unknown',
         'article.url': article.url || ''
       });
@@ -484,14 +487,17 @@ class AIService {
       // Ensure prompt manager is available
       const promptManager = await this.ensurePromptManager();
       
+      // Get content from either field naming convention (scraped vs generated articles)
+      const articleContent = article.body_final || article.body_draft || article.full_text || 'No content available';
+      
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('blog_post', {
         // Underscore format (legacy)
-        article_content: `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
+        article_content: `Title: ${article.title}\n\nContent: ${articleContent}\n\nSource: ${article.source_name || 'Unknown'}\nURL: ${article.url || ''}`,
         // Dot notation format (modern)
         'article.title': article.title || 'No title available',
-        'article.content': article.body_final || article.body_draft || 'No content available',
-        'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
+        'article.content': articleContent,
+        'article.summary': articleContent.substring(0, 300) || 'No summary available',
         'article.source': article.source_name || 'Unknown',
         'article.url': article.url || ''
       });
@@ -588,14 +594,17 @@ class AIService {
       // Ensure prompt manager is available
       const promptManager = await this.ensurePromptManager();
       
+      // Get content from either field naming convention (scraped vs generated articles)
+      const articleContent = article.body_final || article.body_draft || article.full_text || 'No content available';
+      
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('social_media', {
         // Underscore format (legacy)
-        article_content: `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+        article_content: `Title: ${article.title}\n\nContent: ${articleContent}\n\nSource: ${article.source_name || 'Unknown'}`,
         // Dot notation format (modern)
         'article.title': article.title || 'No title available',
-        'article.content': article.body_final || article.body_draft || 'No content available',
-        'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
+        'article.content': articleContent,
+        'article.summary': articleContent.substring(0, 300) || 'No summary available',
         'article.source': article.source_name || 'Unknown',
         'article.url': article.url || ''
       });
@@ -698,14 +707,17 @@ class AIService {
       // Ensure prompt manager is available
       const promptManager = await this.ensurePromptManager();
       
+      // Get content from either field naming convention (scraped vs generated articles)
+      const articleContent = article.body_final || article.body_draft || article.full_text || 'No content available';
+      
       // Get prompt from prompt manager
       const promptData = await promptManager.getPromptForGeneration('video_script', {
         // Underscore format (legacy)
-        article_content: `Title: ${article.title}\n\nContent: ${article.body_final || article.body_draft || 'No content available'}\n\nSource: ${article.source_name || 'Unknown'}`,
+        article_content: `Title: ${article.title}\n\nContent: ${articleContent}\n\nSource: ${article.source_name || 'Unknown'}`,
         // Dot notation format (modern)
         'article.title': article.title || 'No title available',
-        'article.content': article.body_final || article.body_draft || 'No content available',
-        'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
+        'article.content': articleContent,
+        'article.summary': articleContent.substring(0, 300) || 'No summary available',
         'article.source': article.source_name || 'Unknown',
         'article.url': article.url || '',
         duration: duration
@@ -806,13 +818,16 @@ class AIService {
       // Use the existing 'prayer' template directly since it exists and works
       let promptData;
       try {
+        // Get content from either field naming convention (scraped vs generated articles)
+        const articleContent = article.body_final || article.body_draft || article.full_text || 'No content available';
+        
         promptData = await promptManager.getPromptForGeneration('prayer', {
           // Underscore format (legacy)
-          article_content: `Title: ${article.title}\\n\\nContent: ${article.body_final || article.body_draft || 'No content available'}\\n\\nSource: ${article.source_name || 'Unknown'}`,
+          article_content: `Title: ${article.title}\\n\\nContent: ${articleContent}\\n\\nSource: ${article.source_name || 'Unknown'}`,
           // Dot notation format (modern)
           'article.title': article.title || 'No title available',
-          'article.content': article.body_final || article.body_draft || 'No content available',
-          'article.summary': (article.body_final || article.body_draft || 'No content available').substring(0, 300) || 'No summary available',
+          'article.content': articleContent,
+          'article.summary': articleContent.substring(0, 300) || 'No summary available',
           'article.source': article.source_name || 'Unknown',
           'article.url': article.url || ''
         });
@@ -1097,8 +1112,8 @@ class AIService {
       let promptData;
       try {
         // Pass all article fields to support both underscore and dot notation placeholders
-        // Fixed: Use correct database field names (body_final, body_draft) instead of non-existent fields
-        const articleContent = article.body_final || article.body_draft || 'No content available';
+        // Fixed: Use correct database field names for both scraped and generated articles
+        const articleContent = article.body_final || article.body_draft || article.full_text || 'No content available';
         promptData = await promptManager.getPromptForGeneration(category, {
           // Underscore format (legacy)
           article_content: `Title: ${article.title}\n\nContent: ${articleContent}\n\nSource: ${article.source_name || 'Unknown'}`,
