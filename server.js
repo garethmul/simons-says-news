@@ -5027,7 +5027,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler for API routes
+// 404 handler for API routes (must be after all API endpoints)
 app.use('/api/*', (req, res) => {
   res.status(404).json({ error: 'API endpoint not found' });
 });
