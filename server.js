@@ -2438,14 +2438,6 @@ app.post('/api/eden/sources/submit-urls', accountContext, async (req, res) => {
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'dist')));
-  
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-    } else {
-      res.status(404).json({ error: 'API endpoint not found' });
-    }
-  });
 } else {
   app.use(express.static(path.join(__dirname, 'public')));
   
@@ -3884,21 +3876,6 @@ app.get('/api/eden/images/generation-history', accountContext, async (req, res) 
   }
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  res.status(500).json({ 
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message 
-  });
-});
-
-// 404 handler for API routes
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ error: 'API endpoint not found' });
-});
-
 // Initialize system and start server
 const server = app.listen(PORT, () => {
   console.log(`🚀 Project Eden server running on port ${PORT}`);
@@ -5039,3 +5016,25 @@ Each prompt should be detailed and specify style, mood, colors, and composition.
     res.status(500).json({ error: error.message });
   }
 });
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err.stack);
+  res.status(500).json({ 
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : err.message 
+  });
+});
+
+// 404 handler for API routes
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
+
+// Production frontend catch-all route
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  });
+}
