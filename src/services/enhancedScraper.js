@@ -1,6 +1,6 @@
-const puppeteer = require('puppeteer');
-const axios = require('axios');
-const cheerio = require('cheerio');
+import puppeteer from 'puppeteer';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 class EnhancedScraper {
   constructor() {
@@ -306,4 +306,4 @@ process.on('exit', () => enhancedScraper.cleanup());
 process.on('SIGINT', () => enhancedScraper.cleanup());
 process.on('SIGTERM', () => enhancedScraper.cleanup());
 
-module.exports = enhancedScraper; 
+export default enhancedScraper; 
