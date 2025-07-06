@@ -39,73 +39,76 @@ class NewsAggregator {
     };
   }
 
-  async aggregateAllSources(accountId = null) {
-    console.log(`🔄 Starting news aggregation... (accountId: ${accountId})`);
+  async aggregateAllSources(accountId = null, jobLogger = null) {
+    const logger = jobLogger || console;
+    logger.info(`🔄 Starting news aggregation... (accountId: ${accountId})`);
     
     try {
       const sources = await db.getActiveNewsSources(accountId);
-      console.log(`📰 Found ${sources.length} active news sources`);
+      logger.info(`📰 Found ${sources.length} active news sources`);
 
       let totalArticles = 0;
       
       for (const source of sources) {
         try {
-          console.log(`📡 Processing: ${source.name}`);
-          const articles = await this.processSource(source, accountId);
+          logger.info(`📡 Processing: ${source.name}`);
+          const articles = await this.processSource(source, accountId, jobLogger);
           totalArticles += articles.length;
           
           // Update last scraped timestamp with account context
           await db.updateSourceLastScraped(source.source_id, accountId);
           
-          console.log(`✅ ${source.name}: ${articles.length} articles processed`);
+          logger.info(`✅ ${source.name}: ${articles.length} articles processed`);
         } catch (error) {
-          console.error(`❌ Error processing ${source.name}:`, error.message);
+          logger.error(`❌ Error processing ${source.name}:`, error.message);
         }
       }
 
-      console.log(`🎉 Aggregation complete: ${totalArticles} total articles processed`);
+      logger.info(`🎉 Aggregation complete: ${totalArticles} total articles processed`);
       return totalArticles;
     } catch (error) {
-      console.error('❌ News aggregation failed:', error.message);
+      logger.error('❌ News aggregation failed:', error.message);
       throw error;
     }
   }
 
-  async processSource(source, accountId = null) {
+  async processSource(source, accountId = null, jobLogger = null) {
+    const logger = jobLogger || console;
     const articles = [];
 
     try {
       if (source.rss_feed_url) {
         // Try RSS first
-        const rssArticles = await this.scrapeRSS(source);
+        const rssArticles = await this.scrapeRSS(source, jobLogger);
         articles.push(...rssArticles);
       } else {
         // Fallback to website scraping
-        const webArticles = await this.scrapeWebsite(source);
+        const webArticles = await this.scrapeWebsite(source, jobLogger);
         articles.push(...webArticles);
       }
 
       // Store articles in database
       for (const article of articles) {
         try {
-          await this.storeArticle(article, source.source_id, accountId);
+          await this.storeArticle(article, source.source_id, accountId, jobLogger);
         } catch (error) {
           if (!error.message.includes('Duplicate entry')) {
-            console.error(`❌ Error storing article: ${error.message}`);
+            logger.error(`❌ Error storing article: ${error.message}`);
           }
         }
       }
 
       return articles;
     } catch (error) {
-      console.error(`❌ Error processing source ${source.name}:`, error.message);
+      logger.error(`❌ Error processing source ${source.name}:`, error.message);
       return [];
     }
   }
 
-  async scrapeRSS(source) {
+  async scrapeRSS(source, jobLogger = null) {
+    const logger = jobLogger || console;
     try {
-      console.log(`📡 Fetching RSS: ${source.rss_feed_url}`);
+      logger.info(`📡 Fetching RSS: ${source.rss_feed_url}`);
       
       const feed = await this.rssParser.parseURL(source.rss_feed_url);
       const articles = [];
@@ -127,14 +130,15 @@ class NewsAggregator {
 
       return articles;
     } catch (error) {
-      console.error(`❌ RSS scraping failed for ${source.name}:`, error.message);
+      logger.error(`❌ RSS scraping failed for ${source.name}:`, error.message);
       return [];
     }
   }
 
-  async scrapeWebsite(source) {
+  async scrapeWebsite(source, jobLogger = null) {
+    const logger = jobLogger || console;
     try {
-      console.log(`🌐 Scraping website: ${source.url}`);
+      logger.info(`🌐 Scraping website: ${source.url}`);
       
       const response = await axios.get(source.url, this.axiosConfig);
       const $ = cheerio.load(response.data);
@@ -182,8 +186,8 @@ class NewsAggregator {
         'div:has(h1 a), div:has(h2 a), div:has(h3 a)'
       ];
 
-      console.log(`📄 Page title: "${$('title').text()}"`);
-      console.log(`📝 Page content length: ${response.data.length} characters`);
+      logger.info(`📄 Page title: "${$('title').text()}"`);
+      logger.info(`📝 Page content length: ${response.data.length} characters`);
 
       let selectorUsed = null;
       let elementsFound = 0;
@@ -332,7 +336,8 @@ class NewsAggregator {
     }
   }
 
-  async storeArticle(article, sourceId, accountId = null) {
+  async storeArticle(article, sourceId, accountId = null, jobLogger = null) {
+    const logger = jobLogger || console;
     try {
       // Check if article already exists
       const existing = await db.findOne('ssnews_scraped_articles', 'url = ?', [article.url]);
@@ -350,7 +355,7 @@ class NewsAggregator {
       };
 
       const articleId = await db.insertScrapedArticle(articleData, accountId);
-      console.log(`💾 Stored article: ${article.title.substring(0, 50)}...`);
+      logger.info(`💾 Stored article: ${article.title.substring(0, 50)}...`);
       
       return articleId;
     } catch (error) {
@@ -361,18 +366,19 @@ class NewsAggregator {
     }
   }
 
-  async analyzeScrapedArticles(limit = 20, accountId = null) {
-    console.log(`🧠 Starting AI analysis of scraped articles (limit: ${limit}, accountId: ${accountId})...`);
+  async analyzeScrapedArticles(limit = 20, accountId = null, jobLogger = null) {
+    const logger = jobLogger || console;
+    logger.info(`🧠 Starting AI analysis of scraped articles (limit: ${limit}, accountId: ${accountId})...`);
     
     try {
       const articles = await db.getUnanalyzedArticles(limit, accountId); // Process with specified limit and account filtering
-      console.log(`📊 Analyzing ${articles.length} articles for account ${accountId || 'all accounts'}`);
+      logger.info(`📊 Analyzing ${articles.length} articles for account ${accountId || 'all accounts'}`);
 
       let analyzed = 0;
 
       for (const article of articles) {
         try {
-          console.log(`🔍 Analyzing: ${article.title.substring(0, 50)}... (accountId: ${accountId})`);
+          logger.info(`🔍 Analyzing: ${article.title.substring(0, 50)}... (accountId: ${accountId})`);
 
           // Generate AI summary
           const summary = await aiService.summarizeArticle(article.full_text, article.title);
@@ -391,19 +397,19 @@ class NewsAggregator {
           }, accountId);
 
           analyzed++;
-          console.log(`✅ Analyzed: ${article.title.substring(0, 30)}... (Score: ${relevanceScore}) (accountId: ${accountId})`);
+          logger.info(`✅ Analyzed: ${article.title.substring(0, 30)}... (Score: ${relevanceScore}) (accountId: ${accountId})`);
 
           // Small delay to avoid rate limiting
           await this.delay(1000);
         } catch (error) {
-          console.error(`❌ Error analyzing article ${article.article_id}:`, error.message);
+          logger.error(`❌ Error analyzing article ${article.article_id}:`, error.message);
         }
       }
 
-      console.log(`🎉 Analysis complete: ${analyzed} articles analyzed for account ${accountId || 'all accounts'}`);
+      logger.info(`🎉 Analysis complete: ${analyzed} articles analyzed for account ${accountId || 'all accounts'}`);
       return analyzed;
     } catch (error) {
-      console.error('❌ Article analysis failed:', error.message);
+      logger.error('❌ Article analysis failed:', error.message);
       throw error;
     }
   }

@@ -191,7 +191,7 @@ class JobWorker {
     // Step 1: News Aggregation
     await jobManager.updateJobProgress(jobId, 10, 'Aggregating news from sources...');
     
-    const articlesAggregated = await newsAggregator.aggregateAllSources(accountId);
+    const articlesAggregated = await newsAggregator.aggregateAllSources(accountId, jobLogger);
     results.articlesAggregated = articlesAggregated;
     
     await jobManager.updateJobProgress(jobId, 35, `Aggregated ${articlesAggregated} articles`);
@@ -199,7 +199,7 @@ class JobWorker {
     // Step 2: AI Analysis
     await jobManager.updateJobProgress(jobId, 40, 'Running AI analysis on articles...');
     
-    const articlesAnalyzed = await newsAggregator.analyzeScrapedArticles(20, accountId);
+    const articlesAnalyzed = await newsAggregator.analyzeScrapedArticles(20, accountId, jobLogger);
     results.articlesAnalyzed = articlesAnalyzed;
     
     await jobManager.updateJobProgress(jobId, 65, `Analyzed ${articlesAnalyzed} articles`);
@@ -258,7 +258,7 @@ class JobWorker {
       await jobManager.updateJobProgress(jobId, 30, `Processing articles from ${sourceName}...`);
       
       // Process the single source
-      const articles = await newsAggregator.processSource(source, accountId);
+      const articles = await newsAggregator.processSource(source, accountId, jobLogger);
       
       // Update last scraped timestamp - handle potential database errors
       try {
@@ -289,7 +289,7 @@ class JobWorker {
 
       await jobManager.updateJobProgress(jobId, 30, `Aggregating from ${sourceName}...`);
       
-      const articles = await newsAggregator.processSource(source);
+      const articles = await newsAggregator.processSource(source, null, jobLogger);
       
       results = {
         articlesAggregated: articles.length,
@@ -299,7 +299,7 @@ class JobWorker {
       // Aggregate from all sources (existing functionality)
       await jobManager.updateJobProgress(jobId, 30, 'Aggregating from all sources...');
       
-      const totalArticles = await newsAggregator.aggregateAllSources();
+      const totalArticles = await newsAggregator.aggregateAllSources(null, jobLogger);
       
       results = {
         articlesAggregated: totalArticles
@@ -326,7 +326,7 @@ class JobWorker {
     await jobManager.updateJobProgress(jobId, 30, `Analyzing ${limit} articles for account ${accountId}...`);
     
     try {
-      const analyzed = await newsAggregator.analyzeScrapedArticles(limit, accountId);
+      const analyzed = await newsAggregator.analyzeScrapedArticles(limit, accountId, jobLogger);
       
       jobLogger.info(`✅ Analysis complete: ${analyzed} articles analyzed`);
       await jobManager.updateJobProgress(jobId, 90, 'AI analysis complete');
